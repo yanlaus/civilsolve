@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "civilsolve",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "POE_CODEX_MODEL": "GPT-5.2",
+    "POE_CLAUDE_MODEL": "Claude-Sonnet-4.6",
+    "POE_GEMINI_MODEL": "Gemini-3.1-Pro",
+    "POE_NO_STREAM": ""
+  },
+  "observability": {
+    "enabled": true
+  }
+}
