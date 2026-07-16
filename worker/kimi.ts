@@ -63,7 +63,10 @@ async function fetchChatCompletion(
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      ...(params.wantStream ? { Accept: "text/event-stream" } : {}),
+      // Workers' fetch sends no UA by default; some WAF rules reject
+      // anonymous datacenter traffic. Identify the app truthfully.
+      "User-Agent": "CivilSolve/1.0 (Cloudflare Worker; +https://civilsolve.yanlaus.workers.dev)",
+      Accept: params.wantStream ? "text/event-stream" : "application/json",
     },
     body: JSON.stringify(
       params.wantStream ? { ...requestBody, stream: true } : requestBody,
