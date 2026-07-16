@@ -13,7 +13,7 @@
     "POE_CLAUDE_MODEL": "Claude-Sonnet-4.6",
     "POE_GEMINI_MODEL": "Gemini-3.1-Pro",
     "POE_NO_STREAM": "",
-    "KIMI_MODEL": "k3",
+    "KIMI_MODEL": "kimi-for-coding",
     "KIMI_API_URL": "https://api.kimi.com/coding/v1"
   },
   "observability": {
