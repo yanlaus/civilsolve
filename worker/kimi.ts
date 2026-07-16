@@ -9,7 +9,7 @@ import {
 } from "./upstream";
 
 const DEFAULT_KIMI_API_URL = "https://api.kimi.com/coding/v1";
-const DEFAULT_KIMI_MODEL = "kimi-k3";
+const DEFAULT_KIMI_MODEL = "k3";
 
 export async function callKimi(params: UpstreamParams) {
   const apiKey = params.env.KIMI_API_KEY?.trim() || "";

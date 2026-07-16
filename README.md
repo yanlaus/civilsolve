@@ -142,7 +142,7 @@ The Worker requests `stream: true` with a strict `json_schema` response format, 
 - `POE_CLAUDE_MODEL` (default `Claude-Sonnet-4.6`)
 - `POE_GEMINI_MODEL` (default `Gemini-3.1-Pro`)
 - `POE_NO_STREAM` (default empty; also accepts `kimi`)
-- `KIMI_MODEL` (default `kimi-k3`)
+- `KIMI_MODEL` (default `k3`)
 - `KIMI_API_URL` (default `https://api.kimi.com/coding/v1`)
 
 **Kimi Code caveat**: the default `KIMI_API_URL` is the Kimi Code membership endpoint, which enforces a client whitelist for coding agents and may reject calls from this app. If the kimi tab fails with an authorization/whitelist error, switch to a Moonshot platform key: set `KIMI_API_URL` to `https://api.moonshot.ai/v1` and update the `KIMI_API_KEY` secret. No code change needed.
