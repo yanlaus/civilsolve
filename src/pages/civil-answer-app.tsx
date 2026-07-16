@@ -1,14 +1,27 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Calculator, Loader2 } from "lucide-react";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { isRunActive, useSolve } from "@/hooks/use-solve";
+import { useInterpret } from "@/hooks/use-interpret";
 import { filesToImageDataUrls } from "@/lib/attachments";
-import { MAX_IMAGES } from "../../shared/stream-protocol";
+import { lectureNotesToPayload } from "@/lib/lecture-notes";
+import { MAX_IMAGES, type SolveRequestBody } from "../../shared/stream-protocol";
+import type { ProviderKey } from "../../shared/solution";
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 
+// Everything prepared at submit time and needed again after the user
+// confirms the reviewed interpretation.
+type PendingSolve = {
+  providers: ProviderKey[];
+  body: SolveRequestBody;
+};
+
 export default function CivilAnswerAppPage() {
   const { runs, start } = useSolve();
+  const { pipeline, start: startInterpret, reset: resetInterpret } = useInterpret();
+  const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
@@ -39,10 +52,25 @@ export default function CivilAnswerAppPage() {
   }, []);
 
   const isSolving = Object.values(runs).some(isRunActive);
-  const busy = isSolving || Boolean(prepStatus);
+  const isInterpreting = pipeline.status === "running" || pipeline.status === "review";
+  const busy = isSolving || isInterpreting || Boolean(prepStatus);
 
-  async function handleSolve({ files, providers, notes, effort }: SolveSubmission) {
+  const statusMessage =
+    prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
+  const bannerError =
+    error || (pipeline.status === "error" ? pipeline.message : "");
+
+  async function handleSolve({
+    files,
+    lectureFiles,
+    providers,
+    notes,
+    effort,
+    verify,
+  }: SolveSubmission) {
     setError("");
+    resetInterpret();
+    setPendingSolve(null);
     setPrepStatus("Preparing images...");
 
     try {
@@ -52,7 +80,32 @@ export default function CivilAnswerAppPage() {
           `The upload produced ${images.length} images (PDF pages count individually). The limit is ${MAX_IMAGES} — remove some files or pages.`,
         );
       }
-      start(providers, images, notes, effort);
+
+      let referenceText = "";
+      let referenceImages: string[] = [];
+      if (lectureFiles.length > 0) {
+        setPrepStatus("Preparing lecture notes...");
+        const payload = await lectureNotesToPayload(lectureFiles);
+        referenceText = payload.referenceText;
+        referenceImages = payload.referenceImages;
+      }
+
+      const body: SolveRequestBody = {
+        images,
+        notes,
+        effort,
+        ...(referenceText ? { referenceText } : {}),
+        ...(referenceImages.length ? { referenceImages } : {}),
+      };
+
+      if (verify) {
+        setPendingSolve({ providers, body });
+        setPrepStatus("");
+        await startInterpret(verify, images, notes);
+        return;
+      }
+
+      start(providers, body);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -60,6 +113,19 @@ export default function CivilAnswerAppPage() {
     } finally {
       setPrepStatus("");
     }
+  }
+
+  function handleInterpretationConfirm(confirmedText: string) {
+    if (!pendingSolve) return;
+    const { providers, body } = pendingSolve;
+    setPendingSolve(null);
+    resetInterpret();
+    start(providers, { ...body, interpretation: confirmedText });
+  }
+
+  function handleInterpretationCancel() {
+    setPendingSolve(null);
+    resetInterpret();
   }
 
   return (
@@ -79,7 +145,21 @@ export default function CivilAnswerAppPage() {
           </p>
         </header>
 
-        <UploadForm busy={busy} status={prepStatus} error={error} onSolve={handleSolve} />
+        <UploadForm
+          busy={busy}
+          status={statusMessage}
+          error={bannerError}
+          onSolve={handleSolve}
+        />
+
+        {pipeline.status === "review" ? (
+          <InterpretationReview
+            interpretation={pipeline.interpretation}
+            initialText={pipeline.text}
+            onConfirm={handleInterpretationConfirm}
+            onCancel={handleInterpretationCancel}
+          />
+        ) : null}
 
         {runtimeError ? (
           <div className="mt-5 rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] print:hidden dark:border-[#5b2a31] dark:text-[#f2b8b2]">

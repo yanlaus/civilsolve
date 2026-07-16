@@ -12,7 +12,9 @@
     "POE_CODEX_MODEL": "GPT-5.2",
     "POE_CLAUDE_MODEL": "Claude-Sonnet-4.6",
     "POE_GEMINI_MODEL": "Gemini-3.1-Pro",
-    "POE_NO_STREAM": ""
+    "POE_NO_STREAM": "",
+    "KIMI_MODEL": "kimi-k3",
+    "KIMI_API_URL": "https://api.kimi.com/coding/v1"
   },
   "observability": {
     "enabled": true

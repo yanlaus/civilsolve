@@ -4,8 +4,10 @@ CivilSolve is a civil engineering assignment solver hosted on a single Cloudflar
 
 ## Core Invariants
 
-- **Keep API keys server-side only.** `POE_API_KEY` is the only secret; it lives in `.dev.vars` locally and in Wrangler secrets in production. Never expose it to frontend code.
-- **Keep `/api/solve/:provider` streaming.** The Worker sends SSE headers immediately and heartbeats every 15s — that is what lets minutes-long provider calls survive on Workers without any job storage. Do not convert it to a buffered request/response.
+- **Keep API keys server-side only.** `POE_API_KEY` and `KIMI_API_KEY` are the only secrets; they live in `.dev.vars` locally and in Wrangler secrets in production. Never expose them to frontend code.
+- **Keep `/api/solve/:provider` and `/api/interpret/:provider` streaming.** The Worker sends SSE headers immediately and heartbeats every 15s — that is what lets minutes-long provider calls survive on Workers without any job storage. Do not convert them to buffered request/response.
+- **Kimi routes through `worker/kimi.ts`** (OpenAI-compatible, `KIMI_API_URL`), the Poe providers through `worker/poe.ts`; both share the SSE shell in `worker/run.ts`. The default Kimi Code endpoint may reject non-coding-agent clients — the documented fallback is switching `KIMI_API_URL` to the Moonshot platform endpoint, not spoofing client headers.
+- **The interpretation pipeline is client-orchestrated.** Each Worker request stays one upstream LLM call; the browser sequences interpret → verify → user review → solve. Keep it that way.
 - **No server-side storage.** The app is intentionally stateless: no KV, D1, R2, or Durable Objects. Uploads are converted to data URLs in the browser and never persisted.
 - **Provider failures are per-provider.** A Claude failure must not hide ChatGPT or Gemini results — each tab has its own run state.
 - **Keep math rendering in the web UI.** Users read formulas via KaTeX directly; PDF export is a browser-print convenience, not a requirement for reading solutions.

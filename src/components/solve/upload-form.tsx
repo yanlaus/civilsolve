@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  BookOpen,
   Brain,
   Calculator,
+  Eye,
   FileImage,
   FileText,
   Loader2,
@@ -10,8 +12,9 @@ import {
   X,
 } from "lucide-react";
 import type { EffortKey } from "../../../shared/prompt";
-import type { ProviderKey } from "../../../shared/solution";
+import { PROVIDER_LABELS, type ProviderKey } from "../../../shared/solution";
 import { isAcceptedUpload, isPdfFile } from "@/lib/attachments";
+import type { InterpretConfig } from "@/hooks/use-interpret";
 
 type QueuedFile = {
   id: string;
@@ -21,15 +24,20 @@ type QueuedFile = {
 
 export type SolveSubmission = {
   files: File[];
+  lectureFiles: File[];
   providers: ProviderKey[];
   notes: string;
   effort: EffortKey;
+  // Set when the user enabled the diagram-verification pipeline.
+  verify: InterpretConfig | null;
 };
 
 const MAX_FILES = 10;
+const MAX_LECTURE_FILES = 5;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string; note: string }> = [
+  { key: "kimi", label: "Kimi K3", note: "via Kimi Code" },
   { key: "codex", label: "ChatGPT", note: "via Poe" },
   { key: "claude", label: "Claude Sonnet", note: "via Poe" },
   { key: "gemini", label: "Gemini Pro", note: "via Poe" },
@@ -49,6 +57,14 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function providerSelectOptions() {
+  return PROVIDER_OPTIONS.map((option) => (
+    <option key={option.key} value={option.key}>
+      {option.label}
+    </option>
+  ));
+}
+
 export function UploadForm({
   busy,
   status,
@@ -61,13 +77,14 @@ export function UploadForm({
   onSolve: (submission: SolveSubmission) => void;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+  const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
   const [effort, setEffort] = useState<EffortKey>("low");
-  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
-    "codex",
-    "claude",
-    "gemini",
-  ]);
+  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(["kimi"]);
+  const [verifyEnabled, setVerifyEnabled] = useState(false);
+  const [interpreterA, setInterpreterA] = useState<ProviderKey>("claude");
+  const [interpreterB, setInterpreterB] = useState<ProviderKey>("gemini");
+  const [verifier, setVerifier] = useState<ProviderKey>("kimi");
   const [fileError, setFileError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -79,7 +96,13 @@ export function UploadForm({
     };
   }, [queuedFiles]);
 
-  const canSubmit = queuedFiles.length > 0 && selectedProviders.length > 0 && !busy;
+  const verifyConfigError =
+    verifyEnabled && interpreterA === interpreterB
+      ? "Choose two different models to interpret the question."
+      : "";
+
+  const canSubmit =
+    queuedFiles.length > 0 && selectedProviders.length > 0 && !verifyConfigError && !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -126,12 +149,51 @@ export function UploadForm({
     setFileError(nextError);
   }
 
+  function addLectureFiles(inputFiles: FileList | File[]) {
+    const next = Array.from(inputFiles);
+    let nextError = "";
+
+    setLectureFiles((current) => {
+      const existingKeys = new Set(
+        current.map((item) => `${item.file.name}-${item.file.size}-${item.file.lastModified}`),
+      );
+      const added: QueuedFile[] = [];
+
+      for (const file of next) {
+        const key = `${file.name}-${file.size}-${file.lastModified}`;
+        if (existingKeys.has(key)) continue;
+        if (current.length + added.length >= MAX_LECTURE_FILES) {
+          nextError = `You can attach up to ${MAX_LECTURE_FILES} lecture-notes files.`;
+          break;
+        }
+        if (!isAcceptedUpload(file)) {
+          nextError = `Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, GIF, or PDF.`;
+          continue;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          nextError = `${file.name} is larger than 25 MB.`;
+          continue;
+        }
+        added.push({ id: key, file });
+        existingKeys.add(key);
+      }
+
+      return [...current, ...added];
+    });
+
+    setFileError(nextError);
+  }
+
   function removeFile(id: string) {
     setQueuedFiles((current) => {
       const match = current.find((item) => item.id === id);
       if (match?.previewUrl) URL.revokeObjectURL(match.previewUrl);
       return current.filter((item) => item.id !== id);
     });
+  }
+
+  function removeLectureFile(id: string) {
+    setLectureFiles((current) => current.filter((item) => item.id !== id));
   }
 
   function toggleProvider(provider: ProviderKey) {
@@ -150,13 +212,18 @@ export function UploadForm({
     if (!canSubmit) return;
     onSolve({
       files: queuedFiles.map((item) => item.file),
+      lectureFiles: lectureFiles.map((item) => item.file),
       providers: selectedProviders,
       notes,
       effort,
+      verify: verifyEnabled ? { interpreterA, interpreterB, verifier } : null,
     });
   }
 
-  const bannerError = error || fileError;
+  const bannerError = error || fileError || verifyConfigError;
+
+  const selectClassName =
+    "w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] focus:ring-4 focus:ring-[rgba(179,92,30,0.15)] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db] dark:focus:border-[#e8903a]";
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -259,6 +326,56 @@ export function UploadForm({
 
       <section>
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <BookOpen className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Lecture Notes
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional — the AI follows the taught methods)</span>
+        </p>
+        <label className="relative block cursor-pointer rounded-[10px] border-2 border-dashed border-[#d4cdc3] bg-white px-4 py-4 text-center text-sm text-[#8a7f72] transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a]">
+          Attach lecture notes or worked examples (JPEG, PNG, WebP, GIF, PDF) — solutions will
+          follow the methods and notation taught in them.
+          <input
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf"
+            multiple
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label="Choose lecture-notes files"
+            onChange={(event) => {
+              if (event.target.files?.length) addLectureFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+        </label>
+
+        {lectureFiles.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {lectureFiles.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e8e3db] bg-white px-3 py-2 text-sm dark:border-[#1e2a40] dark:bg-[#151d2e]"
+              >
+                <span className="flex min-w-0 items-center gap-2 text-[#5c5347] dark:text-[#a8a098]">
+                  <FileText className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]" />
+                  <span className="truncate">{item.file.name}</span>
+                  <span className="shrink-0 text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+                    {formatSize(item.file.size)}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeLectureFile(item.id)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#8a7f72] transition hover:bg-[#e8e3db] hover:text-[#c0392b] dark:text-[#a8a098] dark:hover:bg-[#0e1420]"
+                  aria-label={`Remove ${item.file.name}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <PenSquare className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           Additional Instructions
           <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
@@ -277,7 +394,7 @@ export function UploadForm({
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Providers
         </p>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
             const checked = selectedProviders.includes(provider.key);
             return (
@@ -306,6 +423,72 @@ export function UploadForm({
               </label>
             );
           })}
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <Eye className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Diagram Verification
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional — cross-check the question reading first)</span>
+        </p>
+        <div className="rounded-[10px] border border-[#d4cdc3] bg-white p-4 dark:border-[#2a3650] dark:bg-[#151d2e]">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={verifyEnabled}
+              onChange={(event) => setVerifyEnabled(event.target.checked)}
+              className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+            />
+            <span className="text-sm text-[#5c5347] dark:text-[#a8a098]">
+              <span className="block font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+                Verify the question interpretation before solving
+              </span>
+              Two models read the question (diagrams included) independently, a third
+              cross-checks them, and you review the result before any solving starts.
+            </span>
+          </label>
+
+          {verifyEnabled ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#8a7f72] dark:text-[#a8a098]">
+                Interpreter 1
+                <select
+                  value={interpreterA}
+                  onChange={(event) => setInterpreterA(event.target.value as ProviderKey)}
+                  className={`mt-1 ${selectClassName}`}
+                >
+                  {providerSelectOptions()}
+                </select>
+              </label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#8a7f72] dark:text-[#a8a098]">
+                Interpreter 2
+                <select
+                  value={interpreterB}
+                  onChange={(event) => setInterpreterB(event.target.value as ProviderKey)}
+                  className={`mt-1 ${selectClassName}`}
+                >
+                  {providerSelectOptions()}
+                </select>
+              </label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-[#8a7f72] dark:text-[#a8a098]">
+                Verifier
+                <select
+                  value={verifier}
+                  onChange={(event) => setVerifier(event.target.value as ProviderKey)}
+                  className={`mt-1 ${selectClassName}`}
+                >
+                  {providerSelectOptions()}
+                </select>
+              </label>
+              {interpreterA === interpreterB ? (
+                <p className="text-xs text-[#c0392b] sm:col-span-3 dark:text-[#f2b8b2]">
+                  Interpreter 1 and Interpreter 2 must be different models —{" "}
+                  {PROVIDER_LABELS[interpreterA]} is selected twice.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -352,7 +535,7 @@ export function UploadForm({
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[10px] bg-[#b35c1e] px-8 py-3 text-base font-semibold text-white shadow-[0_3px_14px_rgba(179,92,30,0.15)] transition hover:-translate-y-0.5 hover:bg-[#9a4d17] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#e8903a] dark:text-[#0e1420] dark:hover:bg-[#f5a04f] sm:px-12"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-          {busy ? "Generating solutions..." : "Solve Problems"}
+          {busy ? "Working..." : "Solve Problems"}
         </button>
       </div>
     </form>
