@@ -2,7 +2,8 @@
 
 CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions and lecture notes, choose a thinking-effort level, and receive worked solutions from up to four providers in parallel:
 
-- Kimi K3 (via Kimi Code / Moonshot — the default)
+- Kimi K3 (via Kimi Code / Moonshot — default)
+- MiniMax M3 (via MiniMax — default)
 - ChatGPT (via Poe)
 - Claude Sonnet (via Poe)
 - Gemini Pro (via Poe)
@@ -52,7 +53,7 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 │   ├── run.ts              # Provider-agnostic SSE run shell (heartbeats, retries)
 │   ├── upstream.ts         # Env types + provider routing (Poe vs Kimi)
 │   ├── poe.ts              # Poe Responses API upstream (codex/claude/gemini)
-│   └── kimi.ts             # OpenAI-compatible upstream (Kimi Code / Moonshot)
+│   └── openai-compat.ts    # OpenAI-compatible upstream (Kimi, MiniMax)
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
 │   ├── interpretation.ts   # Interpretation schema + parsing (verify pipeline)
@@ -83,9 +84,9 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 
 ### `GET /api/health`
 
-Returns `{ "poeConfigured": true | false, "kimiConfigured": true | false }` without exposing secret values.
+Returns `{ "poeConfigured": ..., "kimiConfigured": ..., "minimaxConfigured": ... }` (booleans) without exposing secret values.
 
-### `POST /api/solve/:provider` (`kimi` | `codex` | `claude` | `gemini`)
+### `POST /api/solve/:provider` (`kimi` | `minimax` | `codex` | `claude` | `gemini`)
 
 Request JSON:
 
@@ -131,10 +132,10 @@ The Worker requests `stream: true` with a strict `json_schema` response format, 
 
 ## Configuration
 
-**Secrets**: `POE_API_KEY` (Poe providers) and `KIMI_API_KEY` (Kimi provider)
+**Secrets**: `POE_API_KEY` (Poe providers), `KIMI_API_KEY` (Kimi), `MINIMAX_API_KEY` (MiniMax)
 
 - Local: put them in `.dev.vars` (gitignored).
-- Production: `wrangler secret put POE_API_KEY` / `wrangler secret put KIMI_API_KEY`.
+- Production: `wrangler secret put <NAME>` for each.
 
 **Vars** (in `wrangler.jsonc`):
 
@@ -144,6 +145,8 @@ The Worker requests `stream: true` with a strict `json_schema` response format, 
 - `POE_NO_STREAM` (default empty; also accepts `kimi`)
 - `KIMI_MODEL` (default `kimi-for-coding`)
 - `KIMI_API_URL` (default `https://api.kimi.com/coding/v1`)
+- `MINIMAX_MODEL` (default `MiniMax-M3`)
+- `MINIMAX_API_URL` (default `https://api.minimax.io/v1`)
 
 **Kimi Code caveat**: the default `KIMI_API_URL` is the Kimi Code membership endpoint, which enforces a client whitelist for coding agents and may reject calls from this app. If the kimi tab fails with an authorization/whitelist error, switch to a Moonshot platform key: set `KIMI_API_URL` to `https://api.moonshot.ai/v1` and update the `KIMI_API_KEY` secret. No code change needed.
 
@@ -174,7 +177,7 @@ npx wrangler secret put POE_API_KEY
 npm run deploy     # vite build && wrangler deploy
 ```
 
-The app deploys to `https://civilsolve.<account>.workers.dev`. Free-tier fit: a solve is at most 7 requests (4 providers + 3 interpretation calls; 100k/day limit), SSE piping is I/O-wait (10ms CPU limit untouched), static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive.
+The app deploys to `https://civilsolve.<account>.workers.dev`. Free-tier fit: a solve is at most 8 requests (5 providers + 3 interpretation calls; 100k/day limit), SSE piping is I/O-wait (10ms CPU limit untouched), static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive.
 
 ## Upload support
 

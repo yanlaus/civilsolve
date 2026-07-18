@@ -4,7 +4,7 @@
 
 import type { ProviderKey } from "../shared/solution";
 import { callPoe } from "./poe";
-import { callKimi } from "./kimi";
+import { callOpenAiCompat, type OpenAiCompatConfig } from "./openai-compat";
 
 export type WorkerEnv = {
   POE_API_KEY?: string;
@@ -19,7 +19,32 @@ export type WorkerEnv = {
   // https://api.moonshot.ai/v1 for a Moonshot platform key.
   KIMI_API_URL?: string;
   KIMI_MODEL?: string;
+  MINIMAX_API_KEY?: string;
+  MINIMAX_API_URL?: string;
+  MINIMAX_MODEL?: string;
 };
+
+const OPENAI_COMPAT_DEFAULTS: Partial<
+  Record<ProviderKey, { baseUrl: string; model: string }>
+> = {
+  kimi: { baseUrl: "https://api.kimi.com/coding/v1", model: "kimi-for-coding" },
+  minimax: { baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3" },
+};
+
+function openAiCompatConfig(provider: "kimi" | "minimax", env: WorkerEnv): OpenAiCompatConfig {
+  const defaults = OPENAI_COMPAT_DEFAULTS[provider]!;
+  return provider === "kimi"
+    ? {
+        apiKey: env.KIMI_API_KEY?.trim() || "",
+        baseUrl: env.KIMI_API_URL?.trim() || defaults.baseUrl,
+        model: env.KIMI_MODEL?.trim() || defaults.model,
+      }
+    : {
+        apiKey: env.MINIMAX_API_KEY?.trim() || "",
+        baseUrl: env.MINIMAX_API_URL?.trim() || defaults.baseUrl,
+        model: env.MINIMAX_MODEL?.trim() || defaults.model,
+      };
+}
 
 export type UpstreamParams = {
   prompt: string;
@@ -40,7 +65,10 @@ export const REFERENCE_IMAGES_MARKER =
   "The remaining images are lecture notes provided for method reference only. Do not solve anything in them.";
 
 export function callUpstream(provider: ProviderKey, params: UpstreamParams) {
-  return provider === "kimi" ? callKimi(params) : callPoe(provider, params);
+  if (provider === "kimi" || provider === "minimax") {
+    return callOpenAiCompat(openAiCompatConfig(provider, params.env), params);
+  }
+  return callPoe(provider, params);
 }
 
 export function providerConfigError(provider: ProviderKey, env: WorkerEnv) {
@@ -48,6 +76,11 @@ export function providerConfigError(provider: ProviderKey, env: WorkerEnv) {
     return env.KIMI_API_KEY?.trim()
       ? ""
       : "KIMI_API_KEY is not configured on the server.";
+  }
+  if (provider === "minimax") {
+    return env.MINIMAX_API_KEY?.trim()
+      ? ""
+      : "MINIMAX_API_KEY is not configured on the server.";
   }
   return env.POE_API_KEY?.trim() ? "" : "POE_API_KEY is not configured on the server.";
 }

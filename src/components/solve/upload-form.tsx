@@ -38,6 +38,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string; note: string }> = [
   { key: "kimi", label: "Kimi K3", note: "via Kimi Code" },
+  { key: "minimax", label: "MiniMax M3", note: "via MiniMax" },
   { key: "codex", label: "ChatGPT", note: "via Poe" },
   { key: "claude", label: "Claude Sonnet", note: "via Poe" },
   { key: "gemini", label: "Gemini Pro", note: "via Poe" },
@@ -80,7 +81,10 @@ export function UploadForm({
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
   const [effort, setEffort] = useState<EffortKey>("low");
-  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(["kimi"]);
+  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
+    "kimi",
+    "minimax",
+  ]);
   const [verifyEnabled, setVerifyEnabled] = useState(false);
   const [interpreterA, setInterpreterA] = useState<ProviderKey>("claude");
   const [interpreterB, setInterpreterB] = useState<ProviderKey>("gemini");
@@ -394,7 +398,7 @@ export function UploadForm({
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Providers
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {PROVIDER_OPTIONS.map((provider) => {
             const checked = selectedProviders.includes(provider.key);
             return (

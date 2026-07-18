@@ -18,6 +18,7 @@ export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
 const IDLE_RUNS: ProviderRuns = {
   kimi: { status: "idle" },
+  minimax: { status: "idle" },
   codex: { status: "idle" },
   claude: { status: "idle" },
   gemini: { status: "idle" },

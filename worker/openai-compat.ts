@@ -1,6 +1,6 @@
-// Kimi upstream over the OpenAI-compatible chat-completions protocol.
-// Default endpoint is Kimi Code (api.kimi.com/coding/v1); KIMI_API_URL can
-// point at a Moonshot platform key's endpoint (api.moonshot.ai/v1) instead.
+// Shared upstream for providers speaking the OpenAI chat-completions
+// protocol (Kimi Code / Moonshot, MiniMax). Endpoint, model, and key come
+// from per-provider env config resolved in upstream.ts.
 
 import {
   readSseDataLines,
@@ -8,13 +8,17 @@ import {
   type UpstreamParams,
 } from "./upstream";
 
-const DEFAULT_KIMI_API_URL = "https://api.kimi.com/coding/v1";
-const DEFAULT_KIMI_MODEL = "kimi-for-coding";
+export type OpenAiCompatConfig = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+};
 
-export async function callKimi(params: UpstreamParams) {
-  const apiKey = params.env.KIMI_API_KEY?.trim() || "";
-  const baseUrl = (params.env.KIMI_API_URL?.trim() || DEFAULT_KIMI_API_URL).replace(/\/$/, "");
-  const model = params.env.KIMI_MODEL?.trim() || DEFAULT_KIMI_MODEL;
+export async function callOpenAiCompat(
+  config: OpenAiCompatConfig,
+  params: UpstreamParams,
+) {
+  const baseUrl = config.baseUrl.replace(/\/$/, "");
 
   const userContent: Array<Record<string, unknown>> = [
     { type: "text", text: params.prompt },
@@ -28,7 +32,7 @@ export async function callKimi(params: UpstreamParams) {
   }
 
   const requestBody: Record<string, unknown> = {
-    model,
+    model: config.model,
     messages: [
       {
         role: "system",
@@ -40,13 +44,13 @@ export async function callKimi(params: UpstreamParams) {
   };
 
   try {
-    return await fetchChatCompletion(baseUrl, apiKey, requestBody, params);
+    return await fetchChatCompletion(baseUrl, config.apiKey, requestBody, params);
   } catch (error) {
     // Some OpenAI-compatible endpoints reject response_format; the shared
     // repair pipeline copes with free-form JSON, so retry once without it.
     if (error instanceof Error && /response_format/i.test(error.message)) {
       const { response_format: _dropped, ...withoutFormat } = requestBody;
-      return fetchChatCompletion(baseUrl, apiKey, withoutFormat, params);
+      return fetchChatCompletion(baseUrl, config.apiKey, withoutFormat, params);
     }
     throw error;
   }

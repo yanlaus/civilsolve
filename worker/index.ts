@@ -35,6 +35,7 @@ app.get("/api/health", (c) =>
   c.json({
     poeConfigured: Boolean(c.env.POE_API_KEY?.trim()),
     kimiConfigured: Boolean(c.env.KIMI_API_KEY?.trim()),
+    minimaxConfigured: Boolean(c.env.MINIMAX_API_KEY?.trim()),
   }),
 );
 

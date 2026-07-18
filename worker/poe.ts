@@ -10,13 +10,15 @@ import {
 
 const POE_RESPONSES_URL = "https://api.poe.com/v1/responses";
 
-const DEFAULT_MODELS: Record<Exclude<ProviderKey, "kimi">, string> = {
+type PoeProviderKey = Extract<ProviderKey, "codex" | "claude" | "gemini">;
+
+const DEFAULT_MODELS: Record<PoeProviderKey, string> = {
   codex: "GPT-5.2",
   claude: "Claude-Sonnet-4.6",
   gemini: "Gemini-3.1-Pro",
 };
 
-function modelFor(provider: Exclude<ProviderKey, "kimi">, env: WorkerEnv) {
+function modelFor(provider: PoeProviderKey, env: WorkerEnv) {
   const override =
     provider === "codex"
       ? env.POE_CODEX_MODEL
@@ -27,8 +29,8 @@ function modelFor(provider: Exclude<ProviderKey, "kimi">, env: WorkerEnv) {
 }
 
 export async function callPoe(provider: ProviderKey, params: UpstreamParams) {
-  if (provider === "kimi") {
-    throw new Error("kimi is not a Poe provider.");
+  if (provider === "kimi" || provider === "minimax") {
+    throw new Error(`${provider} is not a Poe provider.`);
   }
   const apiKey = params.env.POE_API_KEY?.trim() || "";
 
