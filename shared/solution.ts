@@ -2,7 +2,7 @@
 // Pure string logic shared by the Worker (finalizing streamed responses)
 // and the client (building .tex downloads).
 
-export type ProviderKey = "codex" | "claude" | "gemini";
+export type ProviderKey = "kimi" | "minimax" | "codex" | "claude" | "gemini";
 
 export type StructuredSolution = {
   title: string;
@@ -23,12 +23,14 @@ export type ProviderArtifact = {
 };
 
 export const PROVIDER_LABELS: Record<ProviderKey, string> = {
+  kimi: "Kimi K3",
+  minimax: "MiniMax M3",
   codex: "ChatGPT",
   claude: "Claude Sonnet",
   gemini: "Gemini Pro",
 };
 
-export const PROVIDER_KEYS: ProviderKey[] = ["codex", "claude", "gemini"];
+export const PROVIDER_KEYS: ProviderKey[] = ["kimi", "minimax", "codex", "claude", "gemini"];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
@@ -70,7 +72,7 @@ export function sanitizeText(value: string) {
 // Structured solution parsing (raw model text -> StructuredSolution)
 // ---------------------------------------------------------------------------
 
-function normalizeJsonCandidate(rawText: string) {
+export function normalizeJsonCandidate(rawText: string) {
   const trimmed = sanitizeText(rawText);
   if (!trimmed) return trimmed;
 

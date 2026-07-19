@@ -27,7 +27,7 @@ function viewSource(artifact: ProviderArtifact, view: ViewKey) {
 }
 
 export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
-  const [activeProvider, setActiveProvider] = useState<ProviderKey>("codex");
+  const [activeProvider, setActiveProvider] = useState<ProviderKey>("kimi");
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
   const visibleProviders = PROVIDER_OPTIONS.filter(

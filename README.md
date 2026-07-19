@@ -1,10 +1,17 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level, and receive worked solutions from three providers in parallel:
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions and lecture notes, choose a thinking-effort level, and receive worked solutions from up to four providers in parallel:
 
+- Kimi K3 (via Kimi Code / Moonshot — default)
+- MiniMax M3 (via MiniMax — default)
 - ChatGPT (via Poe)
 - Claude Sonnet (via Poe)
 - Gemini Pro (via Poe)
+
+Two optional accuracy features:
+
+- **Diagram verification**: two user-chosen models interpret the question independently, a third cross-checks them, and the user reviews/edits the confirmed interpretation before solving starts.
+- **Lecture notes**: uploaded notes/worked examples are sent as method reference so solutions follow the taught approach (text-layer PDF pages as extracted text, scans/diagrams as images).
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -17,10 +24,11 @@ A single **Cloudflare Worker** (free tier) serves everything:
 
 The solve flow is **stateless streaming** — no database, no object storage, no job queue:
 
-1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js (max 8 pages).
-2. It fires one `POST /api/solve/:provider` request per selected provider, in parallel.
-3. Each Worker invocation calls Poe's Responses API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back over Server-Sent Events.
-4. Provider tabs render progressively — each one flips from spinner to live progress to finished solution independently.
+1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js (max 8 pages). Lecture notes use hybrid extraction (`src/lib/lecture-notes.ts`): text-layer PDF pages become extracted text, sparse/scanned pages and images are rasterized (max 8 reference images, 20k chars text).
+2. If diagram verification is enabled, the browser first runs the interpret pipeline: two parallel `POST /api/interpret/:provider` calls (mode `interpret`), then one more (mode `verify`) that reconciles them. The result pauses in an editable review box; the confirmed text is attached to solve requests as `interpretation`.
+3. It fires one `POST /api/solve/:provider` request per selected provider, in parallel.
+4. Each Worker invocation calls the provider's API with **native vision input** (no OCR) — Poe's Responses API for codex/claude/gemini, OpenAI-compatible chat completions for kimi — and streams progress back over Server-Sent Events.
+5. Provider tabs render progressively — each one flips from spinner to live progress to finished solution independently.
 
 Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a fully free, zero-storage deployment).
 
@@ -35,29 +43,38 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 | Markdown | marked (lazy-loaded chunk) |
 | PDF input | pdfjs-dist (lazy-loaded, browser-side rasterization) |
 | PDF export | Browser print stylesheet (`Save as PDF`) |
-| LLM access | Poe Responses API (`https://api.poe.com/v1/responses`) |
+| LLM access | Poe Responses API (`https://api.poe.com/v1/responses`) + Kimi OpenAI-compatible API (`KIMI_API_URL`, default `https://api.kimi.com/coding/v1`) |
 
 ### File structure
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: /api/health, /api/solve/:provider
-│   └── poe.ts              # Poe call, SSE translation, retries, heartbeats
+│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret
+│   ├── run.ts              # Provider-agnostic SSE run shell (heartbeats, retries)
+│   ├── upstream.ts         # Env types + provider routing (Poe vs Kimi)
+│   ├── poe.ts              # Poe Responses API upstream (codex/claude/gemini)
+│   └── openai-compat.ts    # OpenAI-compatible upstream (Kimi, MiniMax)
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
-│   ├── prompt.ts           # Tutor prompt (image-attachment variant)
+│   ├── interpretation.ts   # Interpretation schema + parsing (verify pipeline)
+│   ├── prompt.ts           # Tutor/interpret/verify prompts
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
-│   ├── pages/civil-answer-app.tsx      # Page composition (~110 lines)
+│   ├── pages/civil-answer-app.tsx      # Page composition + pipeline orchestration
 │   ├── components/solve/
-│   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort
+│   │   ├── upload-form.tsx             # Dropzones, notes, providers, verification, effort
+│   │   ├── interpretation-review.tsx   # Pause-for-review step (editable)
 │   │   ├── solution-panel.tsx          # Tabs, streaming states, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
-│   ├── hooks/use-solve.ts              # Per-provider SSE state machine
+│   ├── hooks/
+│   │   ├── use-solve.ts                # Per-provider SSE state machine
+│   │   └── use-interpret.ts            # Interpret -> verify -> review pipeline
 │   └── lib/
 │       ├── math-markdown.ts            # Math normalization + renderMarkdown
 │       ├── attachments.ts              # File -> JPEG data URL conversion
-│       ├── pdf-to-images.ts            # pdf.js rasterization (dynamic import)
+│       ├── lecture-notes.ts            # Hybrid notes extraction (text + images)
+│       ├── pdf-to-images.ts            # pdf.js rasterization + text extraction
+│       ├── sse.ts                      # Shared SSE fetch/parse helpers
 │       └── exports.ts                  # Print PDF, .tex download, Overleaf
 ├── wrangler.jsonc          # Worker config (assets, vars, run_worker_first)
 └── vite.config.ts          # @cloudflare/vite-plugin + manualChunks
@@ -67,9 +84,9 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 
 ### `GET /api/health`
 
-Returns `{ "poeConfigured": true | false }` without exposing secret values.
+Returns `{ "poeConfigured": ..., "kimiConfigured": ..., "minimaxConfigured": ... }` (booleans) without exposing secret values.
 
-### `POST /api/solve/:provider` (`codex` | `claude` | `gemini`)
+### `POST /api/solve/:provider` (`kimi` | `minimax` | `codex` | `claude` | `gemini`)
 
 Request JSON:
 
@@ -77,11 +94,29 @@ Request JSON:
 {
   "images": ["data:image/jpeg;base64,..."],
   "notes": "optional user instructions",
-  "effort": "none | low | medium | high | max"
+  "effort": "none | low | medium | high | max",
+  "interpretation": "optional human-confirmed problem statement",
+  "referenceText": "optional lecture-notes text",
+  "referenceImages": ["optional lecture-notes data URLs"]
 }
 ```
 
-Limits: 1–16 images (JPEG/PNG/WebP/GIF data URLs), ~20 MB body, 4000-char notes.
+Limits: 1–16 images (JPEG/PNG/WebP/GIF data URLs), ~20 MB body, 4000-char notes, 8 reference images, 20k-char reference text, 8k-char interpretation.
+
+### `POST /api/interpret/:provider`
+
+Same SSE response shape; `done` carries `{"interpretation": {...}}` instead of a solution.
+
+```json
+{
+  "mode": "interpret | verify",
+  "images": ["data:image/jpeg;base64,..."],
+  "notes": "optional user instructions",
+  "interpretations": ["A's reading", "B's reading"]
+}
+```
+
+`interpretations` is required for `verify` mode only.
 
 Response is `text/event-stream`:
 
@@ -97,17 +132,23 @@ The Worker requests `stream: true` with a strict `json_schema` response format, 
 
 ## Configuration
 
-**Secret** (the only one): `POE_API_KEY`
+**Secrets**: `POE_API_KEY` (Poe providers), `KIMI_API_KEY` (Kimi), `MINIMAX_API_KEY` (MiniMax)
 
-- Local: put it in `.dev.vars` (gitignored).
-- Production: `wrangler secret put POE_API_KEY`.
+- Local: put them in `.dev.vars` (gitignored).
+- Production: `wrangler secret put <NAME>` for each.
 
 **Vars** (in `wrangler.jsonc`):
 
 - `POE_CODEX_MODEL` (default `GPT-5.2`)
 - `POE_CLAUDE_MODEL` (default `Claude-Sonnet-4.6`)
 - `POE_GEMINI_MODEL` (default `Gemini-3.1-Pro`)
-- `POE_NO_STREAM` (default empty)
+- `POE_NO_STREAM` (default empty; also accepts `kimi`)
+- `KIMI_MODEL` (default `kimi-for-coding`)
+- `KIMI_API_URL` (default `https://api.kimi.com/coding/v1`)
+- `MINIMAX_MODEL` (default `MiniMax-M3`)
+- `MINIMAX_API_URL` (default `https://api.minimax.io/v1`)
+
+**Kimi Code caveat**: the default `KIMI_API_URL` is the Kimi Code membership endpoint, which enforces a client whitelist for coding agents and may reject calls from this app. If the kimi tab fails with an authorization/whitelist error, switch to a Moonshot platform key: set `KIMI_API_URL` to `https://api.moonshot.ai/v1` and update the `KIMI_API_KEY` secret. No code change needed.
 
 ## Development
 
@@ -136,7 +177,7 @@ npx wrangler secret put POE_API_KEY
 npm run deploy     # vite build && wrangler deploy
 ```
 
-The app deploys to `https://civilsolve.<account>.workers.dev`. Free-tier fit: a solve is at most 3 requests (100k/day limit), SSE piping is I/O-wait (10ms CPU limit untouched), static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive.
+The app deploys to `https://civilsolve.<account>.workers.dev`. Free-tier fit: a solve is at most 8 requests (5 providers + 3 interpretation calls; 100k/day limit), SSE piping is I/O-wait (10ms CPU limit untouched), static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive.
 
 ## Upload support
 
