@@ -10,7 +10,14 @@ import {
   X,
 } from "lucide-react";
 import type { EffortKey } from "../../../shared/prompt";
-import type { ProviderKey } from "../../../shared/solution";
+import {
+  CHANNEL_LABELS,
+  PROVIDER_KEYS,
+  PROVIDER_LABELS,
+  type HealthResponse,
+  type ProviderKey,
+  type ProviderStatus,
+} from "../../../shared/providers";
 import { isAcceptedUpload, isPdfFile } from "@/lib/attachments";
 
 type QueuedFile = {
@@ -29,11 +36,8 @@ export type SolveSubmission = {
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
-export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string; note: string }> = [
-  { key: "codex", label: "ChatGPT", note: "via Poe" },
-  { key: "claude", label: "Claude Sonnet", note: "via Poe" },
-  { key: "gemini", label: "Gemini Pro", note: "via Poe" },
-];
+export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
+  PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
@@ -51,23 +55,28 @@ function formatSize(bytes: number) {
 
 export function UploadForm({
   busy,
+  solving,
   status,
   error,
   onSolve,
+  onCancel,
 }: {
   busy: boolean;
+  /** True only while provider requests are in flight (image prep excluded). */
+  solving: boolean;
   status: string;
   error: string;
   onSolve: (submission: SolveSubmission) => void;
+  onCancel: () => void;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
-    "codex",
-    "claude",
-    "gemini",
+    ...PROVIDER_KEYS,
   ]);
+  const [providerStatus, setProviderStatus] =
+    useState<Record<ProviderKey, ProviderStatus> | null>(null);
   const [fileError, setFileError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -78,6 +87,37 @@ export function UploadForm({
       });
     };
   }, [queuedFiles]);
+
+  // Which providers actually have a key on the server. Advisory only: if the
+  // probe fails the form still works and the Worker reports the real error.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/health")
+      .then((response) => (response.ok ? (response.json() as Promise<HealthResponse>) : null))
+      .then((payload) => {
+        if (cancelled || !payload?.providers) return;
+        setProviderStatus(payload.providers);
+        setSelectedProviders((current) => {
+          const usable = current.filter((key) => payload.providers[key]?.configured);
+          return usable.length ? usable : current;
+        });
+      })
+      .catch(() => {
+        // Ignored on purpose - health is a hint, not a gate.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isAvailable = (provider: ProviderKey) =>
+    providerStatus ? providerStatus[provider]?.configured !== false : true;
+
+  const noneConfigured = Boolean(
+    providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
+  );
 
   const canSubmit = queuedFiles.length > 0 && selectedProviders.length > 0 && !busy;
 
@@ -277,13 +317,22 @@ export function UploadForm({
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Providers
         </p>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {PROVIDER_OPTIONS.map((provider) => {
-            const checked = selectedProviders.includes(provider.key);
+            const status = providerStatus?.[provider.key];
+            const available = isAvailable(provider.key);
+            const checked = selectedProviders.includes(provider.key) && available;
+            const note = status
+              ? status.configured
+                ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}`
+                : `${CHANNEL_LABELS[status.channel]} key not configured`
+              : "checking...";
             return (
               <label
                 key={provider.key}
-                className={`flex min-h-[84px] cursor-pointer items-start gap-3 rounded-[10px] border-2 bg-white p-4 transition dark:bg-[#151d2e] ${
+                className={`flex min-h-[84px] items-start gap-3 rounded-[10px] border-2 bg-white p-4 transition dark:bg-[#151d2e] ${
+                  available ? "cursor-pointer" : "cursor-not-allowed opacity-55"
+                } ${
                   checked
                     ? "border-[#b35c1e] shadow-[0_0_0_4px_rgba(179,92,30,0.12)] dark:border-[#e8903a]"
                     : "border-[#d4cdc3] hover:border-[#b35c1e] dark:border-[#2a3650] dark:hover:border-[#e8903a]"
@@ -292,21 +341,28 @@ export function UploadForm({
                 <input
                   type="checkbox"
                   checked={checked}
+                  disabled={!available}
                   onChange={() => toggleProvider(provider.key)}
-                  className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+                  className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
                 />
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
                     {provider.label}
                   </span>
-                  <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
-                    {provider.note}
+                  <span className="mt-1 block break-words text-xs text-[#8a7f72] dark:text-[#a8a098]">
+                    {note}
                   </span>
                 </span>
               </label>
             );
           })}
         </div>
+        {noneConfigured ? (
+          <p className="mt-3 text-sm text-[#c0392b] dark:text-[#f2b8b2]">
+            No provider keys are configured on the server. Add at least one key
+            (POE_API_KEY, MOONSHOT_API_KEY, MINIMAX_API_KEY, or GOOGLE_API_KEY) and restart.
+          </p>
+        ) : null}
       </section>
 
       <section>
@@ -331,6 +387,11 @@ export function UploadForm({
             </button>
           ))}
         </div>
+        <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+          Each model has its own reasoning scale, so the level is mapped per provider.
+          Levels a model does not offer fall back to its own default (Gemini Pro, for
+          example, cannot switch thinking off).
+        </p>
       </section>
 
       {bannerError ? (
@@ -345,7 +406,7 @@ export function UploadForm({
         </div>
       ) : null}
 
-      <div className="flex justify-center pt-1">
+      <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
         <button
           type="submit"
           disabled={!canSubmit}
@@ -354,6 +415,16 @@ export function UploadForm({
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
           {busy ? "Generating solutions..." : "Solve Problems"}
         </button>
+        {solving ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[10px] border-2 border-[#d4cdc3] bg-white px-6 py-3 text-base font-semibold text-[#5c5347] transition hover:border-[#c0392b] hover:text-[#c0392b] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#f2b8b2] dark:hover:text-[#f2b8b2]"
+          >
+            <X className="h-4 w-4" />
+            Stop
+          </button>
+        ) : null}
       </div>
     </form>
   );

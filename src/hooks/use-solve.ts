@@ -4,7 +4,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { EffortKey } from "../../shared/prompt";
-import type { ProviderArtifact, ProviderKey } from "../../shared/solution";
+import { PROVIDER_KEYS, type ProviderKey } from "../../shared/providers";
+import type { ProviderArtifact } from "../../shared/solution";
 import type { SolveRequestBody } from "../../shared/stream-protocol";
 
 export type ProviderRun =
@@ -16,11 +17,9 @@ export type ProviderRun =
 
 export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
-const IDLE_RUNS: ProviderRuns = {
-  codex: { status: "idle" },
-  claude: { status: "idle" },
-  gemini: { status: "idle" },
-};
+const IDLE_RUNS = Object.fromEntries(
+  PROVIDER_KEYS.map((key) => [key, { status: "idle" } as ProviderRun]),
+) as ProviderRuns;
 
 export function isRunActive(run: ProviderRun) {
   return run.status === "waiting" || run.status === "streaming";

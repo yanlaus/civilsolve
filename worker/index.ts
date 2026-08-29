@@ -1,19 +1,57 @@
 import { Hono } from "hono";
 import { isEffortKey, type EffortKey } from "../shared/prompt";
-import { isProviderKey } from "../shared/solution";
+import {
+  isProviderKey,
+  PROVIDER_KEYS,
+  type HealthResponse,
+  type ProviderKey,
+  type ProviderStatus,
+} from "../shared/providers";
 import {
   DATA_URL_PATTERN,
   MAX_BODY_BYTES,
   MAX_IMAGES,
   MAX_NOTES_LENGTH,
 } from "../shared/stream-protocol";
-import { runSolve, type WorkerEnv } from "./poe";
+import { routeStatus, type WorkerEnv } from "./channels";
+import { runSolve } from "./solve";
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
 
-app.get("/api/health", (c) =>
-  c.json({ poeConfigured: Boolean(c.env.POE_API_KEY?.trim()) }),
-);
+/**
+ * Reads a request body as text, stopping as soon as it exceeds `limit`.
+ * Returns null when the limit is passed, so an oversized upload is abandoned
+ * mid-flight instead of being buffered and parsed in full.
+ */
+async function readBoundedBody(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
+}
+
+app.get("/api/health", (c) => {
+  const providers = {} as Record<ProviderKey, ProviderStatus>;
+  for (const provider of PROVIDER_KEYS) {
+    providers[provider] = routeStatus(provider, c.env);
+  }
+  return c.json<HealthResponse>({ providers });
+});
 
 app.post("/api/solve/:provider", async (c) => {
   const provider = c.req.param("provider");
@@ -21,14 +59,23 @@ app.post("/api/solve/:provider", async (c) => {
     return c.json({ error: "Unknown provider." }, 404);
   }
 
+  // Cheap early reject when the client declares an oversized body...
   const contentLength = Number(c.req.header("content-length") || 0);
   if (contentLength > MAX_BODY_BYTES) {
-    return c.json({ error: "Request body is too large." }, 400);
+    return c.json({ error: "Request body is too large." }, 413);
+  }
+
+  // ...and a real one for when it does not. A chunked request carries no
+  // content-length, so the header check alone lets an arbitrarily large body
+  // through to the JSON parser.
+  const raw = await readBoundedBody(c.req.raw, MAX_BODY_BYTES);
+  if (raw === null) {
+    return c.json({ error: "Request body is too large." }, 413);
   }
 
   let body: { images?: unknown; notes?: unknown; effort?: unknown };
   try {
-    body = await c.req.json();
+    body = JSON.parse(raw) as typeof body;
   } catch {
     return c.json({ error: "Request body must be JSON." }, 400);
   }

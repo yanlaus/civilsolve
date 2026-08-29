@@ -3,12 +3,17 @@ import { Calculator, Loader2 } from "lucide-react";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { isRunActive, useSolve } from "@/hooks/use-solve";
 import { filesToImageDataUrls } from "@/lib/attachments";
-import { MAX_IMAGES } from "../../shared/stream-protocol";
+import {
+  estimateBodyBytes,
+  formatBytes,
+  MAX_BODY_BYTES,
+  MAX_IMAGES,
+} from "../../shared/stream-protocol";
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 
 export default function CivilAnswerAppPage() {
-  const { runs, start } = useSolve();
+  const { runs, start, cancel } = useSolve();
   const [prepStatus, setPrepStatus] = useState("");
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
@@ -52,6 +57,16 @@ export default function CivilAnswerAppPage() {
           `The upload produced ${images.length} images (PDF pages count individually). The limit is ${MAX_IMAGES} — remove some files or pages.`,
         );
       }
+
+      // One copy of this payload is uploaded per selected provider, so an
+      // oversized batch is caught here rather than as N rejected requests.
+      const bytes = estimateBodyBytes(images, notes);
+      if (bytes > MAX_BODY_BYTES) {
+        throw new Error(
+          `The prepared upload is about ${formatBytes(bytes)}, over the ${formatBytes(MAX_BODY_BYTES)} limit for one request. Remove some pages, or rescan at a lower resolution.`,
+        );
+      }
+
       start(providers, images, notes, effort);
     } catch (prepError) {
       setError(
@@ -79,7 +94,14 @@ export default function CivilAnswerAppPage() {
           </p>
         </header>
 
-        <UploadForm busy={busy} status={prepStatus} error={error} onSolve={handleSolve} />
+        <UploadForm
+          busy={busy}
+          solving={isSolving}
+          status={prepStatus}
+          error={error}
+          onSolve={handleSolve}
+          onCancel={cancel}
+        />
 
         {runtimeError ? (
           <div className="mt-5 rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] print:hidden dark:border-[#5b2a31] dark:text-[#f2b8b2]">

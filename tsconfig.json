@@ -8,7 +8,7 @@
     "module": "esnext",
     "target": "esnext",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",

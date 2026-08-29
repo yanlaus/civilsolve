@@ -8,11 +8,43 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  // Non-secret configuration only. API keys are Wrangler secrets in production
+  // and live in .dev.vars locally - never put a key in this file.
   "vars": {
-    "POE_CODEX_MODEL": "GPT-5.2",
-    "POE_CLAUDE_MODEL": "Claude-Sonnet-4.6",
-    "POE_GEMINI_MODEL": "Gemini-3.1-Pro",
-    "POE_NO_STREAM": ""
+    // Which upstream account serves each provider.
+    // poe | kimi | moonshot | minimax | google (see worker/channels.ts for
+    // what each provider actually supports).
+    "CHATGPT_CHANNEL": "poe",
+    "CLAUDE_CHANNEL": "poe",
+    "GEMINI_CHANNEL": "poe",
+    "KIMI_CHANNEL": "kimi",
+    "MINIMAX_CHANNEL": "minimax",
+
+    // Model per channel. Every one of these must be vision-capable: the
+    // assignment is sent as images, never as OCR text. List the Poe bots your
+    // key can see with:
+    //   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
+    "POE_CHATGPT_MODEL": "gpt-5.4",
+    "POE_CLAUDE_MODEL": "claude-opus-4.8",
+    "POE_GEMINI_MODEL": "gemini-3.1-pro",
+    "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro",
+    "KIMI_CODE_MODEL": "kimi-for-coding",
+    "MOONSHOT_KIMI_MODEL": "kimi-latest",
+    // MiniMax-M2/M2.1 are text-only and answer "I cannot view the image"
+    // instead of failing, so they would invent solutions. M3 reads images.
+    "MINIMAX_MODEL": "MiniMax-M3",
+
+    // Endpoint overrides, for switching between mainland and global hosts.
+    // Defaults are the mainland hosts for Moonshot and MiniMax:
+    //   "KIMI_BASE_URL": "https://api.kimi.com/coding",
+    //   "MOONSHOT_BASE_URL": "https://api.moonshot.cn/v1/chat/completions",
+    //   "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
+    //   "POE_BASE_URL": "https://api.poe.com/v1/responses",
+    //   "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+
+    // Comma-separated provider keys that should skip upstream streaming
+    // (still delivered to the browser over SSE), e.g. "kimi".
+    "NO_STREAM": ""
   },
   "observability": {
     "enabled": true

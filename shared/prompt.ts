@@ -12,7 +12,25 @@ export function isEffortKey(value: string): value is EffortKey {
 export const SOLVE_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Use English for every user-facing field unless the user explicitly requests another language.";
 
-export function buildTutorPrompt(userNotes: string, effort: EffortKey) {
+/**
+ * Spelled-out shape contract, appended only when the channel cannot enforce a
+ * schema itself. Without it a model is free to invent its own envelope, and
+ * they do: `{problems:[...]}`, `{assignment_title, problems}`, and a bare
+ * object all show up across runs of the same prompt.
+ */
+const SHAPE_CONTRACT = [
+  "",
+  "Return exactly one JSON object with these six fields, all strings:",
+  '{"title": "", "interpreted_problem": "", "assumptions": "", "step_by_step": "", "final_answer": "", "latex_body": ""}',
+  "Do not add other fields. Do not nest this object inside another object or array.",
+  "If the assignment contains several problems, cover all of them inside these same six fields.",
+];
+
+export function buildTutorPrompt(
+  userNotes: string,
+  effort: EffortKey,
+  options?: { enforceShape?: boolean },
+) {
   return [
     "Analyze the attached civil engineering assignment images and solve every identifiable problem.",
     "The assignment is provided as attached images. Read them directly, including diagrams, tables, and handwriting.",
@@ -37,5 +55,6 @@ export function buildTutorPrompt(userNotes: string, effort: EffortKey) {
     "- Use `$$...$$` for displayed equations, substitutions, and final calculated expressions.",
     "- Do not leave formulas as plain text when they contain symbols, subscripts, superscripts, fractions, or unit calculations.",
     "- Do not use CJK prose such as 代入, 結果, 已知, or 所求 unless the user explicitly requests a Chinese answer.",
+    ...(options?.enforceShape ? SHAPE_CONTRACT : []),
   ].join("\n");
 }
