@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  BookOpen,
   Brain,
   Calculator,
+  Eye,
   FileImage,
   FileText,
   Loader2,
@@ -9,6 +11,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import type { InterpretConfig } from "@/hooks/use-interpret";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
@@ -28,12 +31,17 @@ type QueuedFile = {
 
 export type SolveSubmission = {
   files: File[];
+  /** Reference material for method/notation, never solved. */
+  lectureFiles: File[];
   providers: ProviderKey[];
   notes: string;
   effort: EffortKey;
+  /** Null when the user leaves the interpretation pass switched off. */
+  verify: InterpretConfig | null;
 };
 
 const MAX_FILES = 10;
+const MAX_LECTURE_FILES = 6;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
@@ -70,7 +78,12 @@ export function UploadForm({
   onCancel: () => void;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+  const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
+  const [verifyEnabled, setVerifyEnabled] = useState(false);
+  const [interpreterA, setInterpreterA] = useState<ProviderKey>("chatgpt");
+  const [interpreterB, setInterpreterB] = useState<ProviderKey>("gemini");
+  const [verifier, setVerifier] = useState<ProviderKey>("claude");
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
     ...PROVIDER_KEYS,
@@ -119,7 +132,14 @@ export function UploadForm({
     providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
   );
 
-  const canSubmit = queuedFiles.length > 0 && selectedProviders.length > 0 && !busy;
+  // Two readers that are the same model would just agree with themselves.
+  const verifyConfigError =
+    verifyEnabled && interpreterA === interpreterB
+      ? "Pick two different models to read the question independently."
+      : "";
+
+  const canSubmit =
+    queuedFiles.length > 0 && selectedProviders.length > 0 && !verifyConfigError && !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -166,6 +186,43 @@ export function UploadForm({
     setFileError(nextError);
   }
 
+  function addLectureFiles(inputFiles: FileList | File[]) {
+    const next = Array.from(inputFiles);
+    let nextError = "";
+
+    setLectureFiles((current) => {
+      const existingKeys = new Set(current.map((item) => item.id));
+      const added: QueuedFile[] = [];
+
+      for (const file of next) {
+        const key = `${file.name}-${file.size}-${file.lastModified}`;
+        if (existingKeys.has(key)) continue;
+        if (current.length + added.length >= MAX_LECTURE_FILES) {
+          nextError = `You can attach up to ${MAX_LECTURE_FILES} lecture-notes files.`;
+          break;
+        }
+        if (!isAcceptedUpload(file)) {
+          nextError = `Unsupported file type: ${file.name}. Use JPEG, PNG, WebP, GIF, or PDF.`;
+          continue;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          nextError = `${file.name} is larger than 25 MB.`;
+          continue;
+        }
+        added.push({ id: key, file });
+        existingKeys.add(key);
+      }
+
+      return [...current, ...added];
+    });
+
+    setFileError(nextError);
+  }
+
+  function removeLectureFile(id: string) {
+    setLectureFiles((current) => current.filter((item) => item.id !== id));
+  }
+
   function removeFile(id: string) {
     setQueuedFiles((current) => {
       const match = current.find((item) => item.id === id);
@@ -190,13 +247,15 @@ export function UploadForm({
     if (!canSubmit) return;
     onSolve({
       files: queuedFiles.map((item) => item.file),
+      lectureFiles: lectureFiles.map((item) => item.file),
       providers: selectedProviders,
       notes,
       effort,
+      verify: verifyEnabled ? { interpreterA, interpreterB, verifier } : null,
     });
   }
 
-  const bannerError = error || fileError;
+  const bannerError = error || fileError || verifyConfigError;
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -314,6 +373,61 @@ export function UploadForm({
 
       <section>
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <BookOpen className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Lecture Notes
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+        </p>
+        <p className="mb-3 text-sm text-[#8a7f72] dark:text-[#a8a098]">
+          Attach notes or worked examples and the solutions will follow the methods, notation,
+          and sign conventions taught there. Reference only — nothing in them is solved.
+        </p>
+        <label className="relative block cursor-pointer rounded-[10px] border-2 border-dashed border-[#d4cdc3] bg-white px-4 py-5 text-center text-sm text-[#8a7f72] transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a]">
+          Add lecture notes — <span className="font-semibold text-[#b35c1e] dark:text-[#e8903a]">browse</span>
+          <input
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf"
+            multiple
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label="Choose lecture-notes files"
+            onChange={(event) => {
+              if (event.target.files?.length) addLectureFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+        </label>
+
+        {lectureFiles.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {lectureFiles.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e8e3db] bg-white px-3 py-2 text-sm dark:border-[#1e2a40] dark:bg-[#151d2e]"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <FileText className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]" />
+                  <span className="truncate text-[#5c5347] dark:text-[#a8a098]">{item.file.name}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-3">
+                  <span className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+                    {formatSize(item.file.size)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeLectureFile(item.id)}
+                    aria-label={`Remove ${item.file.name}`}
+                    className="text-[#8a7f72] transition hover:text-[#c0392b] dark:text-[#6e6960]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Providers
         </p>
@@ -392,6 +506,59 @@ export function UploadForm({
           Levels a model does not offer fall back to its own default (Gemini Pro, for
           example, cannot switch thinking off).
         </p>
+      </section>
+
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <Eye className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Question Interpretation
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+        </p>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border-2 border-[#d4cdc3] bg-white p-4 transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:hover:border-[#e8903a]">
+          <input
+            type="checkbox"
+            checked={verifyEnabled}
+            onChange={(event) => setVerifyEnabled(event.target.checked)}
+            className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+              Check the diagram reading before solving
+            </span>
+            <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              Two models read the question independently, a third reconciles them, and you get to
+              correct the result before any solving starts. Catches misread diagrams — at the cost
+              of three extra model calls and a wait before the solutions begin.
+            </span>
+          </span>
+        </label>
+
+        {verifyEnabled ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "First reader", value: interpreterA, set: setInterpreterA },
+              { label: "Second reader", value: interpreterB, set: setInterpreterB },
+              { label: "Reconciler", value: verifier, set: setVerifier },
+            ].map((field) => (
+              <label key={field.label} className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+                {field.label}
+                <select
+                  value={field.value}
+                  onChange={(event) => field.set(event.target.value as ProviderKey)}
+                  className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+                >
+                  {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       {bannerError ? (

@@ -1,19 +1,33 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Calculator, Loader2 } from "lucide-react";
+import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { useInterpret } from "@/hooks/use-interpret";
 import { isRunActive, useSolve } from "@/hooks/use-solve";
 import { filesToImageDataUrls } from "@/lib/attachments";
+import { lectureNotesToPayload } from "@/lib/lecture-notes";
+import type { ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
   formatBytes,
   MAX_BODY_BYTES,
   MAX_IMAGES,
+  type SolveRequestBody,
 } from "../../shared/stream-protocol";
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 
+// Prepared at submit time and needed again once the user confirms the
+// reviewed interpretation.
+type PendingSolve = {
+  providers: ProviderKey[];
+  body: SolveRequestBody;
+};
+
 export default function CivilAnswerAppPage() {
   const { runs, start, cancel } = useSolve();
+  const { pipeline, start: startInterpret, reset: resetInterpret } = useInterpret();
+  const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
@@ -44,10 +58,29 @@ export default function CivilAnswerAppPage() {
   }, []);
 
   const isSolving = Object.values(runs).some(isRunActive);
-  const busy = isSolving || Boolean(prepStatus);
+  const isInterpreting = pipeline.status === "running";
+  const busy = isSolving || isInterpreting || Boolean(prepStatus);
 
-  async function handleSolve({ files, providers, notes, effort }: SolveSubmission) {
+  const statusMessage = prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
+  const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
+
+  function cancelAll() {
+    resetInterpret();
+    setPendingSolve(null);
+    cancel();
+  }
+
+  async function handleSolve({
+    files,
+    lectureFiles,
+    providers,
+    notes,
+    effort,
+    verify,
+  }: SolveSubmission) {
     setError("");
+    resetInterpret();
+    setPendingSolve(null);
     setPrepStatus("Preparing images...");
 
     try {
@@ -58,16 +91,40 @@ export default function CivilAnswerAppPage() {
         );
       }
 
+      let referenceText = "";
+      let referenceImages: string[] = [];
+      if (lectureFiles.length > 0) {
+        setPrepStatus("Preparing lecture notes...");
+        const payload = await lectureNotesToPayload(lectureFiles);
+        referenceText = payload.referenceText;
+        referenceImages = payload.referenceImages;
+      }
+
+      const body: SolveRequestBody = {
+        images,
+        notes,
+        effort,
+        ...(referenceText ? { referenceText } : {}),
+        ...(referenceImages.length ? { referenceImages } : {}),
+      };
+
       // One copy of this payload is uploaded per selected provider, so an
       // oversized batch is caught here rather than as N rejected requests.
-      const bytes = estimateBodyBytes(images, notes);
+      const bytes = estimateBodyBytes(body);
       if (bytes > MAX_BODY_BYTES) {
         throw new Error(
           `The prepared upload is about ${formatBytes(bytes)}, over the ${formatBytes(MAX_BODY_BYTES)} limit for one request. Remove some pages, or rescan at a lower resolution.`,
         );
       }
 
-      start(providers, images, notes, effort);
+      if (verify) {
+        setPendingSolve({ providers, body });
+        setPrepStatus("");
+        await startInterpret(verify, images, notes);
+        return;
+      }
+
+      start(providers, body);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -75,6 +132,14 @@ export default function CivilAnswerAppPage() {
     } finally {
       setPrepStatus("");
     }
+  }
+
+  function confirmInterpretation(confirmedText: string) {
+    if (!pendingSolve) return;
+    const { providers, body } = pendingSolve;
+    setPendingSolve(null);
+    resetInterpret();
+    start(providers, { ...body, interpretation: confirmedText });
   }
 
   return (
@@ -96,12 +161,21 @@ export default function CivilAnswerAppPage() {
 
         <UploadForm
           busy={busy}
-          solving={isSolving}
-          status={prepStatus}
-          error={error}
+          solving={isSolving || isInterpreting}
+          status={statusMessage}
+          error={bannerError}
           onSolve={handleSolve}
-          onCancel={cancel}
+          onCancel={cancelAll}
         />
+
+        {pipeline.status === "review" ? (
+          <InterpretationReview
+            interpretation={pipeline.interpretation}
+            initialText={pipeline.text}
+            onConfirm={confirmInterpretation}
+            onCancel={cancelAll}
+          />
+        ) : null}
 
         {runtimeError ? (
           <div className="mt-5 rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] print:hidden dark:border-[#5b2a31] dark:text-[#f2b8b2]">

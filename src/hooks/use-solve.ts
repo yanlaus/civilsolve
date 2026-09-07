@@ -3,10 +3,10 @@
 // independently (spinner -> live progress -> rendered solution).
 
 import { useCallback, useRef, useState } from "react";
-import type { EffortKey } from "../../shared/prompt";
 import { PROVIDER_KEYS, type ProviderKey } from "../../shared/providers";
 import type { ProviderArtifact } from "../../shared/solution";
 import type { SolveRequestBody } from "../../shared/stream-protocol";
+import { fetchSseStream, readSseEvents } from "@/lib/sse";
 
 export type ProviderRun =
   | { status: "idle" }
@@ -43,32 +43,27 @@ export function useSolve() {
     });
   }, []);
 
-  const start = useCallback(
-    (providers: ProviderKey[], images: string[], notes: string, effort: EffortKey) => {
-      abortRef.current?.abort();
-      const abort = new AbortController();
-      abortRef.current = abort;
+  const start = useCallback((providers: ProviderKey[], body: SolveRequestBody) => {
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
 
-      setRuns(() => {
-        const next: ProviderRuns = { ...IDLE_RUNS };
-        for (const provider of providers) {
-          next[provider] = { status: "waiting", message: "Submitting..." };
-        }
-        return next;
-      });
-
-      const update = (provider: ProviderKey, run: ProviderRun) => {
-        setRuns((current) => ({ ...current, [provider]: run }));
-      };
-
-      const body: SolveRequestBody = { images, notes, effort };
-
+    setRuns(() => {
+      const next: ProviderRuns = { ...IDLE_RUNS };
       for (const provider of providers) {
-        void streamProvider(provider, body, abort.signal, update);
+        next[provider] = { status: "waiting", message: "Submitting..." };
       }
-    },
-    [],
-  );
+      return next;
+    });
+
+    const update = (provider: ProviderKey, run: ProviderRun) => {
+      setRuns((current) => ({ ...current, [provider]: run }));
+    };
+
+    for (const provider of providers) {
+      void streamProvider(provider, body, abort.signal, update);
+    }
+  }, []);
 
   return { runs, start, cancel };
 }
@@ -82,37 +77,10 @@ async function streamProvider(
   let charsReceived = 0;
 
   try {
-    const response = await fetch(`/api/solve/${provider}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal,
-    });
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok || !contentType.includes("text/event-stream")) {
-      const text = await response.text();
-      let message = `The solve request failed (HTTP ${response.status}).`;
-      try {
-        const payload = JSON.parse(text) as { error?: string };
-        if (payload.error) message = payload.error;
-      } catch {
-        if (text.trim().startsWith("<")) {
-          message = "The server returned an HTML page instead of a solution stream.";
-        }
-      }
-      update(provider, { status: "error", message });
-      return;
-    }
-
-    if (!response.body) {
-      update(provider, { status: "error", message: "The server returned no stream." });
-      return;
-    }
-
+    const stream = await fetchSseStream(`/api/solve/${provider}`, body, signal);
     let finished = false;
 
-    for await (const event of readSseEvents(response.body)) {
+    for await (const event of readSseEvents(stream)) {
       let payload: Record<string, unknown>;
       try {
         payload = JSON.parse(event.data) as Record<string, unknown>;
@@ -127,7 +95,11 @@ async function streamProvider(
       } else if (event.name === "delta" && typeof payload.text === "string") {
         charsReceived += payload.text.length;
         update(provider, { status: "streaming", charsReceived });
-      } else if (event.name === "done" && payload.solution && typeof payload.solution === "object") {
+      } else if (
+        event.name === "done" &&
+        payload.solution &&
+        typeof payload.solution === "object"
+      ) {
         finished = true;
         update(provider, {
           status: "done",
@@ -151,58 +123,5 @@ async function streamProvider(
       status: "error",
       message: error instanceof Error ? error.message : "The solve request failed.",
     });
-  }
-}
-
-type SseEvent = { name: string; data: string };
-
-/**
- * Minimal SSE parser over a fetch body. EventSource cannot POST, so the
- * stream is read manually; comment lines (heartbeats) are ignored.
- */
-async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let eventName = "";
-  let dataLines: string[] = [];
-
-  const flush = (): SseEvent | null => {
-    if (!dataLines.length) {
-      eventName = "";
-      return null;
-    }
-    const event = { name: eventName || "message", data: dataLines.join("\n") };
-    eventName = "";
-    dataLines = [];
-    return event;
-  };
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
-        buffer = buffer.slice(newlineIndex + 1);
-
-        if (line === "") {
-          const event = flush();
-          if (event) yield event;
-        } else if (line.startsWith("event:")) {
-          eventName = line.slice(6).trim();
-        } else if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).trimStart());
-        }
-        // lines starting with ":" are heartbeat comments — ignored
-      }
-    }
-    const event = flush();
-    if (event) yield event;
-  } finally {
-    reader.releaseLock();
   }
 }
