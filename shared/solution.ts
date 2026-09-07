@@ -2,7 +2,7 @@
 // Pure string logic shared by the Worker (finalizing streamed responses)
 // and the client (building .tex downloads).
 
-export type ProviderKey = "codex" | "claude" | "gemini";
+import { PROVIDER_LABELS, type ProviderKey } from "./providers";
 
 export type StructuredSolution = {
   title: string;
@@ -21,18 +21,6 @@ export type ProviderArtifact = {
   finalAnswer: string;
   latexBody: string;
 };
-
-export const PROVIDER_LABELS: Record<ProviderKey, string> = {
-  codex: "ChatGPT",
-  claude: "Claude Sonnet",
-  gemini: "Gemini Pro",
-};
-
-export const PROVIDER_KEYS: ProviderKey[] = ["codex", "claude", "gemini"];
-
-export function isProviderKey(value: string): value is ProviderKey {
-  return (PROVIDER_KEYS as string[]).includes(value);
-}
 
 export const solutionSchema = {
   type: "object",
@@ -167,7 +155,24 @@ function coerceStructuredSolution(value: unknown): StructuredSolution | null {
   if (!value || typeof value !== "object") {
     return null;
   }
-  return normalizeStructuredSolution(value as Record<string, unknown>);
+
+  const record = value as Record<string, unknown>;
+  const direct = normalizeStructuredSolution(record);
+  if (direct) {
+    return direct;
+  }
+
+  // Some providers return the answer wrapped in a single envelope key, usually
+  // the json_schema name they were handed: {"civil_solution": {...}}.
+  const keys = Object.keys(record);
+  if (keys.length === 1) {
+    const inner = record[keys[0]];
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      return normalizeStructuredSolution(inner as Record<string, unknown>);
+    }
+  }
+
+  return null;
 }
 
 function normalizeStructuredSolution(

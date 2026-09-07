@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Download, ExternalLink, Loader2 } from "lucide-react";
-import type { ProviderArtifact, ProviderKey } from "../../../shared/solution";
+import { PROVIDER_KEYS, type ProviderKey } from "../../../shared/providers";
+import type { ProviderArtifact } from "../../../shared/solution";
 import { isRunActive, type ProviderRuns } from "@/hooks/use-solve";
 import { exportPdf, exportTex, openInOverleaf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
@@ -27,7 +28,7 @@ function viewSource(artifact: ProviderArtifact, view: ViewKey) {
 }
 
 export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
-  const [activeProvider, setActiveProvider] = useState<ProviderKey>("codex");
+  const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
   const visibleProviders = PROVIDER_OPTIONS.filter(
@@ -98,7 +99,6 @@ export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
                   }`}
                 >
                   <div>{provider.label}</div>
-                  <div className="text-[11px] font-normal opacity-80">{provider.note}</div>
                   <span
                     className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
                       activeProvider === provider.key ? "bg-[#b35c1e] dark:bg-[#e8903a]" : "bg-transparent"

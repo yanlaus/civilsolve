@@ -2,6 +2,7 @@
 // civil-answer-app monolith). katex/marked live only in this module so the
 // whole stack stays out of the initial bundle — import it from lazy chunks.
 
+import DOMPurify from "dompurify";
 import katex from "katex";
 import { marked } from "marked";
 import "katex/dist/katex.min.css";
@@ -283,6 +284,16 @@ function restoreMathHtml(value: string, mathHtml: string[]) {
   );
 }
 
+/**
+ * Renders one provider field to HTML.
+ *
+ * The input is model output, which is untrusted: the assignment images are
+ * user-supplied, so anything in them can steer what the model writes. `marked`
+ * passes raw HTML straight through, and the result is injected with
+ * dangerouslySetInnerHTML, so the markdown HTML is sanitized before it reaches
+ * the DOM. KaTeX output is spliced in afterwards, from placeholders, so our own
+ * generated math markup is never mangled by the sanitizer.
+ */
 export function renderMarkdown(value: string) {
   try {
     const { protectedText, protectedChunks } = protectCodeSpans(
@@ -290,7 +301,7 @@ export function renderMarkdown(value: string) {
     );
     const { markdown, mathHtml } = replaceMathWithPlaceholders(protectedText);
     const html = marked.parse(restoreCodeSpans(markdown, protectedChunks)) as string;
-    return restoreMathHtml(html, mathHtml);
+    return restoreMathHtml(DOMPurify.sanitize(html), mathHtml);
   } catch {
     const escaped = sanitizeText(value)
       .replace(/&/g, "&amp;")
