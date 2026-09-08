@@ -38,6 +38,8 @@ The repo previously carried a second, unused backend from the original Bun/Zo de
 
 ## Provider gotchas found by testing
 
+- **Kimi Code is unreachable from deployed Workers.** `api.kimi.com` is itself behind Cloudflare and answers requests originating from Workers' egress with a 403 challenge page ("Attention Required! | Cloudflare"). Measured from Cloudflare's edge, every variation returns the same 403: our headers, a browser User-Agent, no User-Agent, and a bare `GET https://api.kimi.com/` with no credential at all. The same code and key succeed from a laptop, so this is the egress network, not the request. Headers cannot fix it. The workarounds are `KIMI_BASE_URL` pointed at a non-Cloudflare proxy, or `KIMI_CHANNEL=moonshot` with a Moonshot platform key. Kimi still works in local dev.
+
 These were all discovered by running real requests, not from vendor docs. Re-verify before changing a model id or a route flag.
 
 - **Every model must be vision-capable.** The assignment is only ever sent as images. A text-only model does not necessarily fail — MiniMax M2/M2.1 reply "I cannot view the image" and then invent a plausible solution, which is far worse than an error.

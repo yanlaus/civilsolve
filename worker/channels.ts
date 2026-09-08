@@ -386,10 +386,13 @@ export type Task = {
 };
 
 /**
- * Workers' fetch sends no User-Agent at all, and some upstream WAFs answer
- * anonymous datacenter traffic with a challenge page instead of the API.
- * api.kimi.com does exactly that: HTTP 403 carrying Cloudflare's "Attention
- * Required!" HTML. Identify the app truthfully on every channel.
+ * Workers' fetch sends no User-Agent at all. Identifying the app truthfully is
+ * good manners toward upstreams and makes their logs legible.
+ *
+ * It is NOT what unblocks api.kimi.com. That host sits behind Cloudflare and
+ * rejects traffic from Workers' egress before looking at the request: a bare
+ * GET to https://api.kimi.com/ with no key and no headers gets the same 403
+ * challenge page as a fully formed API call. See AGENTS.md.
  */
 const UPSTREAM_UA =
   "CivilSolve/1.0 (Cloudflare Worker; +https://civilsolve.yanlaus.workers.dev)";
