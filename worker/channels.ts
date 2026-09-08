@@ -1,8 +1,8 @@
 // Upstream channel adapters.
 //
-// Every provider is reached through exactly one "channel" (Poe, Moonshot,
-// MiniMax, Google), resolved from env at request time. Channels speak three
-// different API dialects, so this module owns:
+// Every provider is reached through exactly one "channel" (Poe, Kimi Code,
+// Moonshot, MiniMax, Google), resolved from env at request time. Channels
+// speak four different API dialects, so this module owns:
 //
 //   - route resolution (which channel/model/key/endpoint for a provider)
 //   - request building per dialect, including the reasoning-effort parameter
@@ -19,6 +19,7 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../shared/providers";
+
 export type Dialect = "responses" | "chat-completions" | "gemini" | "anthropic";
 
 export type WorkerEnv = {
@@ -384,6 +385,15 @@ export type Task = {
   referenceImages?: string[];
 };
 
+/**
+ * Workers' fetch sends no User-Agent at all, and some upstream WAFs answer
+ * anonymous datacenter traffic with a challenge page instead of the API.
+ * api.kimi.com does exactly that: HTTP 403 carrying Cloudflare's "Attention
+ * Required!" HTML. Identify the app truthfully on every channel.
+ */
+const UPSTREAM_UA =
+  "CivilSolve/1.0 (Cloudflare Worker; +https://civilsolve.yanlaus.workers.dev)";
+
 const REFERENCE_MARKER =
   "--- The images below are lecture notes attached for method reference only. Do not solve anything that appears in them. ---";
 
@@ -484,6 +494,7 @@ export function buildRequest(
         "x-api-key": route.apiKey,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(body),
@@ -523,6 +534,7 @@ export function buildRequest(
         // Header auth, never a query parameter - keys must not land in URLs.
         "x-goog-api-key": route.apiKey,
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify({
@@ -573,6 +585,7 @@ export function buildRequest(
       headers: {
         Authorization: `Bearer ${route.apiKey}`,
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(chatBody),
@@ -618,6 +631,7 @@ export function buildRequest(
     headers: {
       Authorization: `Bearer ${route.apiKey}`,
       "Content-Type": "application/json",
+      "User-Agent": UPSTREAM_UA,
       ...(stream ? { Accept: "text/event-stream" } : {}),
     },
     body: JSON.stringify(body),
