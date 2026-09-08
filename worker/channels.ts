@@ -1,16 +1,16 @@
 // Upstream channel adapters.
 //
-// Every provider is reached through exactly one "channel" (Poe, Moonshot,
-// MiniMax, Google), resolved from env at request time. Channels speak three
-// different API dialects, so this module owns:
+// Every provider is reached through exactly one "channel" (Poe, Kimi Code,
+// Moonshot, MiniMax, Google), resolved from env at request time. Channels
+// speak four different API dialects, so this module owns:
 //
 //   - route resolution (which channel/model/key/endpoint for a provider)
 //   - request building per dialect, including the reasoning-effort parameter
 //   - upstream stream/payload parsing per dialect
 //
-// worker/solve.ts stays dialect-agnostic and only orchestrates.
+// worker/run.ts stays dialect-agnostic and only orchestrates.
 
-import { buildTutorPrompt, SOLVE_INSTRUCTIONS, type EffortKey } from "../shared/prompt";
+import type { EffortKey } from "../shared/prompt";
 import {
   CHANNEL_LABELS,
   isChannelKey,
@@ -19,7 +19,6 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../shared/providers";
-import { solutionSchema } from "../shared/solution";
 
 export type Dialect = "responses" | "chat-completions" | "gemini" | "anthropic";
 
@@ -369,7 +368,34 @@ export type UpstreamRequest = {
   body: string;
 };
 
-const SCHEMA_NAME = "civil_solution";
+/**
+ * One unit of work for a channel. Both /api/solve and /api/interpret describe
+ * themselves this way, so the dialects never learn what task they are serving.
+ *
+ * `prompt` is a function because whether the channel can enforce the schema
+ * itself decides whether the prompt must spell the shape out.
+ */
+export type Task = {
+  prompt: (options: { enforceShape: boolean }) => string;
+  instructions: string;
+  schemaName: string;
+  schema: Record<string, unknown>;
+  images: string[];
+  /** Reference material appended after the images, introduced by a marker. */
+  referenceImages?: string[];
+};
+
+/**
+ * Workers' fetch sends no User-Agent at all, and some upstream WAFs answer
+ * anonymous datacenter traffic with a challenge page instead of the API.
+ * api.kimi.com does exactly that: HTTP 403 carrying Cloudflare's "Attention
+ * Required!" HTML. Identify the app truthfully on every channel.
+ */
+const UPSTREAM_UA =
+  "CivilSolve/1.0 (Cloudflare Worker; +https://civilsolve.yanlaus.workers.dev)";
+
+const REFERENCE_MARKER =
+  "--- The images below are lecture notes attached for method reference only. Do not solve anything that appears in them. ---";
 
 function enumEffort(route: Route, effort: EffortKey) {
   return route.effort.kind === "enum" ? route.effort.values[effort] : undefined;
@@ -380,9 +406,10 @@ function budgetEffort(route: Route, effort: EffortKey) {
 }
 
 /** Gemini responseSchema is an OpenAPI subset that rejects additionalProperties. */
-function geminiSchema(): Record<string, unknown> {
-  const { additionalProperties: _unsupported, ...rest } = solutionSchema;
-  return { ...rest, propertyOrdering: [...solutionSchema.required] };
+function geminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const { additionalProperties: _unsupported, ...rest } = schema;
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  return { ...rest, propertyOrdering: [...required] };
 }
 
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/;
@@ -405,8 +432,7 @@ const ANTHROPIC_ANSWER_TOKENS = 8192;
 export function buildRequest(
   route: Route,
   caps: Capabilities,
-  images: string[],
-  notes: string,
+  task: Task,
   effort: EffortKey,
   stream: boolean,
 ): UpstreamRequest {
@@ -415,7 +441,9 @@ export function buildRequest(
   // prompt has to carry the contract instead.
   const schemaEnforced =
     caps.schema === "strict" && (route.dialect !== "anthropic" || route.structured);
-  const prompt = buildTutorPrompt(notes, effort, { enforceShape: !schemaEnforced });
+  const prompt = task.prompt({ enforceShape: !schemaEnforced });
+  const { images, instructions, schema, schemaName } = task;
+  const referenceImages = task.referenceImages || [];
 
   if (route.dialect === "anthropic") {
     const budget = caps.reasoning ? budgetEffort(route, effort) : undefined;
@@ -425,12 +453,19 @@ export function buildRequest(
       const block = toAnthropicImage(image);
       if (block) content.push(block);
     }
+    if (referenceImages.length) {
+      content.push({ type: "text", text: REFERENCE_MARKER });
+      for (const image of referenceImages) {
+        const block = toAnthropicImage(image);
+        if (block) content.push(block);
+      }
+    }
 
     const body: Record<string, unknown> = {
       model: route.model,
       // Required by the Messages API, and it must exceed the thinking budget.
       max_tokens: (budget ?? 0) + ANTHROPIC_ANSWER_TOKENS,
-      system: SOLVE_INSTRUCTIONS,
+      system: instructions,
       messages: [{ role: "user", content }],
     };
 
@@ -439,12 +474,12 @@ export function buildRequest(
     if (caps.schema === "strict" && route.structured) {
       body.tools = [
         {
-          name: SCHEMA_NAME,
-          description: "Return the worked solution using exactly these fields.",
-          input_schema: solutionSchema,
+          name: schemaName,
+          description: "Return the result using exactly these fields.",
+          input_schema: schema,
         },
       ];
-      body.tool_choice = { type: "tool", name: SCHEMA_NAME };
+      body.tool_choice = { type: "tool", name: schemaName };
     }
     if (budget !== undefined) {
       body.thinking = { type: "enabled", budget_tokens: budget };
@@ -459,6 +494,7 @@ export function buildRequest(
         "x-api-key": route.apiKey,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(body),
@@ -469,7 +505,7 @@ export function buildRequest(
     const generationConfig: Record<string, unknown> = {};
     if (caps.schema === "strict") {
       generationConfig.responseMimeType = "application/json";
-      generationConfig.responseSchema = geminiSchema();
+      generationConfig.responseSchema = geminiSchema(schema);
     } else if (caps.schema === "loose") {
       generationConfig.responseMimeType = "application/json";
     }
@@ -483,6 +519,13 @@ export function buildRequest(
       const inline = toInlineData(image);
       if (inline) parts.push(inline);
     }
+    if (referenceImages.length) {
+      parts.push({ text: REFERENCE_MARKER });
+      for (const image of referenceImages) {
+        const inline = toInlineData(image);
+        if (inline) parts.push(inline);
+      }
+    }
 
     const method = stream ? "streamGenerateContent?alt=sse" : "generateContent";
     return {
@@ -491,10 +534,11 @@ export function buildRequest(
         // Header auth, never a query parameter - keys must not land in URLs.
         "x-goog-api-key": route.apiKey,
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SOLVE_INSTRUCTIONS }] },
+        systemInstruction: { parts: [{ text: instructions }] },
         contents: [{ role: "user", parts }],
         ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
       }),
@@ -505,12 +549,21 @@ export function buildRequest(
     const chatBody: Record<string, unknown> = {
       model: route.model,
       messages: [
-        { role: "system", content: SOLVE_INSTRUCTIONS },
+        { role: "system", content: instructions },
         {
           role: "user",
           content: [
             { type: "text", text: prompt },
             ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+            ...(referenceImages.length
+              ? [
+                  { type: "text", text: REFERENCE_MARKER },
+                  ...referenceImages.map((url) => ({
+                    type: "image_url",
+                    image_url: { url },
+                  })),
+                ]
+              : []),
           ],
         },
       ],
@@ -518,7 +571,7 @@ export function buildRequest(
     if (caps.schema === "strict") {
       chatBody.response_format = {
         type: "json_schema",
-        json_schema: { name: SCHEMA_NAME, strict: true, schema: solutionSchema },
+        json_schema: { name: schemaName, strict: true, schema },
       };
     } else if (caps.schema === "loose") {
       chatBody.response_format = { type: "json_object" };
@@ -532,6 +585,7 @@ export function buildRequest(
       headers: {
         Authorization: `Bearer ${route.apiKey}`,
         "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(chatBody),
@@ -541,20 +595,29 @@ export function buildRequest(
   // dialect === "responses" (Poe)
   const body: Record<string, unknown> = {
     model: route.model,
-    instructions: SOLVE_INSTRUCTIONS,
+    instructions,
     input: [
       {
         role: "user",
         content: [
           { type: "input_text", text: prompt },
           ...images.map((url) => ({ type: "input_image", image_url: url })),
+          ...(referenceImages.length
+            ? [
+                { type: "input_text", text: REFERENCE_MARKER },
+                ...referenceImages.map((url) => ({
+                  type: "input_image",
+                  image_url: url,
+                })),
+              ]
+            : []),
         ],
       },
     ],
   };
   if (caps.schema === "strict") {
     body.text = {
-      format: { type: "json_schema", name: SCHEMA_NAME, strict: true, schema: solutionSchema },
+      format: { type: "json_schema", name: schemaName, strict: true, schema },
     };
   } else if (caps.schema === "loose") {
     body.text = { format: { type: "json_object" } };
@@ -568,6 +631,7 @@ export function buildRequest(
     headers: {
       Authorization: `Bearer ${route.apiKey}`,
       "Content-Type": "application/json",
+      "User-Agent": UPSTREAM_UA,
       ...(stream ? { Accept: "text/event-stream" } : {}),
     },
     body: JSON.stringify(body),

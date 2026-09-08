@@ -98,24 +98,30 @@ Because no vendor publishes a reliable per-model matrix, the Worker also **degra
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: /api/health, /api/solve/:provider
+│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
-│   └── solve.ts            # Heartbeats, timeout, retry/downgrade, SSE output
+│   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE output
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── providers.ts        # Provider + channel registry, health payload types
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
-│   ├── prompt.ts           # Tutor prompt + JSON shape contract
+│   ├── interpretation.ts   # Interpret/verify schema and parsing
+│   ├── prompt.ts           # Solve + interpret/verify prompts, shape contract
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
 │   ├── pages/civil-answer-app.tsx      # Page composition
 │   ├── components/solve/
 │   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort
+│   │   ├── interpretation-review.tsx   # Confirm the diagram reading
 │   │   ├── solution-panel.tsx          # Tabs, streaming states, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
-│   ├── hooks/use-solve.ts              # Per-provider SSE state machine
+│   ├── hooks/
+│   │   ├── use-solve.ts                # Per-provider SSE state machine
+│   │   └── use-interpret.ts            # interpret -> verify -> review
 │   └── lib/
+│       ├── sse.ts                      # Shared SSE reader over fetch
 │       ├── math-markdown.ts            # Math normalization, sanitize, render
 │       ├── attachments.ts              # File -> JPEG data URL conversion
+│       ├── lecture-notes.ts            # Reference payload from notes files
 │       ├── pdf-to-images.ts            # pdf.js rasterization (dynamic import)
 │       └── exports.ts                  # Print PDF, .tex download, Overleaf
 ├── wrangler.jsonc          # Worker config (assets, vars, run_worker_first)
@@ -143,6 +149,14 @@ Reports which providers are usable, without exposing any secret value:
 
 The upload form uses this to disable providers whose key is missing.
 
+### `POST /api/interpret/:provider`
+
+Optional pre-pass that reads the question without solving it. Body: `{ mode: "interpret" | "verify", images, notes, interpretations? }`. Returns the same SSE shape with `done → { interpretation }`.
+
+The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
+
+Off by default — it costs three extra model calls and delays the first solution.
+
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `kimi` | `minimax`)
 
 Request JSON:
@@ -151,7 +165,10 @@ Request JSON:
 {
   "images": ["data:image/jpeg;base64,..."],
   "notes": "optional user instructions",
-  "effort": "none | low | medium | high | max"
+  "effort": "none | low | medium | high | max",
+  "interpretation": "optional confirmed problem statement",
+  "referenceText": "optional lecture-notes text",
+  "referenceImages": ["optional lecture-notes pages"]
 }
 ```
 

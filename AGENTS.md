@@ -33,6 +33,9 @@ Never retry after a `delta` has reached the client, and never retry the safety-t
 
 The repo previously carried a second, unused backend from the original Bun/Zo deployment (`server.ts`, `backend-lib/`, root `index.tsx`, `zosite.json`). It was outside both tsconfig `include` globs, so `npm run check` never covered it. It has been removed — recover it from git history if you need to consult the old provider logic. Everything that ships now lives in `worker/`, `shared/`, and `src/`, and all three are typechecked.
 
+- **The interpretation pass is opt-in.** `/api/interpret` costs three extra model calls before the first solution appears, so it stays off unless the user ticks it. Do not make it the default.
+- **`worker/run.ts` is task-agnostic.** Solve and interpret differ only in prompt, schema, and `finalize`. Add new model-calling features as another `Task`, not another orchestrator.
+
 ## Provider gotchas found by testing
 
 These were all discovered by running real requests, not from vendor docs. Re-verify before changing a model id or a route flag.

@@ -1,14 +1,13 @@
-// Solve orchestration: one provider, one SSE response.
+// Task orchestration: one provider, one SSE response.
 //
 // Dialect-specific concerns (endpoints, request shape, stream parsing) live in
 // worker/channels.ts. This module only owns the parts that are the same for
-// every channel: immediate SSE headers, heartbeats, the safety timeout, the
-// retry/downgrade policy, and translation into the app-level SSE protocol.
+// every channel and every task: immediate SSE headers, heartbeats, the safety
+// timeout, the retry/downgrade policy, and translation into the app-level SSE
+// protocol. Both /api/solve and /api/interpret run through it.
 
 import type { EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
-import { finalizeProviderArtifact } from "../shared/solution";
-import type { SolveEvent } from "../shared/stream-protocol";
 import {
   buildRequest,
   extractCompleted,
@@ -23,6 +22,7 @@ import {
   type Capabilities,
   type Dialect,
   type Route,
+  type Task,
   type WorkerEnv,
 } from "./channels";
 
@@ -37,7 +37,7 @@ const MAX_BLIND_DOWNGRADES = 1;
 
 const encoder = new TextEncoder();
 
-function encodeEvent(event: SolveEvent) {
+function encodeEvent(event: TaskEvent) {
   const { type, ...payload } = event;
   return encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
@@ -155,19 +155,29 @@ function describeDrop(caps: Capabilities, drop: DropTarget) {
 // Solve
 // ---------------------------------------------------------------------------
 
+export type RunTaskParams = {
+  provider: ProviderKey;
+  env: WorkerEnv;
+  effort: EffortKey;
+  task: Task;
+  /**
+   * Turns the raw model text into the payload of the `done` event, e.g.
+   * `{ solution }` or `{ interpretation }`. Throws on unusable output.
+   */
+  finalize: (rawText: string) => Record<string, unknown>;
+};
+
+type TaskEvent = { type: string } & Record<string, unknown>;
+
 /**
- * Runs the full solve for one provider, writing app-level SSE events to
- * `writer`. Closes the writer when finished (success or error).
+ * Runs one provider task, writing app-level SSE events to `writer`.
+ * Closes the writer when finished (success or error).
  */
-export async function runSolve(
+export async function runTask(
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  provider: ProviderKey,
-  images: string[],
-  notes: string,
-  effort: EffortKey,
-  env: WorkerEnv,
+  { provider, env, effort, task, finalize }: RunTaskParams,
 ) {
-  const write = async (event: SolveEvent) => {
+  const write = async (event: TaskEvent) => {
     await writer.write(encodeEvent(event));
   };
 
@@ -206,7 +216,7 @@ export async function runSolve(
     let rawText = "";
 
     for (let step = 0; step < maxSteps; step += 1) {
-      const request = buildRequest(route, caps, images, notes, effort, streamUpstream);
+      const request = buildRequest(route, caps, task, effort, streamUpstream);
       let deltaEmitted = false;
 
       try {
@@ -256,8 +266,7 @@ export async function runSolve(
       throw new Error(`${route.label} returned an empty response.`);
     }
 
-    const solution = finalizeProviderArtifact(provider, rawText);
-    await write({ type: "done", solution });
+    await write({ type: "done", ...finalize(rawText) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {

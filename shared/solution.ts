@@ -58,7 +58,7 @@ export function sanitizeText(value: string) {
 // Structured solution parsing (raw model text -> StructuredSolution)
 // ---------------------------------------------------------------------------
 
-function normalizeJsonCandidate(rawText: string) {
+export function normalizeJsonCandidate(rawText: string) {
   const trimmed = sanitizeText(rawText);
   if (!trimmed) return trimmed;
 
