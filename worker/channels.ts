@@ -170,7 +170,9 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "gemini",
       keyVar: "GOOGLE_API_KEY",
       modelVar: "GOOGLE_GEMINI_MODEL",
-      defaultModel: "gemini-3.1-pro",
+      // Real ids come from GET /v1beta/models. The Pro tier is preview-suffixed;
+      // "gemini-3.1-pro" does not resolve.
+      defaultModel: "gemini-3.1-pro-preview",
       urlVar: "GOOGLE_BASE_URL",
       defaultUrl: "https://generativelanguage.googleapis.com/v1beta",
       effort: GEMINI_BUDGET,
