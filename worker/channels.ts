@@ -771,6 +771,34 @@ export function buildRequest(
 // Response parsing
 // ---------------------------------------------------------------------------
 
+/**
+ * True for a raw SSE payload that can be dropped without parsing: a frame
+ * that can only ever carry the model's reasoning, never answer text, never
+ * completion, never an error. On a thinking model these outnumber the answer
+ * frames several to one, and JSON.parse on each is CPU the Worker is short of.
+ *
+ * Substring tests only. Anything ambiguous falls through to the full parse.
+ */
+export function isReasoningOnlyFrame(dialect: Dialect, data: string): boolean {
+  if (dialect === "responses") {
+    return /"type"\s*:\s*"response\.reasoning/.test(data);
+  }
+  if (dialect === "anthropic") {
+    return /"type"\s*:\s*"(?:thinking_delta|signature_delta)"/.test(data);
+  }
+  if (dialect === "chat-completions") {
+    // {"delta":{"reasoning_content":"..."}} - but never a frame that also has
+    // answer content, an error object, or MiniMax's in-body status.
+    return (
+      data.includes('"reasoning_content"') &&
+      !/"content"\s*:\s*"/.test(data) &&
+      !data.includes('"error"') &&
+      !data.includes('"base_resp"')
+    );
+  }
+  return false;
+}
+
 /** SSE payload that ends the stream, if the dialect uses one. */
 export function streamTerminator(dialect: Dialect) {
   return dialect === "gemini" || dialect === "anthropic" ? null : "[DONE]";

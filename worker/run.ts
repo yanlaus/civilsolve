@@ -15,6 +15,7 @@ import {
   extractFinalText,
   extractPayloadError,
   extractStructuredDelta,
+  isReasoningOnlyFrame,
   resolveRoute,
   streamTerminator,
   supportsEffort,
@@ -34,6 +35,14 @@ const MAX_TRANSIENT_RETRIES = 1;
 const RETRY_DELAY_MS = 3_000;
 /** Unrecognised 400s that we speculatively treat as a rejected parameter. */
 const MAX_BLIND_DOWNGRADES = 1;
+
+// Client deltas are coalesced. The browser only counts characters for a
+// progress indicator, so one write per token buys nothing and each write
+// costs a JSON.stringify, an encode, and a trip through the TransformStream.
+// On a thinking model that is thousands of writes per solve - the single
+// largest CPU cost in the Worker, and the free plan kills the isolate for it.
+const DELTA_FLUSH_CHARS = 2048;
+const DELTA_FLUSH_MS = 400;
 
 const encoder = new TextEncoder();
 
@@ -225,18 +234,35 @@ export async function runTask(
 
     for (let step = 0; step < maxSteps; step += 1) {
       const request = buildRequest(route, caps, task, effort, streamUpstream);
+      // Set only when a flush actually reached the client: until then a
+      // failed attempt can still be retried without the user seeing a restart.
       let deltaEmitted = false;
+      let pending = "";
+      let lastFlush = Date.now();
+
+      const flushDeltas = async () => {
+        if (!pending) return;
+        const text = pending;
+        pending = "";
+        lastFlush = Date.now();
+        deltaEmitted = true;
+        await write({ type: "delta", text });
+      };
 
       try {
         rawText = streamUpstream
           ? await fetchStreamed(route.dialect, route.label, request, abort.signal, async (delta) => {
-              deltaEmitted = true;
-              await write({ type: "delta", text: delta });
+              pending += delta;
+              if (pending.length >= DELTA_FLUSH_CHARS || Date.now() - lastFlush >= DELTA_FLUSH_MS) {
+                await flushDeltas();
+              }
             })
           : await fetchNonStreamed(route.dialect, route.label, request, abort.signal);
+        await flushDeltas();
         lastError = null;
         break;
       } catch (error) {
+        pending = "";
         lastError = toError(error);
 
         // Never retry once partial output reached the client, and never
@@ -395,6 +421,7 @@ async function fetchStreamed(
 
   for await (const data of readSseData(response.body)) {
     if (terminator && data === terminator) break;
+    if (isReasoningOnlyFrame(dialect, data)) continue;
 
     let event: Record<string, unknown>;
     try {
@@ -463,16 +490,19 @@ async function* readSseData(body: ReadableStream<Uint8Array>) {
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
-        buffer = buffer.slice(newlineIndex + 1);
+      // One split per network chunk, keeping the unterminated tail. Cheaper
+      // than an indexOf/slice pair per line, which re-flattens the buffer.
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const rawLine of lines) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
 
         if (line === "") {
           const payload = flush();
           if (payload !== null) yield payload;
         } else if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).replace(/^ /, ""));
+          dataLines.push(line.charCodeAt(5) === 32 ? line.slice(6) : line.slice(5));
         }
         // Other fields (event:, id:, retry:) and `:` comments are ignored.
       }
