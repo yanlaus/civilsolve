@@ -28,7 +28,8 @@
     // key can see with:
     //   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
     // OpenCode Go ids come from GET https://opencode.ai/zen/go/v1/models.
-    // gpt-5.6-luna always runs at max thinking (see forceEffort in channels.ts).
+    // gpt-5.6-luna runs at "high" or "max" only; lower picks are raised to
+    // "high" (see minEffort in channels.ts).
     "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
     // k2.7-code over k3 on cost. It misreads diagrams at effort "low", so the
     // route floors it at "medium" (minEffort in channels.ts).

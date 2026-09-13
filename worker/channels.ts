@@ -180,9 +180,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       modelVar: "OPENCODE_CHATGPT_MODEL",
       defaultModel: "gpt-5.6-luna",
       effort: OPENAI_EFFORT,
-      // "Luna Max": this configuration always thinks at the top level, whatever
-      // the user picked. The label in the UI says so.
-      forceEffort: "max",
+      // Luna is offered at "high" or "max" only: the user's pick is honoured
+      // at those two levels and anything lower is raised to "high". "max" maps
+      // to reasoning.effort "xhigh", which the gateway accepts.
+      minEffort: "high",
     },
     poe: {
       ...POE_SPEC,

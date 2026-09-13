@@ -4,7 +4,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 
 | Provider | Default channel | Default model | On by default |
 |---|---|---|---|
-| ChatGPT | OpenCode Go | `gpt-5.6-luna`, always at max thinking | yes |
+| ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | yes |
 | Claude | Poe | `claude-opus-4.8` | yes |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | yes |
 | Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | yes |
@@ -61,7 +61,7 @@ Channels speak four different API dialects, all handled in `worker/channels.ts`:
 
 One key and one base URL (`https://opencode.ai/zen/go/v1`) front three protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. ChatGPT pins: `gpt-5.6-luna` always runs at `max` regardless of the level the user picked (that maps to `reasoning.effort: "xhigh"`, which the gateway accepts). Kimi floors: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium` for that route only. The upload form labels both.
+A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. Two routes use a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. Kimi: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium`. The upload form labels both.
 
 #### Getting structured output out of each dialect
 
@@ -233,7 +233,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
 | `KIMI_CHANNEL` | `opencode` | `opencode`, `kimi`, or `moonshot` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `QWEN_CHANNEL` | `opencode` | Only OpenCode Go serves these |
-| `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Always max thinking |
+| `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_KIMI_MODEL` | `kimi-k2.7-code` | Floored at medium effort; `kimi-k3` reads correctly at low but costs more |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
