@@ -36,6 +36,17 @@ The repo previously carried a second, unused backend from the original Bun/Zo de
 - **The interpretation pass is opt-in.** `/api/interpret` costs three extra model calls before the first solution appears, so it stays off unless the user ticks it. Do not make it the default.
 - **`worker/run.ts` is task-agnostic.** Solve and interpret differ only in prompt, schema, and `finalize`. Add new model-calling features as another `Task`, not another orchestrator.
 
+## CPU on the Workers free plan
+
+Measured with `wrangler tail` (`cpuTime` per request), September 2026. Re-measure before drawing new conclusions; do not reason from Node timings, which are 40-100x lower than workerd's for the same stream.
+
+- **Cost is per upstream chunk read, in the runtime, not in our JS.** A thinking model on OpenCode Go sends one HTTP chunk per token; workerd hands them over at ~57 bytes per `read()` and charges roughly 70 us each. One 47 s Kimi solve is ~7,400 reads. That is why CPU tracks streaming *duration* (~8-30 ms per second) and why cutting client writes 26x (1113 -> 43) and skipping JSON.parse on reasoning frames left CPU unchanged (410-1378 ms before, 531 ms after, same fixture).
+- **Reads cannot be coalesced from JS.** A BYOB reader with a 64 KB buffer plus a 100 ms pause before each read still averaged 57 B/read; workerd does not queue between reads. That experiment was measured and discarded - do not repeat it.
+- **Non-streamed upstream is not an escape.** Both api.kimi.com and opencode.ai close a request that produces no bytes for ~100-120 s, which a thinking model exceeds. `NO_STREAM` only suits fast models.
+- **Where the CPU goes, per provider, one easy solve:** Poe routes 22-48 ms (Poe buffers upstream, few chunks); OpenCode Go routes 330-500 ms (per-token). A default five-provider solve is ~900 ms total.
+- **The free plan's limit behaves like a refilling budget, not a fixed 10 ms.** Rested single requests of 1378 ms passed; a 192 ms request right after several heavy ones was killed (`outcome=exceededCpu`). A kill is hard: no `error` event is written, the client sees the stream end and shows "ended unexpectedly, please try again". Rapid-fire testing drains the budget far faster than real use does - space test runs out by minutes.
+- **What this means for users:** one solve at a time, minutes apart, works (5/5 providers after a rest). Back-to-back solves, the interpretation pass (three extra calls) plus five providers, or several users at once will get some tabs killed. Workers Paid removes the limit; the owner has declined it. The remaining levers are all product choices: fewer default providers, lower thinking on the OpenCode routes, or accepting retries.
+
 ## Provider gotchas found by testing
 
 - **OpenCode Go needs `x-opencode-session` on every request.** Without it the gateway returns `MissingSessionID` even though `GET /models` works, so a valid key can look broken. The Worker sends a UUID per solve.
