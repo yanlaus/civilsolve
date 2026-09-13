@@ -175,7 +175,7 @@ type TaskEvent = { type: string } & Record<string, unknown>;
  */
 export async function runTask(
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  { provider, env, effort, task, finalize }: RunTaskParams,
+  { provider, env, effort: requestedEffort, task, finalize }: RunTaskParams,
 ) {
   const write = async (event: TaskEvent) => {
     await writer.write(encodeEvent(event));
@@ -188,6 +188,8 @@ export async function runTask(
   }, HEARTBEAT_INTERVAL_MS);
 
   const route = resolveRoute(provider, env);
+  // A route may pin its reasoning level (a deliberately "always max" model).
+  const effort = route.forceEffort ?? requestedEffort;
 
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {

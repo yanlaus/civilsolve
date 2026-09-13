@@ -15,6 +15,7 @@ import type { InterpretConfig } from "@/hooks/use-interpret";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
+  DEFAULT_SELECTED,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type HealthResponse,
@@ -86,7 +87,7 @@ export function UploadForm({
   const [verifier, setVerifier] = useState<ProviderKey>("claude");
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
-    ...PROVIDER_KEYS,
+    ...DEFAULT_SELECTED,
   ]);
   const [providerStatus, setProviderStatus] =
     useState<Record<ProviderKey, ProviderStatus> | null>(null);
@@ -431,14 +432,16 @@ export function UploadForm({
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Providers
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
             const checked = selectedProviders.includes(provider.key) && available;
             const note = status
               ? status.configured
-                ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}`
+                ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
+                    status.forcedEffort ? ` - always ${status.forcedEffort} thinking` : ""
+                  }`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
             return (

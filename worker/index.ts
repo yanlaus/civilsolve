@@ -174,8 +174,9 @@ app.post("/api/solve/:provider", async (c) => {
     env: c.env,
     effort,
     task: {
-      prompt: ({ enforceShape }) =>
-        buildTutorPrompt(notes, effort, {
+      session: crypto.randomUUID(),
+      prompt: ({ enforceShape, effort: effective }) =>
+        buildTutorPrompt(notes, effective, {
           enforceShape,
           interpretation: interpretation || undefined,
           referenceText: referenceText || undefined,
@@ -230,6 +231,7 @@ app.post("/api/interpret/:provider", async (c) => {
     // budget keeps the extra round trips cheap regardless of the solve level.
     effort: "low",
     task: {
+      session: crypto.randomUUID(),
       prompt: buildPrompt,
       instructions: INTERPRET_INSTRUCTIONS,
       schemaName: "civil_interpretation",
