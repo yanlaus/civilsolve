@@ -45,7 +45,14 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
  * Ticked by default in the upload form. Every selected provider is one more
  * upload and one more model call per solve, so the additions are opt-in.
  */
-export const DEFAULT_SELECTED: ProviderKey[] = ["chatgpt", "claude", "gemini", "kimi", "minimax"];
+export const DEFAULT_SELECTED: ProviderKey[] = ["chatgpt", "kimi", "minimax", "deepseek"];
+
+/**
+ * Default readers and judge for the optional interpretation pass. Two
+ * different readers so they can disagree; the judge is a third model.
+ */
+export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "deepseek"];
+export const DEFAULT_VERIFIER: ProviderKey = "kimi";
 
 export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
 

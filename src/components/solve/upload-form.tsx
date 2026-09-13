@@ -15,7 +15,9 @@ import type { InterpretConfig } from "@/hooks/use-interpret";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
+  DEFAULT_INTERPRETERS,
   DEFAULT_SELECTED,
+  DEFAULT_VERIFIER,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type HealthResponse,
@@ -82,9 +84,9 @@ export function UploadForm({
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
   const [verifyEnabled, setVerifyEnabled] = useState(false);
-  const [interpreterA, setInterpreterA] = useState<ProviderKey>("chatgpt");
-  const [interpreterB, setInterpreterB] = useState<ProviderKey>("gemini");
-  const [verifier, setVerifier] = useState<ProviderKey>("claude");
+  const [interpreterA, setInterpreterA] = useState<ProviderKey>(DEFAULT_INTERPRETERS[0]);
+  const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
+  const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
     ...DEFAULT_SELECTED,
