@@ -6,7 +6,7 @@
 // timeout, the retry/downgrade policy, and translation into the app-level SSE
 // protocol. Both /api/solve and /api/interpret run through it.
 
-import type { EffortKey } from "../shared/prompt";
+import { EFFORT_KEYS, type EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
 import {
   buildRequest,
@@ -48,6 +48,11 @@ function encodeHeartbeat() {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function raiseToFloor(requested: EffortKey, floor: EffortKey | undefined): EffortKey {
+  if (!floor) return requested;
+  return EFFORT_KEYS.indexOf(requested) < EFFORT_KEYS.indexOf(floor) ? floor : requested;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +180,7 @@ type TaskEvent = { type: string } & Record<string, unknown>;
  */
 export async function runTask(
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  { provider, env, effort, task, finalize }: RunTaskParams,
+  { provider, env, effort: requestedEffort, task, finalize }: RunTaskParams,
 ) {
   const write = async (event: TaskEvent) => {
     await writer.write(encodeEvent(event));
@@ -188,6 +193,9 @@ export async function runTask(
   }, HEARTBEAT_INTERVAL_MS);
 
   const route = resolveRoute(provider, env);
+  // A route may pin its reasoning level (a deliberately "always max" model)
+  // or set a floor under the user's choice.
+  const effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
 
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {

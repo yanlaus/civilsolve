@@ -1,14 +1,19 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level, and receive worked solutions from up to five models in parallel:
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level, and receive worked solutions from up to eight models in parallel:
 
-| Provider | Default channel | Default model |
-|---|---|---|
-| ChatGPT | Poe | `gpt-5.4` |
-| Claude | Poe | `claude-opus-4.8` |
-| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` |
-| Kimi | Kimi Code token plan | `kimi-for-coding` |
-| MiniMax | MiniMax (mainland) | `MiniMax-M3` |
+| Provider | Default channel | Default model | On by default |
+|---|---|---|---|
+| ChatGPT | OpenCode Go | `gpt-5.6-luna`, always at max thinking | yes |
+| Claude | Poe | `claude-opus-4.8` | yes |
+| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | yes |
+| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | yes |
+| MiniMax | MiniMax (mainland) | `MiniMax-M3` | yes |
+| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | no |
+| Grok | OpenCode Go | `grok-4.6` | no |
+| Qwen | OpenCode Go | `qwen3.8-max` | no |
+
+Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. The three additions are opt-in because each selected provider is one more upload and one more model call per solve.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -33,21 +38,30 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 A **provider** is what the user picks in the UI. A **channel** is the upstream account the key comes from. One provider can be reachable over several channels, and the channel is resolved from env per request:
 
 ```
-chatgpt ──> poe
-claude  ──> poe
-gemini  ──> poe | google        (GEMINI_CHANNEL)
-kimi    ──> kimi | moonshot     (KIMI_CHANNEL)
-minimax ──> minimax
+chatgpt  ──> opencode | poe              (CHATGPT_CHANNEL)
+claude   ──> poe
+gemini   ──> poe | google                (GEMINI_CHANNEL)
+kimi     ──> opencode | kimi | moonshot  (KIMI_CHANNEL)
+minimax  ──> minimax
+deepseek ──> opencode
+grok     ──> opencode
+qwen     ──> opencode
 ```
 
 Channels speak four different API dialects, all handled in `worker/channels.ts`:
 
 | Dialect | Used by | Endpoint shape | Reasoning parameter |
 |---|---|---|---|
-| `responses` | Poe | `POST /v1/responses` | `reasoning: { effort }` (enum) |
-| `chat-completions` | Moonshot | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
+| `responses` | Poe; OpenCode Go (GPT Luna, Grok) | `POST /v1/responses` | `reasoning: { effort }` (enum) |
+| `chat-completions` | OpenCode Go (Kimi, DeepSeek, Qwen); Moonshot | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
 | `anthropic` | Kimi Code, MiniMax | `POST /v1/messages` | `thinking: { budget_tokens }` (tokens) |
 | `gemini` | Google | `:streamGenerateContent?alt=sse` | `generationConfig.thinkingConfig.thinkingBudget` (tokens) |
+
+#### OpenCode Go
+
+One key and one base URL (`https://opencode.ai/zen/go/v1`) front three protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
+
+A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. ChatGPT pins: `gpt-5.6-luna` always runs at `max` regardless of the level the user picked (that maps to `reasoning.effort: "xhigh"`, which the gateway accepts). Kimi floors: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium` for that route only. The upload form labels both.
 
 #### Getting structured output out of each dialect
 
@@ -196,7 +210,8 @@ Set the `NO_STREAM` var (e.g. `"kimi"`) to make those providers use a non-stream
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `POE_API_KEY` | ChatGPT, Claude, Gemini (Poe channel) | <https://poe.com/api_key> |
+| `OPENCODE_API_KEY` | ChatGPT, Kimi, DeepSeek, Grok, Qwen | <https://opencode.ai/go> |
+| `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `KIMI_API_KEY` | Kimi | Kimi Code Console, <https://www.kimi.com/code> |
 | `MOONSHOT_API_KEY` | Kimi, only when `KIMI_CHANNEL=moonshot` | <https://platform.moonshot.cn> (mainland) |
 | `MINIMAX_API_KEY` | MiniMax | <https://platform.minimaxi.com> (mainland) |
@@ -213,10 +228,17 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CHATGPT_CHANNEL` | `poe` | Channel for ChatGPT |
+| `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
-| `KIMI_CHANNEL` | `kimi` | `kimi` or `moonshot` |
+| `KIMI_CHANNEL` | `opencode` | `opencode`, `kimi`, or `moonshot` |
+| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `QWEN_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Always max thinking |
+| `OPENCODE_KIMI_MODEL` | `kimi-k2.7-code` | Floored at medium effort; `kimi-k3` reads correctly at low but costs more |
+| `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
+| `OPENCODE_GROK_MODEL` | `grok-4.6` | |
+| `OPENCODE_QWEN_MODEL` | `qwen3.8-max` | `qwen3.7-max` is text-only |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Endpoint override |
 | `MINIMAX_CHANNEL` | `minimax` | Channel for MiniMax |
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |

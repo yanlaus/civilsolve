@@ -1,11 +1,19 @@
 // Provider + channel registry. Pure data shared by the Worker and the client.
 //
 // A "provider" is what the user picks in the UI (ChatGPT, Claude, ...).
-// A "channel" is the upstream account/API the key comes from (Poe, Moonshot,
-// MiniMax, Google). One provider can be reachable over several channels; the
-// Worker resolves which one to use from env (see worker/channels.ts).
+// A "channel" is the upstream account/API the key comes from (Poe, OpenCode
+// Go, Kimi Code, ...). One provider can be reachable over several channels;
+// the Worker resolves which one to use from env (see worker/channels.ts).
 
-export type ProviderKey = "chatgpt" | "claude" | "gemini" | "kimi" | "minimax";
+export type ProviderKey =
+  | "chatgpt"
+  | "claude"
+  | "gemini"
+  | "kimi"
+  | "minimax"
+  | "deepseek"
+  | "grok"
+  | "qwen";
 
 export const PROVIDER_KEYS: ProviderKey[] = [
   "chatgpt",
@@ -13,6 +21,9 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "gemini",
   "kimi",
   "minimax",
+  "deepseek",
+  "grok",
+  "qwen",
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
@@ -25,11 +36,27 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   gemini: "Gemini",
   kimi: "Kimi",
   minimax: "MiniMax",
+  deepseek: "DeepSeek",
+  grok: "Grok",
+  qwen: "Qwen",
 };
 
-export type ChannelKey = "poe" | "kimi" | "moonshot" | "minimax" | "google";
+/**
+ * Ticked by default in the upload form. Every selected provider is one more
+ * upload and one more model call per solve, so the additions are opt-in.
+ */
+export const DEFAULT_SELECTED: ProviderKey[] = ["chatgpt", "claude", "gemini", "kimi", "minimax"];
 
-export const CHANNEL_KEYS: ChannelKey[] = ["poe", "kimi", "moonshot", "minimax", "google"];
+export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
+
+export const CHANNEL_KEYS: ChannelKey[] = [
+  "poe",
+  "opencode",
+  "kimi",
+  "moonshot",
+  "minimax",
+  "google",
+];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -38,6 +65,7 @@ export function isChannelKey(value: string): value is ChannelKey {
 /** Human-readable name of the account the key comes from. */
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   poe: "Poe",
+  opencode: "OpenCode Go",
   kimi: "Kimi Code",
   moonshot: "Moonshot",
   minimax: "MiniMax",
@@ -49,6 +77,10 @@ export type ProviderStatus = {
   channel: ChannelKey;
   model: string;
   configured: boolean;
+  /** Present when the route pins its reasoning level regardless of the user's choice. */
+  forcedEffort?: string;
+  /** Present when the route raises low choices to a floor. */
+  minEffort?: string;
 };
 
 export type HealthResponse = {

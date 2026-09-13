@@ -13,11 +13,17 @@
 
 # --- Keys: one per upstream account ----------------------------------------
 
-# Poe (https://poe.com/api_key) - serves ChatGPT, Claude, and Gemini by default.
+# OpenCode Go (https://opencode.ai/go) - serves ChatGPT (GPT 5.6 Luna), Kimi,
+# DeepSeek, Grok, and Qwen by default. One key, three protocols behind it.
+OPENCODE_API_KEY=
+
+# Poe (https://poe.com/api_key) - serves Claude and Gemini by default; can also
+# serve ChatGPT (CHATGPT_CHANNEL=poe).
 POE_API_KEY=
 
-# Kimi Code token plan (https://www.kimi.com/code) - serves Kimi by default.
-# Anthropic-protocol endpoint; the key comes from the Kimi Code Console.
+# Kimi Code token plan (https://www.kimi.com/code) - alternative channel for
+# Kimi (KIMI_CHANNEL=kimi). Works in local dev only: api.kimi.com rejects
+# requests from deployed Workers (see AGENTS.md).
 KIMI_API_KEY=
 
 # Moonshot open platform (https://platform.moonshot.cn) - pay-as-you-go
@@ -37,6 +43,8 @@ GOOGLE_API_KEY=
 # Anything in wrangler.jsonc "vars" can be overridden here for local runs,
 # for example:
 #   GEMINI_CHANNEL=google
+#   OPENCODE_KIMI_MODEL=kimi-k2.7-code
+#   CHATGPT_CHANNEL=poe
 #   POE_CHATGPT_MODEL=gpt-5.4-pro
 #   KIMI_CODE_MODEL=k3-256k
 #   MINIMAX_MODEL=MiniMax-M3[1m]

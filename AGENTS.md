@@ -5,7 +5,7 @@ CivilSolve is a civil engineering assignment solver hosted on a single Cloudflar
 ## Core Invariants
 
 - **Keep API keys server-side only.** Keys live in `.dev.vars` locally and in Wrangler secrets in production. Never expose one to frontend code, and never put one in a URL or query string (Google auth uses the `x-goog-api-key` header for exactly this reason).
-- **Providers and channels are separate concepts.** A provider is a UI choice (`chatgpt`, `claude`, `gemini`, `kimi`, `minimax`); a channel is the upstream account (`poe`, `moonshot`, `minimax`, `google`). Routing lives in `ROUTES` in `worker/channels.ts` — add channels there, not by branching in `worker/solve.ts`.
+- **Providers and channels are separate concepts.** A provider is a UI choice (`chatgpt`, `claude`, `gemini`, `kimi`, `minimax`, `deepseek`, `grok`, `qwen`); a channel is the upstream account (`poe`, `opencode`, `kimi`, `moonshot`, `minimax`, `google`). Routing lives in `ROUTES` in `worker/channels.ts` — add channels there, not by branching in `worker/run.ts`.
 - **Thinking effort is mapped per route, never passed through.** The five UI levels do not exist on every model: OpenAI-style enums take `none`/`xhigh` only on GPT-5.x, Claude has no "off" value, Gemini takes an integer token budget and Pro-tier models cannot disable thinking. A level with no mapping sends nothing.
 - **Only visible output becomes a `delta`.** Reasoning summaries (`response.reasoning_summary_text.delta`, `reasoning_content`, Gemini parts flagged `thought: true`) must never be concatenated into the answer — they corrupt the JSON the parser expects, and they get more frequent at higher effort.
 - **Model output is untrusted.** Uploaded images are user-supplied, so anything in them can steer what a model writes. Anything rendered through `dangerouslySetInnerHTML` must pass DOMPurify first (`src/lib/math-markdown.ts`).
@@ -17,11 +17,11 @@ CivilSolve is a civil engineering assignment solver hosted on a single Cloudflar
 - **Keep katex/marked/dompurify out of the initial bundle.** They are only imported by `src/lib/math-markdown.ts`, which is only reachable through the lazily loaded solution panel. Do not import them (or that module) from eagerly loaded code.
 - **`shared/` is pure string logic** shared by the Worker and the client. No DOM, no Workers APIs, no imports from `src/` or `worker/`.
 - Accepted uploads: JPEG, PNG, WebP, GIF, PDF only. HEIC/TIFF cannot be canvas-decoded in browsers; iOS auto-converts HEIC on the picker.
-- Kimi and MiniMax models **must be vision-capable** — the assignment is sent as images, never as OCR text.
+- Every model **must be vision-capable** — the assignment is sent as images, never as OCR text. Verify with an image before changing any model id; text-only models often answer anyway.
 
 ## Failure handling
 
-`worker/solve.ts` distinguishes three failure modes; keep them distinct:
+`worker/run.ts` distinguishes three failure modes; keep them distinct:
 
 1. **Parameter rejection** (400/422 naming `reasoning`, a schema field, or a generic parameter error) → step down the capability ladder: drop `reasoning`, then relax strict JSON schema to plain JSON mode, then drop the schema. Reported to the client as a `status` event. No sleep, does not consume the retry budget.
 2. **Transient failure** (408/409/429/5xx, or a failure that never reached a response) → one retry after 3s.
@@ -37,6 +37,12 @@ The repo previously carried a second, unused backend from the original Bun/Zo de
 - **`worker/run.ts` is task-agnostic.** Solve and interpret differ only in prompt, schema, and `finalize`. Add new model-calling features as another `Task`, not another orchestrator.
 
 ## Provider gotchas found by testing
+
+- **OpenCode Go needs `x-opencode-session` on every request.** Without it the gateway returns `MissingSessionID` even though `GET /models` works, so a valid key can look broken. The Worker sends a UUID per solve.
+- **OpenCode Go fixes the protocol per model** — Responses for GPT Luna and Grok, chat completions for Kimi/DeepSeek/Qwen, Anthropic messages for MiniMax/Qwen per the docs. Images, though, are only accepted by Qwen on chat completions, and only by 3.8: `qwen3.7-max` rejects image parts on both protocols.
+- **`kimi-k2.7-code` misreads diagrams at effort `low`.** On an overhanging beam with a 4 m partial UDL it read the UDL as 6 m and returned 13.75/36.25 kN instead of 10/30 (127 s). At `medium` it reads the same image correctly (55 s); at `high` too (185 s). It is the default over `kimi-k3` on cost, so its route carries `minEffort: "medium"` — remove that floor and the cheap setting gives confidently wrong reactions again. `kimi-k3` got it right at `low` in 28 s.
+- **`longcat-2.0`, `hy3`, `hy4-preview` cannot see images** (LongCat replies "NO IMAGE"; Hy rejects image parts). `deepseek-v4-pro` and `muse-spark-*` need a workspace opt-in before the key can call them.
+- **`gpt-5.6-luna` accepts `reasoning.effort: "xhigh"`.** The ChatGPT route pins `forceEffort: "max"`, and on the hard fixture it was the fastest of the set at 13.7 s, so max thinking does not cost latency there.
 
 - **Kimi Code is unreachable from deployed Workers.** `api.kimi.com` is itself behind Cloudflare and answers requests originating from Workers' egress with a 403 challenge page ("Attention Required! | Cloudflare"). Measured from Cloudflare's edge, every variation returns the same 403: our headers, a browser User-Agent, no User-Agent, and a bare `GET https://api.kimi.com/` with no credential at all. The same code and key succeed from a laptop, so this is the egress network, not the request. Headers cannot fix it. The workarounds are `KIMI_BASE_URL` pointed at a non-Cloudflare proxy, or `KIMI_CHANNEL=moonshot` with a Moonshot platform key. Kimi still works in local dev.
 

@@ -12,18 +12,31 @@
   // and live in .dev.vars locally - never put a key in this file.
   "vars": {
     // Which upstream account serves each provider.
-    // poe | kimi | moonshot | minimax | google (see worker/channels.ts for
-    // what each provider actually supports).
-    "CHATGPT_CHANNEL": "poe",
+    // poe | opencode | kimi | moonshot | minimax | google (see
+    // worker/channels.ts for what each provider actually supports).
+    "CHATGPT_CHANNEL": "opencode",
     "CLAUDE_CHANNEL": "poe",
     "GEMINI_CHANNEL": "poe",
-    "KIMI_CHANNEL": "kimi",
+    "KIMI_CHANNEL": "opencode",
     "MINIMAX_CHANNEL": "minimax",
+    "DEEPSEEK_CHANNEL": "opencode",
+    "GROK_CHANNEL": "opencode",
+    "QWEN_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the
     // assignment is sent as images, never as OCR text. List the Poe bots your
     // key can see with:
     //   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
+    // OpenCode Go ids come from GET https://opencode.ai/zen/go/v1/models.
+    // gpt-5.6-luna always runs at max thinking (see forceEffort in channels.ts).
+    "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
+    // k2.7-code over k3 on cost. It misreads diagrams at effort "low", so the
+    // route floors it at "medium" (minEffort in channels.ts).
+    "OPENCODE_KIMI_MODEL": "kimi-k2.7-code",
+    "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4-flash-vision-exp",
+    "OPENCODE_GROK_MODEL": "grok-4.6",
+    // qwen3.7-max is text-only; 3.8 reads images.
+    "OPENCODE_QWEN_MODEL": "qwen3.8-max",
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
@@ -36,6 +49,7 @@
 
     // Endpoint overrides, for switching between mainland and global hosts.
     // Defaults are the mainland hosts for Moonshot and MiniMax:
+    //   "OPENCODE_BASE_URL": "https://opencode.ai/zen/go/v1",
     //   "KIMI_BASE_URL": "https://api.kimi.com/coding",
     //   "MOONSHOT_BASE_URL": "https://api.moonshot.cn/v1/chat/completions",
     //   "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",

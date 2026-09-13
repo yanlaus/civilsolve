@@ -25,6 +25,7 @@ export type Dialect = "responses" | "chat-completions" | "gemini" | "anthropic";
 export type WorkerEnv = {
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
+  OPENCODE_API_KEY?: string;
   KIMI_API_KEY?: string;
   MOONSHOT_API_KEY?: string;
   MINIMAX_API_KEY?: string;
@@ -36,11 +37,19 @@ export type WorkerEnv = {
   GEMINI_CHANNEL?: string;
   KIMI_CHANNEL?: string;
   MINIMAX_CHANNEL?: string;
+  DEEPSEEK_CHANNEL?: string;
+  GROK_CHANNEL?: string;
+  QWEN_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   POE_CHATGPT_MODEL?: string;
   POE_CLAUDE_MODEL?: string;
   POE_GEMINI_MODEL?: string;
+  OPENCODE_CHATGPT_MODEL?: string;
+  OPENCODE_KIMI_MODEL?: string;
+  OPENCODE_DEEPSEEK_MODEL?: string;
+  OPENCODE_GROK_MODEL?: string;
+  OPENCODE_QWEN_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   KIMI_CODE_MODEL?: string;
   MOONSHOT_KIMI_MODEL?: string;
@@ -48,6 +57,7 @@ export type WorkerEnv = {
 
   // --- Endpoint overrides (mainland vs global hosts, proxies) ------------
   POE_BASE_URL?: string;
+  OPENCODE_BASE_URL?: string;
   KIMI_BASE_URL?: string;
   MOONSHOT_BASE_URL?: string;
   MINIMAX_BASE_URL?: string;
@@ -117,7 +127,20 @@ type RouteSpec = {
   defaultModel: string;
   urlVar: keyof WorkerEnv;
   defaultUrl: string;
+  /** Appended to the (possibly overridden) URL, for channels sharing one base. */
+  pathSuffix?: string;
   effort: EffortSpec;
+  /**
+   * Pins the reasoning level regardless of what the user picked. Used for a
+   * deliberately "always max" configuration of a model.
+   */
+  forceEffort?: EffortKey;
+  /**
+   * Floor on the reasoning level. For a model that is fine above a certain
+   * effort but misreads diagrams below it, this keeps the cheap setting from
+   * producing a confidently wrong answer.
+   */
+  minEffort?: EffortKey;
   /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
@@ -139,8 +162,28 @@ const POE_SPEC = {
   defaultUrl: "https://api.poe.com/v1/responses",
 };
 
+// OpenCode Go: one key, one base URL, three protocols. Which protocol a model
+// speaks is fixed by the gateway (https://opencode.ai/docs/go/), so each route
+// names its dialect and the path suffix; only the base is env-overridable.
+const OPENCODE_SPEC = {
+  keyVar: "OPENCODE_API_KEY" as const,
+  urlVar: "OPENCODE_BASE_URL" as const,
+  defaultUrl: "https://opencode.ai/zen/go/v1",
+};
+
 const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
   chatgpt: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "responses",
+      pathSuffix: "/responses",
+      modelVar: "OPENCODE_CHATGPT_MODEL",
+      defaultModel: "gpt-5.6-luna",
+      effort: OPENAI_EFFORT,
+      // "Luna Max": this configuration always thinks at the top level, whatever
+      // the user picked. The label in the UI says so.
+      forceEffort: "max",
+    },
     poe: {
       ...POE_SPEC,
       modelVar: "POE_CHATGPT_MODEL",
@@ -179,7 +222,21 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     },
   },
   kimi: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_KIMI_MODEL",
+      // k2.7-code over k3 on cost. At effort "low" it misread a 4 m UDL as 6 m
+      // on the overhanging-beam fixture (13.75/36.25 for 10/30); at "medium"
+      // and above it reads the same diagram correctly (55 s / 185 s), hence
+      // the floor. kimi-k3 got it right at "low" in 28 s but costs more.
+      defaultModel: "kimi-k2.7-code",
+      effort: CLAMPED_EFFORT,
+      minEffort: "medium",
+    },
     // Kimi Code subscription ("token plan"), Anthropic-protocol endpoint.
+    // Unreachable from deployed Workers (see AGENTS.md); works in local dev.
     kimi: {
       dialect: "anthropic",
       keyVar: "KIMI_API_KEY",
@@ -208,6 +265,40 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       effort: CLAMPED_EFFORT,
     },
   },
+  deepseek: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_DEEPSEEK_MODEL",
+      // The one model OpenCode Go documents as vision-capable.
+      defaultModel: "deepseek-v4-flash-vision-exp",
+      effort: CLAMPED_EFFORT,
+    },
+  },
+  grok: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "responses",
+      pathSuffix: "/responses",
+      modelVar: "OPENCODE_GROK_MODEL",
+      defaultModel: "grok-4.6",
+      effort: CLAMPED_EFFORT,
+    },
+  },
+  qwen: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      // The docs put Qwen on /messages, but images are only accepted on
+      // /chat/completions - and only by 3.8: qwen3.7-max rejects image parts
+      // on both protocols.
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_QWEN_MODEL",
+      defaultModel: "qwen3.8-max",
+      effort: CLAMPED_EFFORT,
+    },
+  },
   minimax: {
     minimax: {
       dialect: "anthropic",
@@ -226,11 +317,14 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
 };
 
 const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
-  chatgpt: "poe",
+  chatgpt: "opencode",
   claude: "poe",
   gemini: "poe",
-  kimi: "kimi",
+  kimi: "opencode",
   minimax: "minimax",
+  deepseek: "opencode",
+  grok: "opencode",
+  qwen: "opencode",
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
@@ -239,6 +333,9 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   gemini: "GEMINI_CHANNEL",
   kimi: "KIMI_CHANNEL",
   minimax: "MINIMAX_CHANNEL",
+  deepseek: "DEEPSEEK_CHANNEL",
+  grok: "GROK_CHANNEL",
+  qwen: "QWEN_CHANNEL",
 };
 
 export type Route = {
@@ -249,6 +346,10 @@ export type Route = {
   endpoint: string;
   apiKey: string;
   effort: EffortSpec;
+  /** Pinned reasoning level, overriding the user's choice. */
+  forceEffort?: EffortKey;
+  /** Floor on the reasoning level. */
+  minEffort?: EffortKey;
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -309,9 +410,12 @@ export function resolveRoute(provider: ProviderKey, env: WorkerEnv): Route {
     channel,
     dialect: spec.dialect,
     model: readVar(env, spec.modelVar) || spec.defaultModel,
-    endpoint: readVar(env, spec.urlVar) || spec.defaultUrl,
+    endpoint:
+      (readVar(env, spec.urlVar) || spec.defaultUrl).replace(/\/$/, "") + (spec.pathSuffix || ""),
     apiKey,
     effort: spec.effort,
+    forceEffort: spec.forceEffort,
+    minEffort: spec.minEffort,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
@@ -328,6 +432,8 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     channel: route.channel,
     model: route.model,
     configured: route.configured && !route.problem,
+    ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
+    ...(route.minEffort ? { minEffort: route.minEffort } : {}),
   };
 }
 
@@ -378,13 +484,18 @@ export type UpstreamRequest = {
  * itself decides whether the prompt must spell the shape out.
  */
 export type Task = {
-  prompt: (options: { enforceShape: boolean }) => string;
+  prompt: (options: { enforceShape: boolean; effort: EffortKey }) => string;
   instructions: string;
   schemaName: string;
   schema: Record<string, unknown>;
   images: string[];
   /** Reference material appended after the images, introduced by a marker. */
   referenceImages?: string[];
+  /**
+   * Stable id for this conversation. OpenCode Go requires it in
+   * x-opencode-session and refuses requests without one.
+   */
+  session: string;
 };
 
 /**
@@ -434,6 +545,14 @@ function toAnthropicImage(dataUrl: string) {
 /** Room for the answer itself, on top of any extended-thinking budget. */
 const ANTHROPIC_ANSWER_TOKENS = 8192;
 
+/** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
+function channelHeaders(route: Route, task: Task): Record<string, string> {
+  if (route.channel === "opencode") {
+    return { "x-opencode-session": task.session };
+  }
+  return {};
+}
+
 export function buildRequest(
   route: Route,
   caps: Capabilities,
@@ -446,7 +565,8 @@ export function buildRequest(
   // prompt has to carry the contract instead.
   const schemaEnforced =
     caps.schema === "strict" && (route.dialect !== "anthropic" || route.structured);
-  const prompt = task.prompt({ enforceShape: !schemaEnforced });
+  const prompt = task.prompt({ enforceShape: !schemaEnforced, effort });
+  const extraHeaders = channelHeaders(route, task);
   const { images, instructions, schema, schemaName } = task;
   const referenceImages = task.referenceImages || [];
 
@@ -500,6 +620,7 @@ export function buildRequest(
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
         "User-Agent": UPSTREAM_UA,
+        ...extraHeaders,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(body),
@@ -540,6 +661,7 @@ export function buildRequest(
         "x-goog-api-key": route.apiKey,
         "Content-Type": "application/json",
         "User-Agent": UPSTREAM_UA,
+        ...extraHeaders,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify({
@@ -591,6 +713,7 @@ export function buildRequest(
         Authorization: `Bearer ${route.apiKey}`,
         "Content-Type": "application/json",
         "User-Agent": UPSTREAM_UA,
+        ...extraHeaders,
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify(chatBody),
@@ -637,6 +760,7 @@ export function buildRequest(
       Authorization: `Bearer ${route.apiKey}`,
       "Content-Type": "application/json",
       "User-Agent": UPSTREAM_UA,
+      ...extraHeaders,
       ...(stream ? { Accept: "text/event-stream" } : {}),
     },
     body: JSON.stringify(body),
