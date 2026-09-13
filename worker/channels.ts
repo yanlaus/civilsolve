@@ -136,6 +136,12 @@ type RouteSpec = {
    */
   forceEffort?: EffortKey;
   /**
+   * Floor on the reasoning level. For a model that is fine above a certain
+   * effort but misreads diagrams below it, this keeps the cheap setting from
+   * producing a confidently wrong answer.
+   */
+  minEffort?: EffortKey;
+  /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
    * matters more, so such a channel always uses the non-streamed path.
@@ -221,11 +227,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "chat-completions",
       pathSuffix: "/chat/completions",
       modelVar: "OPENCODE_KIMI_MODEL",
-      // Not kimi-k2.7-code: on an overhanging-beam fixture it read a 4 m UDL as
-      // 6 m and returned wrong reactions (13.75/36.25 for 10/30), taking 127 s.
-      // k3 read the same diagram correctly in 28 s.
-      defaultModel: "kimi-k3",
+      // k2.7-code over k3 on cost. At effort "low" it misread a 4 m UDL as 6 m
+      // on the overhanging-beam fixture (13.75/36.25 for 10/30); at "medium"
+      // and above it reads the same diagram correctly (55 s / 185 s), hence
+      // the floor. kimi-k3 got it right at "low" in 28 s but costs more.
+      defaultModel: "kimi-k2.7-code",
       effort: CLAMPED_EFFORT,
+      minEffort: "medium",
     },
     // Kimi Code subscription ("token plan"), Anthropic-protocol endpoint.
     // Unreachable from deployed Workers (see AGENTS.md); works in local dev.
@@ -340,6 +348,8 @@ export type Route = {
   effort: EffortSpec;
   /** Pinned reasoning level, overriding the user's choice. */
   forceEffort?: EffortKey;
+  /** Floor on the reasoning level. */
+  minEffort?: EffortKey;
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -405,6 +415,7 @@ export function resolveRoute(provider: ProviderKey, env: WorkerEnv): Route {
     apiKey,
     effort: spec.effort,
     forceEffort: spec.forceEffort,
+    minEffort: spec.minEffort,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
@@ -422,6 +433,7 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     model: route.model,
     configured: route.configured && !route.problem,
     ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
+    ...(route.minEffort ? { minEffort: route.minEffort } : {}),
   };
 }
 

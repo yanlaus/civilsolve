@@ -30,8 +30,9 @@
     // OpenCode Go ids come from GET https://opencode.ai/zen/go/v1/models.
     // gpt-5.6-luna always runs at max thinking (see forceEffort in channels.ts).
     "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
-    // Not kimi-k2.7-code: it misread a UDL span and took 127 s in testing.
-    "OPENCODE_KIMI_MODEL": "kimi-k3",
+    // k2.7-code over k3 on cost. It misreads diagrams at effort "low", so the
+    // route floors it at "medium" (minEffort in channels.ts).
+    "OPENCODE_KIMI_MODEL": "kimi-k2.7-code",
     "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4-flash-vision-exp",
     "OPENCODE_GROK_MODEL": "grok-4.6",
     // qwen3.7-max is text-only; 3.8 reads images.

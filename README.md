@@ -7,7 +7,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, always at max thinking | yes |
 | Claude | Poe | `claude-opus-4.8` | yes |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | yes |
-| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k3` | yes |
+| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | yes |
 | MiniMax | MiniMax (mainland) | `MiniMax-M3` | yes |
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | no |
 | Grok | OpenCode Go | `grok-4.6` | no |
@@ -61,7 +61,7 @@ Channels speak four different API dialects, all handled in `worker/channels.ts`:
 
 One key and one base URL (`https://opencode.ai/zen/go/v1`) front three protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`. The ChatGPT route does: `gpt-5.6-luna` always runs at `max` regardless of the level the user picked, and the upload form labels it so. That value maps to `reasoning.effort: "xhigh"`, which the gateway accepts.
+A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. ChatGPT pins: `gpt-5.6-luna` always runs at `max` regardless of the level the user picked (that maps to `reasoning.effort: "xhigh"`, which the gateway accepts). Kimi floors: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium` for that route only. The upload form labels both.
 
 #### Getting structured output out of each dialect
 
@@ -234,7 +234,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `KIMI_CHANNEL` | `opencode` | `opencode`, `kimi`, or `moonshot` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `QWEN_CHANNEL` | `opencode` | Only OpenCode Go serves these |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Always max thinking |
-| `OPENCODE_KIMI_MODEL` | `kimi-k3` | `kimi-k2.7-code` misread a diagram in testing — see below |
+| `OPENCODE_KIMI_MODEL` | `kimi-k2.7-code` | Floored at medium effort; `kimi-k3` reads correctly at low but costs more |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
 | `OPENCODE_QWEN_MODEL` | `qwen3.8-max` | `qwen3.7-max` is text-only |

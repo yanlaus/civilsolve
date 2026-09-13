@@ -79,6 +79,8 @@ export type ProviderStatus = {
   configured: boolean;
   /** Present when the route pins its reasoning level regardless of the user's choice. */
   forcedEffort?: string;
+  /** Present when the route raises low choices to a floor. */
+  minEffort?: string;
 };
 
 export type HealthResponse = {

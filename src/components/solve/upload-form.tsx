@@ -440,7 +440,11 @@ export function UploadForm({
             const note = status
               ? status.configured
                 ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
-                    status.forcedEffort ? ` - always ${status.forcedEffort} thinking` : ""
+                    status.forcedEffort
+                      ? ` - always ${status.forcedEffort} thinking`
+                      : status.minEffort
+                        ? ` - at least ${status.minEffort} thinking`
+                        : ""
                   }`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
