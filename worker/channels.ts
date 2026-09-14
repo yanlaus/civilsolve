@@ -543,8 +543,14 @@ function toAnthropicImage(dataUrl: string) {
   return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
 }
 
-/** Room for the answer itself, on top of any extended-thinking budget. */
+// Room for the answer, on top of the thinking budget. But `thinking.budget_tokens`
+// is only advisory on these gateways: MiniMax M3 blew a 2048 budget out to
+// 10,239 thinking tokens on a hard problem and hit max_tokens (10,240) before
+// writing a single answer character - stop_reason "max_tokens", empty answer.
+// So max_tokens gets a generous floor: thinking may overshoot its budget several
+// times over and there is still room for the answer.
 const ANTHROPIC_ANSWER_TOKENS = 8192;
+const ANTHROPIC_MIN_MAX_TOKENS = 32000;
 
 /** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
 function channelHeaders(route: Route, task: Task): Record<string, string> {
@@ -589,8 +595,9 @@ export function buildRequest(
 
     const body: Record<string, unknown> = {
       model: route.model,
-      // Required by the Messages API, and it must exceed the thinking budget.
-      max_tokens: (budget ?? 0) + ANTHROPIC_ANSWER_TOKENS,
+      // Required by the Messages API, and it must leave room for the answer
+      // after thinking - which can run well past its budget (see above).
+      max_tokens: Math.max((budget ?? 0) + ANTHROPIC_ANSWER_TOKENS, ANTHROPIC_MIN_MAX_TOKENS),
       system: instructions,
       messages: [{ role: "user", content }],
     };
