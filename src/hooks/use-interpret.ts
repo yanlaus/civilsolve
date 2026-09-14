@@ -3,6 +3,7 @@
 // result pauses in "review" for the user to edit/confirm before solving.
 
 import { useCallback, useRef, useState } from "react";
+import type { EffortKey } from "../../shared/prompt";
 import {
   interpretationToText,
   type InterpretationResult,
@@ -21,6 +22,8 @@ export type InterpretConfig = {
   interpreterA: ProviderKey;
   interpreterB: ProviderKey;
   verifier: ProviderKey;
+  /** Reasoning level for the two readers. The judge always uses the server default (max). */
+  readerEffort: EffortKey;
 };
 
 export function useInterpret() {
@@ -52,12 +55,12 @@ export function useInterpret() {
         const [resultA, resultB] = await Promise.all([
           runInterpretRequest(
             config.interpreterA,
-            { mode: "interpret", images, notes },
+            { mode: "interpret", images, notes, effort: config.readerEffort },
             abort.signal,
           ),
           runInterpretRequest(
             config.interpreterB,
-            { mode: "interpret", images, notes },
+            { mode: "interpret", images, notes, effort: config.readerEffort },
             abort.signal,
           ),
         ]);

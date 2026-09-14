@@ -169,7 +169,7 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three extra model calls and delays the first solution.
+Off by default — it costs three extra model calls and delays the first solution. The two readers run at a user-chosen effort (default `low`; Kimi's route floor still applies); the judge always runs at `max`, mapped to whatever top level its route supports.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `kimi` | `minimax`)
 
