@@ -60,25 +60,79 @@ export function useSolve() {
       setRuns((current) => ({ ...current, [provider]: run }));
     };
 
+    // A stream that ends with no `done` and no `error` was almost certainly
+    // killed for exceeding the free plan's CPU budget while its siblings ran
+    // (the isolate is terminated, so the Worker cannot even send an error).
+    // Firing all providers again would just recreate the overload, so instead
+    // the killed ones queue and retry ONE AT A TIME, and only after the whole
+    // first wave has settled and the budget has refilled.
+    let active = providers.length;
+    const retryQueue: Array<() => Promise<void>> = [];
+    let draining = false;
+
+    const drainRetries = async () => {
+      if (draining) return;
+      draining = true;
+      while (retryQueue.length > 0 && !abort.signal.aborted) {
+        const job = retryQueue.shift();
+        if (job) await job();
+      }
+      draining = false;
+    };
+
+    const onSettled = () => {
+      active -= 1;
+      if (active === 0) void drainRetries();
+    };
+
     for (const provider of providers) {
-      void streamProvider(provider, body, abort.signal, update);
+      void (async () => {
+        const outcome = await streamProvider(provider, body, abort.signal, update);
+        if (outcome === "interrupted" && !abort.signal.aborted) {
+          // Leave a settled, honest state until the retry actually starts,
+          // rather than a frozen progress count.
+          update(provider, {
+            status: "waiting",
+            message: "Interrupted by server load — will retry shortly.",
+          });
+          retryQueue.push(async () => {
+            if (abort.signal.aborted) return;
+            update(provider, {
+              status: "waiting",
+              message: "Interrupted by server load — retrying...",
+            });
+            const retry = await streamProvider(provider, body, abort.signal, update);
+            if (retry === "interrupted" && !abort.signal.aborted) {
+              update(provider, {
+                status: "error",
+                message:
+                  "The server ran out of capacity for this provider. Try again, or run fewer providers at once.",
+              });
+            }
+          });
+        }
+        onSettled();
+      })();
     }
   }, []);
 
   return { runs, start, cancel };
 }
 
+/** How one attempt ended, so the caller can decide whether to retry. */
+type StreamOutcome = "done" | "error" | "interrupted" | "aborted";
+
 async function streamProvider(
   provider: ProviderKey,
   body: SolveRequestBody,
   signal: AbortSignal,
   update: (provider: ProviderKey, run: ProviderRun) => void,
-) {
+): Promise<StreamOutcome> {
   let charsReceived = 0;
 
   try {
     const stream = await fetchSseStream(`/api/solve/${provider}`, body, signal);
-    let finished = false;
+    let outcome: StreamOutcome | null = null;
 
     for await (const event of readSseEvents(stream)) {
       let payload: Record<string, unknown>;
@@ -100,28 +154,26 @@ async function streamProvider(
         payload.solution &&
         typeof payload.solution === "object"
       ) {
-        finished = true;
+        outcome = "done";
         update(provider, {
           status: "done",
           solution: payload.solution as ProviderArtifact,
         });
       } else if (event.name === "error" && typeof payload.message === "string") {
-        finished = true;
+        outcome = "error";
         update(provider, { status: "error", message: payload.message });
       }
     }
 
-    if (!finished) {
-      update(provider, {
-        status: "error",
-        message: "The solution stream ended unexpectedly. Please try again.",
-      });
-    }
+    // No terminal event: the stream closed mid-flight. The caller may retry;
+    // it owns the final state so a retry is not preceded by a flash of error.
+    return outcome ?? "interrupted";
   } catch (error) {
-    if (signal.aborted) return;
+    if (signal.aborted) return "aborted";
     update(provider, {
       status: "error",
       message: error instanceof Error ? error.message : "The solve request failed.",
     });
+    return "error";
   }
 }
