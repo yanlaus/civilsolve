@@ -87,6 +87,7 @@ export function UploadForm({
   const [interpreterA, setInterpreterA] = useState<ProviderKey>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
+  const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
     ...DEFAULT_SELECTED,
@@ -254,7 +255,7 @@ export function UploadForm({
       providers: selectedProviders,
       notes,
       effort,
-      verify: verifyEnabled ? { interpreterA, interpreterB, verifier } : null,
+      verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
     });
   }
 
@@ -545,7 +546,7 @@ export function UploadForm({
         </label>
 
         {verifyEnabled ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { label: "First reader", value: interpreterA, set: setInterpreterA },
               { label: "Second reader", value: interpreterB, set: setInterpreterB },
@@ -566,6 +567,23 @@ export function UploadForm({
                 </select>
               </label>
             ))}
+            <label className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              Readers&apos; thinking
+              <select
+                value={readerEffort}
+                onChange={(event) => setReaderEffort(event.target.value as EffortKey)}
+                className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+              >
+                {EFFORT_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+                The reconciler always thinks at its maximum.
+              </span>
+            </label>
           </div>
         ) : null}
       </section>
