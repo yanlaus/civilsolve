@@ -5,15 +5,15 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Provider | Default channel | Default model | On by default |
 |---|---|---|---|
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | yes |
-| Claude | Poe | `claude-opus-4.8` | yes |
-| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | yes |
+| Claude | Poe | `claude-opus-4.8` | no |
+| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | no |
 | Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | yes |
 | MiniMax | MiniMax (mainland) | `MiniMax-M3` | yes |
-| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | no |
+| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | yes |
 | Grok | OpenCode Go | `grok-4.6` | no |
 | Qwen | OpenCode Go | `qwen3.8-max` | no |
 
-Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. The three additions are opt-in because each selected provider is one more upload and one more model call per solve.
+Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Four are ticked by default; each selected provider is one more upload and one more model call per solve, so the rest are opt-in. The optional interpretation pass defaults to ChatGPT and DeepSeek as the two readers with Kimi as the judge.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 

@@ -205,6 +205,8 @@ app.post("/api/interpret/:provider", async (c) => {
 
   const notes = readText(body.notes, MAX_NOTES_LENGTH);
   const mode = body.mode === "verify" ? "verify" : "interpret";
+  const verifyEffort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "max";
 
   let buildPrompt: (options: { enforceShape: boolean }) => string;
   if (mode === "verify") {
@@ -227,9 +229,12 @@ app.post("/api/interpret/:provider", async (c) => {
   return startSse(c, {
     provider,
     env: c.env,
-    // Interpretation is a reading task, not a derivation: a fixed modest
-    // budget keeps the extra round trips cheap regardless of the solve level.
-    effort: "low",
+    // Readers do a reading task, not a derivation, so a modest budget keeps
+    // those two round trips cheap. The judge is different: it adjudicates
+    // between two readings against the image, and a misread there poisons
+    // every solve that follows, so it defaults to the strongest level the
+    // route supports. The client may override for the judge only.
+    effort: mode === "verify" ? verifyEffort : "low",
     task: {
       session: crypto.randomUUID(),
       prompt: buildPrompt,
