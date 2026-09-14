@@ -22,6 +22,7 @@ const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
+  concurrency: number;
 };
 
 export default function CivilAnswerAppPage() {
@@ -74,6 +75,7 @@ export default function CivilAnswerAppPage() {
     files,
     lectureFiles,
     providers,
+    concurrency,
     notes,
     effort,
     verify,
@@ -118,13 +120,13 @@ export default function CivilAnswerAppPage() {
       }
 
       if (verify) {
-        setPendingSolve({ providers, body });
+        setPendingSolve({ providers, body, concurrency });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
       }
 
-      start(providers, body);
+      start(providers, body, concurrency);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -136,10 +138,10 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve) return;
-    const { providers, body } = pendingSolve;
+    const { providers, body, concurrency } = pendingSolve;
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText });
+    start(providers, { ...body, interpretation: confirmedText }, concurrency);
   }
 
   return (

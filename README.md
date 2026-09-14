@@ -311,6 +311,8 @@ Free-tier fit: a solve is at most 5 requests (100k/day limit), static assets are
 
 Deduplicating the N uploads would need either server-side storage or a single fan-out request, and both are ruled out by design (see `AGENTS.md`) — so the lever available is payload size, not request count.
 
+The upload form has a **Run** control — *One at a time* (default), *Two at a time*, or *All at once* — that caps how many providers stream in parallel. On the free plan each per-token stream draws CPU for its whole duration, so running four at once can drain the budget and get an isolate killed; capping concurrency spreads the load over time. Fewer at once is slower end-to-end but far more reliable. Whatever slips through is still caught by the automatic retry (killed providers re-run one at a time after the wave).
+
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
 
 ## Upload support

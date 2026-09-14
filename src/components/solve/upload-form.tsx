@@ -37,6 +37,8 @@ export type SolveSubmission = {
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
   providers: ProviderKey[];
+  /** How many providers stream at once. 1 = sequential; a large number = all. */
+  concurrency: number;
   notes: string;
   effort: EffortKey;
   /** Null when the user leaves the interpretation pass switched off. */
@@ -49,6 +51,14 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
+
+// How many providers stream in parallel. Fewer at once spreads the load so the
+// free plan's CPU limit is not hit; "all" is fastest but likeliest to overload.
+const CONCURRENCY_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: "One at a time" },
+  { value: 2, label: "Two at a time" },
+  { value: 99, label: "All at once" },
+];
 
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
@@ -89,6 +99,7 @@ export function UploadForm({
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
   const [effort, setEffort] = useState<EffortKey>("low");
+  const [concurrency, setConcurrency] = useState<number>(1);
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
     ...DEFAULT_SELECTED,
   ]);
@@ -253,6 +264,7 @@ export function UploadForm({
       files: queuedFiles.map((item) => item.file),
       lectureFiles: lectureFiles.map((item) => item.file),
       providers: selectedProviders,
+      concurrency,
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
@@ -480,6 +492,23 @@ export function UploadForm({
               </label>
             );
           })}
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[#5c5347] dark:text-[#a8a098]">
+          <span className="font-medium">Run</span>
+          <select
+            value={concurrency}
+            onChange={(event) => setConcurrency(Number(event.target.value))}
+            className="rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-1.5 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+          >
+            {CONCURRENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-[#8a7f72] dark:text-[#6e6960]">
+            — fewer at once is slower but avoids overloading the free tier.
+          </span>
         </div>
         {noneConfigured ? (
           <p className="mt-3 text-sm text-[#c0392b] dark:text-[#f2b8b2]">

@@ -43,80 +43,88 @@ export function useSolve() {
     });
   }, []);
 
-  const start = useCallback((providers: ProviderKey[], body: SolveRequestBody) => {
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
+  const start = useCallback(
+    (providers: ProviderKey[], body: SolveRequestBody, concurrency: number) => {
+      abortRef.current?.abort();
+      const abort = new AbortController();
+      abortRef.current = abort;
 
-    setRuns(() => {
-      const next: ProviderRuns = { ...IDLE_RUNS };
-      for (const provider of providers) {
-        next[provider] = { status: "waiting", message: "Submitting..." };
-      }
-      return next;
-    });
+      setRuns(() => {
+        const next: ProviderRuns = { ...IDLE_RUNS };
+        for (const provider of providers) {
+          next[provider] = { status: "waiting", message: "Submitting..." };
+        }
+        return next;
+      });
 
-    const update = (provider: ProviderKey, run: ProviderRun) => {
-      setRuns((current) => ({ ...current, [provider]: run }));
-    };
+      const update = (provider: ProviderKey, run: ProviderRun) => {
+        setRuns((current) => ({ ...current, [provider]: run }));
+      };
 
-    // A stream that ends with no `done` and no `error` was almost certainly
-    // killed for exceeding the free plan's CPU budget while its siblings ran
-    // (the isolate is terminated, so the Worker cannot even send an error).
-    // Firing all providers again would just recreate the overload, so instead
-    // the killed ones queue and retry ONE AT A TIME, and only after the whole
-    // first wave has settled and the budget has refilled.
-    let active = providers.length;
-    const retryQueue: Array<() => Promise<void>> = [];
-    let draining = false;
-
-    const drainRetries = async () => {
-      if (draining) return;
-      draining = true;
-      while (retryQueue.length > 0 && !abort.signal.aborted) {
-        const job = retryQueue.shift();
-        if (job) await job();
-      }
-      draining = false;
-    };
-
-    const onSettled = () => {
-      active -= 1;
-      if (active === 0) void drainRetries();
-    };
-
-    for (const provider of providers) {
       void (async () => {
-        const outcome = await streamProvider(provider, body, abort.signal, update);
-        if (outcome === "interrupted" && !abort.signal.aborted) {
-          // Leave a settled, honest state until the retry actually starts,
-          // rather than a frozen progress count.
-          update(provider, {
-            status: "waiting",
-            message: "Interrupted by server load — will retry shortly.",
-          });
-          retryQueue.push(async () => {
-            if (abort.signal.aborted) return;
+        // The first wave runs at most `concurrency` streams at once. On the
+        // free plan every provider is a per-token stream, and running them all
+        // together drains the CPU budget until the runtime kills an isolate;
+        // capping concurrency spreads the load over time instead.
+        const interrupted: ProviderKey[] = [];
+        await runPool(providers, concurrency, async (provider) => {
+          const outcome = await streamProvider(provider, body, abort.signal, update);
+          if (outcome === "interrupted" && !abort.signal.aborted) {
+            // A stream that closed with no `done` and no `error` was almost
+            // certainly a CPU kill (the isolate is gone, so the Worker cannot
+            // send an error). Leave an honest waiting state and retry later.
             update(provider, {
               status: "waiting",
-              message: "Interrupted by server load — retrying...",
+              message: "Interrupted by server load — will retry shortly.",
             });
-            const retry = await streamProvider(provider, body, abort.signal, update);
-            if (retry === "interrupted" && !abort.signal.aborted) {
-              update(provider, {
-                status: "error",
-                message:
-                  "The server ran out of capacity for this provider. Try again, or run fewer providers at once.",
-              });
-            }
+            interrupted.push(provider);
+          }
+        });
+
+        // Retries run strictly one at a time, on a budget the finished wave
+        // has let refill, so they never recreate the overload.
+        await runPool(interrupted, 1, async (provider) => {
+          if (abort.signal.aborted) return;
+          update(provider, {
+            status: "waiting",
+            message: "Interrupted by server load — retrying...",
           });
-        }
-        onSettled();
+          const retry = await streamProvider(provider, body, abort.signal, update);
+          if (retry === "interrupted" && !abort.signal.aborted) {
+            update(provider, {
+              status: "error",
+              message:
+                "The server ran out of capacity for this provider. Try again, or run fewer at once.",
+            });
+          }
+        });
       })();
-    }
-  }, []);
+    },
+    [],
+  );
 
   return { runs, start, cancel };
+}
+
+/**
+ * Runs `worker` over `items` with at most `concurrency` in flight at once.
+ * Resolves when every item has been processed.
+ */
+async function runPool<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let index = 0;
+  const lanes = Math.max(1, Math.min(concurrency, items.length));
+  const runners = Array.from({ length: lanes }, async () => {
+    while (index < items.length) {
+      const item = items[index];
+      index += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(runners);
 }
 
 /** How one attempt ended, so the caller can decide whether to retry. */
