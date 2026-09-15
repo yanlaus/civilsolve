@@ -52,6 +52,9 @@ export type WorkerEnv = {
   OPENCODE_QWEN_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   KIMI_CODE_MODEL?: string;
+  INTERPRET_CHATGPT_MODEL?: string;
+  INTERPRET_GEMINI_MODEL?: string;
+  INTERPRET_CLAUDE_MODEL?: string;
   MOONSHOT_KIMI_MODEL?: string;
   MINIMAX_MODEL?: string;
 
@@ -381,8 +384,20 @@ function channelFor(provider: ProviderKey, env: WorkerEnv) {
   return { channel: requested, problem: "" };
 }
 
-export function resolveRoute(provider: ProviderKey, env: WorkerEnv): Route {
-  const { channel, problem: channelProblem } = channelFor(provider, env);
+/**
+ * Optional per-request route override. The interpretation pass uses it to pin
+ * its providers to Poe top-tier models regardless of the solve-time channel.
+ */
+export type RouteOverride = { channel?: ChannelKey; model?: string };
+
+export function resolveRoute(
+  provider: ProviderKey,
+  env: WorkerEnv,
+  override?: RouteOverride,
+): Route {
+  const { channel, problem: channelProblem } = override?.channel
+    ? { channel: override.channel, problem: "" }
+    : channelFor(provider, env);
   const spec = ROUTES[provider][channel];
 
   if (!spec) {
@@ -410,7 +425,7 @@ export function resolveRoute(provider: ProviderKey, env: WorkerEnv): Route {
     provider,
     channel,
     dialect: spec.dialect,
-    model: readVar(env, spec.modelVar) || spec.defaultModel,
+    model: override?.model || readVar(env, spec.modelVar) || spec.defaultModel,
     endpoint:
       (readVar(env, spec.urlVar) || spec.defaultUrl).replace(/\/$/, "") + (spec.pathSuffix || ""),
     apiKey,
@@ -424,6 +439,35 @@ export function resolveRoute(provider: ProviderKey, env: WorkerEnv): Route {
     problem:
       channelProblem || (apiKey ? "" : `${spec.keyVar} is not configured on the server.`),
   };
+}
+
+// Reading the diagram is a comprehension task where a misread poisons the
+// solve, so the interpretation pass uses top-tier Poe models - which are also
+// the cheap CPU routes (Poe buffers upstream). Only providers with a Poe route
+// are pinned; a non-Poe pick (Kimi, MiniMax, ...) keeps its normal route.
+//
+// gpt-5.4-pro reads correctly but the pro tier over-thinks a transcription
+// task (~95 s vs ~5 s for gemini); set INTERPRET_CHATGPT_MODEL=gpt-5.4 to
+// trade a little away for a much faster reader.
+const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
+  chatgpt: "INTERPRET_CHATGPT_MODEL",
+  gemini: "INTERPRET_GEMINI_MODEL",
+  claude: "INTERPRET_CLAUDE_MODEL",
+};
+
+const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
+  chatgpt: "gpt-5.4-pro",
+  gemini: "gemini-3.1-pro",
+  claude: "claude-opus-4.8",
+};
+
+export function interpretOverride(
+  provider: ProviderKey,
+  env: WorkerEnv,
+): RouteOverride | undefined {
+  const varName = INTERPRET_MODEL_VAR[provider];
+  const model = (varName && readVar(env, varName)) || INTERPRET_MODEL_DEFAULT[provider];
+  return model ? { channel: "poe", model } : undefined;
 }
 
 /** Health payload for one provider. Never exposes key values. */

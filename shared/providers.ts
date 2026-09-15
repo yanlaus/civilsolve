@@ -53,8 +53,8 @@ export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree; the judge is a third model.
  */
-export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "deepseek"];
-export const DEFAULT_VERIFIER: ProviderKey = "kimi";
+export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
+export const DEFAULT_VERIFIER: ProviderKey = "claude";
 
 export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
 

@@ -42,6 +42,11 @@
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
     "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro",
+    // The optional interpretation pass runs on top-tier Poe models, set here.
+    // gpt-5.4-pro reads well but is slow (~95s); gpt-5.4 is much faster.
+    "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",
+    "INTERPRET_GEMINI_MODEL": "gemini-3.1-pro",
+    "INTERPRET_CLAUDE_MODEL": "claude-opus-4.8",
     "KIMI_CODE_MODEL": "kimi-for-coding",
     "MOONSHOT_KIMI_MODEL": "kimi-latest",
     // MiniMax-M2/M2.1 are text-only and answer "I cannot view the image"

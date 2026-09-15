@@ -29,7 +29,7 @@ import {
   MAX_REFERENCE_IMAGES,
   MAX_REFERENCE_TEXT,
 } from "../shared/stream-protocol";
-import { routeStatus, type WorkerEnv } from "./channels";
+import { interpretOverride, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, type RunTaskParams } from "./run";
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
@@ -229,6 +229,8 @@ app.post("/api/interpret/:provider", async (c) => {
   return startSse(c, {
     provider,
     env: c.env,
+    // The interpretation pass runs on Poe top-tier models (see interpretOverride).
+    routeOverride: interpretOverride(provider, c.env),
     // Readers default to a modest budget - they transcribe, they do not
     // derive - and the user can raise it. The judge defaults to the strongest
     // level the route supports: it adjudicates two readings against the

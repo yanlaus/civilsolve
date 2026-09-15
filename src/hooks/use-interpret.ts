@@ -47,23 +47,21 @@ export function useInterpret() {
       const labelV = PROVIDER_LABELS[config.verifier];
 
       try {
-        setPipeline({
-          status: "running",
-          stage: `Reading the question with ${labelA} and ${labelB}...`,
-        });
+        // The readers run one after another, not together: two concurrent
+        // streams is exactly the load that trips the free plan's CPU limit.
+        setPipeline({ status: "running", stage: `Reading the question with ${labelA}...` });
+        const resultA = await runInterpretRequest(
+          config.interpreterA,
+          { mode: "interpret", images, notes, effort: config.readerEffort },
+          abort.signal,
+        );
 
-        const [resultA, resultB] = await Promise.all([
-          runInterpretRequest(
-            config.interpreterA,
-            { mode: "interpret", images, notes, effort: config.readerEffort },
-            abort.signal,
-          ),
-          runInterpretRequest(
-            config.interpreterB,
-            { mode: "interpret", images, notes, effort: config.readerEffort },
-            abort.signal,
-          ),
-        ]);
+        setPipeline({ status: "running", stage: `Reading the question with ${labelB}...` });
+        const resultB = await runInterpretRequest(
+          config.interpreterB,
+          { mode: "interpret", images, notes, effort: config.readerEffort },
+          abort.signal,
+        );
 
         setPipeline({
           status: "running",
