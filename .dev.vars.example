@@ -52,6 +52,7 @@ GOOGLE_API_KEY=
 #   MOONSHOT_KIMI_MODEL=moonshot-v1-128k-vision-preview
 #   MOONSHOT_BASE_URL=https://api.moonshot.ai/v1/chat/completions
 #   NO_STREAM=kimi
+#   INTERPRET_CHATGPT_MODEL=gpt-5.4   # faster interpretation reader than gpt-5.4-pro
 #
 # Check a key without spending tokens:
 #   curl -H "Authorization: Bearer $POE_API_KEY"      https://api.poe.com/v1/models

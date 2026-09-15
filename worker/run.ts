@@ -21,6 +21,7 @@ import {
   supportsEffort,
   wantsUpstreamStream,
   type Capabilities,
+  type RouteOverride,
   type Dialect,
   type Route,
   type Task,
@@ -173,6 +174,8 @@ export type RunTaskParams = {
   provider: ProviderKey;
   env: WorkerEnv;
   effort: EffortKey;
+  /** Optional per-request route override (interpretation pins Poe top-tier). */
+  routeOverride?: RouteOverride;
   task: Task;
   /**
    * Turns the raw model text into the payload of the `done` event, e.g.
@@ -189,7 +192,7 @@ type TaskEvent = { type: string } & Record<string, unknown>;
  */
 export async function runTask(
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  { provider, env, effort: requestedEffort, task, finalize }: RunTaskParams,
+  { provider, env, effort: requestedEffort, routeOverride, task, finalize }: RunTaskParams,
 ) {
   const write = async (event: TaskEvent) => {
     await writer.write(encodeEvent(event));
@@ -201,7 +204,7 @@ export async function runTask(
     });
   }, HEARTBEAT_INTERVAL_MS);
 
-  const route = resolveRoute(provider, env);
+  const route = resolveRoute(provider, env, routeOverride);
   // A route may pin its reasoning level (a deliberately "always max" model)
   // or set a floor under the user's choice.
   const effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);

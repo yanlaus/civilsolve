@@ -16,7 +16,7 @@ import type { EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   DEFAULT_INTERPRETERS,
-  DEFAULT_SELECTED,
+  DEFAULT_PROVIDER,
   DEFAULT_VERIFIER,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
@@ -36,9 +36,8 @@ export type SolveSubmission = {
   files: File[];
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
+  /** Exactly one provider runs per solve. */
   providers: ProviderKey[];
-  /** How many providers stream at once. 1 = sequential; a large number = all. */
-  concurrency: number;
   notes: string;
   effort: EffortKey;
   /** Null when the user leaves the interpretation pass switched off. */
@@ -51,14 +50,6 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
-
-// How many providers stream in parallel. Fewer at once spreads the load so the
-// free plan's CPU limit is not hit; "all" is fastest but likeliest to overload.
-const CONCURRENCY_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: 1, label: "One at a time" },
-  { value: 2, label: "Two at a time" },
-  { value: 99, label: "All at once" },
-];
 
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
@@ -99,10 +90,7 @@ export function UploadForm({
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
   const [effort, setEffort] = useState<EffortKey>("low");
-  const [concurrency, setConcurrency] = useState<number>(1);
-  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>([
-    ...DEFAULT_SELECTED,
-  ]);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderKey>(DEFAULT_PROVIDER);
   const [providerStatus, setProviderStatus] =
     useState<Record<ProviderKey, ProviderStatus> | null>(null);
   const [fileError, setFileError] = useState("");
@@ -126,9 +114,10 @@ export function UploadForm({
       .then((payload) => {
         if (cancelled || !payload?.providers) return;
         setProviderStatus(payload.providers);
-        setSelectedProviders((current) => {
-          const usable = current.filter((key) => payload.providers[key]?.configured);
-          return usable.length ? usable : current;
+        setSelectedProvider((current) => {
+          if (payload.providers[current]?.configured) return current;
+          const firstConfigured = PROVIDER_KEYS.find((key) => payload.providers[key]?.configured);
+          return firstConfigured ?? current;
         });
       })
       .catch(() => {
@@ -154,7 +143,7 @@ export function UploadForm({
       : "";
 
   const canSubmit =
-    queuedFiles.length > 0 && selectedProviders.length > 0 && !verifyConfigError && !busy;
+    queuedFiles.length > 0 && isAvailable(selectedProvider) && !verifyConfigError && !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -246,15 +235,8 @@ export function UploadForm({
     });
   }
 
-  function toggleProvider(provider: ProviderKey) {
-    setSelectedProviders((current) => {
-      if (current.includes(provider)) {
-        return current.filter((item) => item !== provider);
-      }
-      return PROVIDER_OPTIONS.map((option) => option.key).filter(
-        (key) => current.includes(key) || key === provider,
-      );
-    });
+  function selectProvider(provider: ProviderKey) {
+    setSelectedProvider(provider);
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -263,8 +245,7 @@ export function UploadForm({
     onSolve({
       files: queuedFiles.map((item) => item.file),
       lectureFiles: lectureFiles.map((item) => item.file),
-      providers: selectedProviders,
-      concurrency,
+      providers: [selectedProvider],
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
@@ -445,13 +426,14 @@ export function UploadForm({
       <section>
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
-          AI Providers
+          AI Provider
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(one per solve)</span>
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
-            const checked = selectedProviders.includes(provider.key) && available;
+            const checked = selectedProvider === provider.key && available;
             const note = status
               ? status.configured
                 ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
@@ -475,10 +457,11 @@ export function UploadForm({
                 }`}
               >
                 <input
-                  type="checkbox"
+                  type="radio"
+                  name="provider"
                   checked={checked}
                   disabled={!available}
-                  onChange={() => toggleProvider(provider.key)}
+                  onChange={() => selectProvider(provider.key)}
                   className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
                 />
                 <span className="min-w-0">
@@ -492,23 +475,6 @@ export function UploadForm({
               </label>
             );
           })}
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[#5c5347] dark:text-[#a8a098]">
-          <span className="font-medium">Run</span>
-          <select
-            value={concurrency}
-            onChange={(event) => setConcurrency(Number(event.target.value))}
-            className="rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-1.5 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
-          >
-            {CONCURRENCY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <span className="text-[#8a7f72] dark:text-[#6e6960]">
-            — fewer at once is slower but avoids overloading the free tier.
-          </span>
         </div>
         {noneConfigured ? (
           <p className="mt-3 text-sm text-[#c0392b] dark:text-[#f2b8b2]">

@@ -44,7 +44,7 @@ export function useSolve() {
   }, []);
 
   const start = useCallback(
-    (providers: ProviderKey[], body: SolveRequestBody, concurrency: number) => {
+    (providers: ProviderKey[], body: SolveRequestBody) => {
       abortRef.current?.abort();
       const abort = new AbortController();
       abortRef.current = abort;
@@ -62,12 +62,11 @@ export function useSolve() {
       };
 
       void (async () => {
-        // The first wave runs at most `concurrency` streams at once. On the
-        // free plan every provider is a per-token stream, and running them all
-        // together drains the CPU budget until the runtime kills an isolate;
-        // capping concurrency spreads the load over time instead.
+        // Providers run one at a time. On the free plan every provider is a
+        // per-token stream that draws CPU for its whole duration, so anything
+        // above one at a time can drain the budget and get a stream killed.
         const interrupted: ProviderKey[] = [];
-        await runPool(providers, concurrency, async (provider) => {
+        await runPool(providers, 1, async (provider) => {
           const outcome = await streamProvider(provider, body, abort.signal, update);
           if (outcome === "interrupted" && !abort.signal.aborted) {
             // A stream that closed with no `done` and no `error` was almost

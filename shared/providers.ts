@@ -42,17 +42,19 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 };
 
 /**
- * Ticked by default in the upload form. Every selected provider is one more
- * upload and one more model call per solve, so the additions are opt-in.
+ * Selected by default in the upload form. Only one provider runs per solve -
+ * on the free plan each is a per-token stream that draws CPU for its whole
+ * duration, so running several at once exhausts the CPU budget and the runtime
+ * kills a stream. One at a time keeps every solve inside the budget.
  */
-export const DEFAULT_SELECTED: ProviderKey[] = ["chatgpt", "kimi", "minimax", "deepseek"];
+export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree; the judge is a third model.
  */
-export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "deepseek"];
-export const DEFAULT_VERIFIER: ProviderKey = "kimi";
+export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
+export const DEFAULT_VERIFIER: ProviderKey = "claude";
 
 export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
 

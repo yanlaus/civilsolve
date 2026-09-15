@@ -1,19 +1,19 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level, and receive worked solutions from up to eight models in parallel:
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Eight providers are available; **one runs per solve** (see the CPU note below for why):
 
-| Provider | Default channel | Default model | On by default |
+| Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
-| ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | yes |
-| Claude | Poe | `claude-opus-4.8` | no |
-| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | no |
-| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | yes |
-| MiniMax | MiniMax (mainland) | `MiniMax-M3` | yes |
-| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | yes |
-| Grok | OpenCode Go | `grok-4.6` | no |
-| Qwen | OpenCode Go | `qwen3.8-max` | no |
+| ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
+| Claude | Poe | `claude-opus-4.8` | |
+| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
+| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | |
+| MiniMax | MiniMax (mainland) | `MiniMax-M3` | |
+| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
+| Grok | OpenCode Go | `grok-4.6` | |
+| Qwen | OpenCode Go | `qwen3.8-max` | |
 
-Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Four are ticked by default; each selected provider is one more upload and one more model call per solve, so the rest are opt-in. The optional interpretation pass defaults to ChatGPT and DeepSeek as the two readers with Kimi as the judge.
+Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -27,9 +27,9 @@ A single **Cloudflare Worker** (free tier) serves everything:
 The solve flow is **stateless streaming** — no database, no object storage, no job queue:
 
 1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js (max 8 pages).
-2. It fires one `POST /api/solve/:provider` request per selected provider, in parallel.
+2. It fires one `POST /api/solve/:provider` request for the chosen provider (one per solve).
 3. Each Worker invocation resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back over Server-Sent Events.
-4. Provider tabs render progressively — each one flips from spinner to live progress to finished solution independently.
+4. The provider's tab renders progressively — spinner, then live progress, then the finished solution.
 
 Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a fully free, zero-storage deployment).
 
@@ -169,7 +169,7 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three extra model calls and delays the first solution. The two readers run at a user-chosen effort (default `low`; Kimi's route floor still applies); the judge always runs at `max`, mapped to whatever top level its route supports.
+Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (Kimi, MiniMax, …) keeps its normal route if picked.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `kimi` | `minimax`)
 
@@ -311,7 +311,7 @@ Free-tier fit: a solve is at most 5 requests (100k/day limit), static assets are
 
 Deduplicating the N uploads would need either server-side storage or a single fan-out request, and both are ruled out by design (see `AGENTS.md`) — so the lever available is payload size, not request count.
 
-The upload form has a **Run** control — *One at a time* (default), *Two at a time*, or *All at once* — that caps how many providers stream in parallel. On the free plan each per-token stream draws CPU for its whole duration, so running four at once can drain the budget and get an isolate killed; capping concurrency spreads the load over time. Fewer at once is slower end-to-end but far more reliable. Whatever slips through is still caught by the automatic retry (killed providers re-run one at a time after the wave).
+**Only one provider runs per solve.** The picker is single-choice. On the free plan each per-token stream (OpenCode Go, MiniMax) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
 
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
 
