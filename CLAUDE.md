@@ -46,7 +46,7 @@ The three-layer split is what matters:
 
 - **`worker/index.ts`** — Hono app. Validates the request (`readBoundedBody` counts real bytes, ignoring `content-length`), builds a `Task` (prompt builder, instructions, schema, images), and hands it to `runTask`.
 - **`worker/run.ts`** — task-agnostic orchestration: immediate SSE headers, heartbeats, the 280s safety abort, delta coalescing, and the retry/downgrade policy. Knows nothing about dialects. Add a new model-calling feature as another `Task` here, never as a second orchestrator.
-- **`worker/channels.ts`** — all upstream knowledge: the `ROUTES` table (provider × channel → dialect, model var, key var, endpoint, effort spec, `structured`, `streaming`, `forceEffort`/`minEffort`), request building, and per-dialect stream parsing. New channels and per-model quirks go in `ROUTES`, not as branches in `run.ts`.
+- **`worker/channels.ts`** — all upstream knowledge: the `ROUTES` table (provider × channel → dialect, model var, key var, endpoint, effort spec, `structured`, `streaming`, `forceEffort`/`minEffort`/`defaultEffort`), request building, and per-dialect stream parsing. New channels and per-model quirks go in `ROUTES`, not as branches in `run.ts`.
 
 **Provider vs channel** is the central abstraction. A *provider* (`chatgpt`, `claude`, `gemini`, `kimi`, `minimax`, `deepseek`, `grok`, `qwen`) is a UI choice; a *channel* (`poe`, `opencode`, `kimi`, `moonshot`, `minimax`, `google`) is the upstream account, picked from env (`<PROVIDER>_CHANNEL` in `wrangler.jsonc`) per request. Four dialects — `responses`, `chat-completions`, `anthropic`, `gemini` — differ in how they take reasoning effort and how (or whether) a response shape can be pinned.
 
@@ -62,7 +62,7 @@ These are the ones most likely to be violated by a reasonable-looking change. `A
 
 - **One provider per solve, and the CPU budget is why.** The free plan charges per upstream chunk read, so a per-token stream costs 330–500 ms of CPU for its duration; the budget is a refilling account-wide allowance and a kill is silent (the client just sees the stream end). Do not restore multi-provider fan-out or make the interpretation pass default-on.
 - **Keep `/api/solve/:provider` streaming.** Immediate SSE headers + heartbeats are the only reason minutes-long provider calls survive without job storage.
-- **Effort is mapped per route, never passed through.** A level with no mapping sends nothing rather than a value the model rejects.
+- **Effort is mapped per route, never passed through.** A level with no mapping sends nothing rather than a value the model rejects. A request that names no level gets the route's `defaultEffort` (MiniMax: `high`), not a global constant.
 - **Only visible output becomes a `delta`.** Reasoning summaries and thought parts must be filtered per dialect — concatenating them corrupts the JSON the parser expects.
 - **Three failure modes stay distinct in `run.ts`:** parameter rejection → step down the capability ladder (no sleep, no retry budget); transient (408/409/429/5xx, or no response at all) → one retry after 3s; everything else (401, 404, in-body errors like MiniMax's `base_resp`) → fail now. Never retry after a `delta` has shipped, and never retry the safety-timeout abort.
 - **Every model must be vision-capable.** The assignment is only ever sent as images; text-only models invent a plausible solution instead of failing. Verify with a real image before changing any model id.

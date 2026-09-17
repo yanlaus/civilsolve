@@ -90,6 +90,8 @@ export type ProviderStatus = {
   forcedEffort?: string;
   /** Present when the route raises low choices to a floor. */
   minEffort?: string;
+  /** Present when the route has its own default level for an unspecified choice. */
+  defaultEffort?: string;
 };
 
 export type HealthResponse = {

@@ -8,7 +8,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Claude | Poe | `claude-opus-4.8` | |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
 | Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | |
-| MiniMax | MiniMax (mainland) | `MiniMax-M3` | |
+| MiniMax | MiniMax (mainland) | `MiniMax-M3`, high thinking by default | |
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
 | Grok | OpenCode Go | `grok-4.6` | |
 | Qwen | OpenCode Go | `qwen3.8-max` | |
@@ -93,6 +93,8 @@ The five UI levels (`none`/`low`/`medium`/`high`/`max`) do **not** mean the same
 
 A level with no mapping sends **nothing** rather than a value the model would reject.
 
+A route has three levers over the level it ends up using, all in `ROUTES`: `forceEffort` pins it regardless of the request, `minEffort` raises anything below a floor, and `defaultEffort` applies only when the request names no level at all. MiniMax M3 uses the last one (`high`) — a solve that does not pick a level gets a real thinking budget, while a level picked by hand is still honoured all the way down.
+
 Because no vendor publishes a reliable per-model matrix, the Worker also **degrades itself**: if an upstream answers 400/422 complaining about a parameter, the request is retried one rung down a ladder — drop `reasoning`, then relax the strict JSON schema to plain JSON mode, then drop the schema entirely. Each downgrade is reported to the client as a `status` event. The parsing pipeline in `shared/solution.ts` is what makes the lower rungs safe.
 
 ### Stack
@@ -169,7 +171,7 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (Kimi, MiniMax, …) keeps its normal route if picked.
+Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `medium` — enough to read a dimension off a diagram without paying for a deep derivation); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (Kimi, MiniMax, …) keeps its normal route if picked.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `kimi` | `minimax`)
 
@@ -179,7 +181,7 @@ Request JSON:
 {
   "images": ["data:image/jpeg;base64,..."],
   "notes": "optional user instructions",
-  "effort": "none | low | medium | high | max",
+  "effort": "none | low | medium | high | max (optional; omitted uses the route default)",
   "interpretation": "optional confirmed problem statement",
   "referenceText": "optional lecture-notes text",
   "referenceImages": ["optional lecture-notes pages"]
@@ -246,7 +248,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro` | Google model id |
 | `KIMI_CODE_MODEL` | `kimi-for-coding` | Tier-dependent; also `k3`, `k3-256k` |
 | `MOONSHOT_KIMI_MODEL` | `kimi-latest` | **Must be vision-capable** |
-| `MINIMAX_MODEL` | `MiniMax-M3` | **Must be vision-capable**; `MiniMax-M3[1m]` for 1M context |
+| `MINIMAX_MODEL` | `MiniMax-M3` | **Must be vision-capable**; `MiniMax-M3[1m]` for 1M context. Route defaults to `high` thinking |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
 | `KIMI_BASE_URL` | `https://api.kimi.com/coding` | Anthropic-protocol base |
 | `MOONSHOT_BASE_URL` | `https://api.moonshot.cn/v1/chat/completions` | Mainland; global is `api.moonshot.ai` |

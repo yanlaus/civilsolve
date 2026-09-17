@@ -170,10 +170,14 @@ function describeDrop(caps: Capabilities, drop: DropTarget) {
 // Solve
 // ---------------------------------------------------------------------------
 
+/** Level used when neither the request nor the route names one. */
+const FALLBACK_EFFORT: EffortKey = "medium";
+
 export type RunTaskParams = {
   provider: ProviderKey;
   env: WorkerEnv;
-  effort: EffortKey;
+  /** Null when the request did not pick a level; the route's default applies. */
+  effort: EffortKey | null;
   /** Optional per-request route override (interpretation pins Poe top-tier). */
   routeOverride?: RouteOverride;
   task: Task;
@@ -205,9 +209,11 @@ export async function runTask(
   }, HEARTBEAT_INTERVAL_MS);
 
   const route = resolveRoute(provider, env, routeOverride);
-  // A route may pin its reasoning level (a deliberately "always max" model)
-  // or set a floor under the user's choice.
-  const effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
+  // A route may pin its reasoning level (a deliberately "always max" model),
+  // set a floor under the user's choice, or - when the request names no level
+  // at all - supply its own default.
+  const chosen = requestedEffort ?? route.defaultEffort ?? FALLBACK_EFFORT;
+  const effort = route.forceEffort ?? raiseToFloor(chosen, route.minEffort);
 
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {

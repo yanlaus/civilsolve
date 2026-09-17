@@ -51,6 +51,9 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
+/** Used when the selected provider's route does not name a default of its own. */
+const FALLBACK_EFFORT: EffortKey = "low";
+
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
   { key: "low", label: "Low" },
@@ -88,8 +91,11 @@ export function UploadForm({
   const [interpreterA, setInterpreterA] = useState<ProviderKey>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
-  const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
-  const [effort, setEffort] = useState<EffortKey>("low");
+  const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
+  // Null until the user picks a level by hand. An untouched control follows
+  // the selected provider's own default (MiniMax asks for high thinking),
+  // which is why the choice is stored rather than the effective level.
+  const [effortChoice, setEffortChoice] = useState<EffortKey | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>(DEFAULT_PROVIDER);
   const [providerStatus, setProviderStatus] =
     useState<Record<ProviderKey, ProviderStatus> | null>(null);
@@ -131,6 +137,11 @@ export function UploadForm({
 
   const isAvailable = (provider: ProviderKey) =>
     providerStatus ? providerStatus[provider]?.configured !== false : true;
+
+  const providerDefaultEffort =
+    (providerStatus?.[selectedProvider]?.defaultEffort as EffortKey | undefined) ??
+    FALLBACK_EFFORT;
+  const effort = effortChoice ?? providerDefaultEffort;
 
   const noneConfigured = Boolean(
     providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
@@ -441,7 +452,9 @@ export function UploadForm({
                       ? ` - always ${status.forcedEffort} thinking`
                       : status.minEffort
                         ? ` - at least ${status.minEffort} thinking`
-                        : ""
+                        : status.defaultEffort
+                          ? ` - ${status.defaultEffort} thinking by default`
+                          : ""
                   }`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
@@ -495,7 +508,7 @@ export function UploadForm({
             <button
               key={option.key}
               type="button"
-              onClick={() => setEffort(option.key)}
+              onClick={() => setEffortChoice(option.key)}
               className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
                 effort === option.key
                   ? "border-[#b35c1e] bg-[#b35c1e] text-white shadow-[0_2px_10px_rgba(179,92,30,0.15)] dark:border-[#e8903a] dark:bg-[#e8903a] dark:text-[#0e1420]"
@@ -509,7 +522,8 @@ export function UploadForm({
         <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
           Each model has its own reasoning scale, so the level is mapped per provider.
           Levels a model does not offer fall back to its own default (Gemini Pro, for
-          example, cannot switch thinking off).
+          example, cannot switch thinking off). Until you pick a level, the selected
+          provider&apos;s own default applies.
         </p>
       </section>
 

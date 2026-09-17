@@ -164,8 +164,10 @@ app.post("/api/solve/:provider", async (c) => {
   if ("error" in reference) return c.json({ error: reference.error }, 400);
 
   const notes = readText(body.notes, MAX_NOTES_LENGTH);
-  const effort: EffortKey =
-    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
+  // Null, not a level: a request that names none gets the route's own default
+  // (see defaultEffort in worker/channels.ts).
+  const effort: EffortKey | null =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : null;
   const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
   const referenceText = readText(body.referenceText, MAX_REFERENCE_TEXT);
 
@@ -231,11 +233,12 @@ app.post("/api/interpret/:provider", async (c) => {
     env: c.env,
     // The interpretation pass runs on Poe top-tier models (see interpretOverride).
     routeOverride: interpretOverride(provider, c.env),
-    // Readers default to a modest budget - they transcribe, they do not
-    // derive - and the user can raise it. The judge defaults to the strongest
-    // level the route supports: it adjudicates two readings against the
-    // image, and a misread there poisons every solve that follows.
-    effort: requestedEffort ?? (mode === "verify" ? "max" : "low"),
+    // Readers default to a middling budget - enough to read a dimension off a
+    // diagram correctly, without the pro-tier over-thinking of a transcription
+    // task - and the user can move it either way. The judge defaults to the
+    // strongest level the route supports: it adjudicates two readings against
+    // the image, and a misread there poisons every solve that follows.
+    effort: requestedEffort ?? (mode === "verify" ? "max" : "medium"),
     task: {
       session: crypto.randomUUID(),
       prompt: buildPrompt,

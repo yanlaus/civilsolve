@@ -145,6 +145,12 @@ type RouteSpec = {
    */
   minEffort?: EffortKey;
   /**
+   * Level used when the request does not pick one. The softer sibling of
+   * `minEffort`: for a model that is only worth running above a certain
+   * budget but should still be lowerable by hand.
+   */
+  defaultEffort?: EffortKey;
+  /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
    * matters more, so such a channel always uses the non-streamed path.
@@ -316,6 +322,11 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // Mainland host. International deployments use https://api.minimax.io.
       defaultUrl: "https://api.minimaxi.com/anthropic",
       effort: ANTHROPIC_BUDGET,
+      // M3 is worth running with a real thinking budget, so an unspecified
+      // level lands on "high" (16384 tokens) rather than the generic default.
+      // A floor is deliberately not used - a lower level picked by hand is
+      // still honoured.
+      defaultEffort: "high",
     },
   },
 };
@@ -354,6 +365,8 @@ export type Route = {
   forceEffort?: EffortKey;
   /** Floor on the reasoning level. */
   minEffort?: EffortKey;
+  /** Level used when the request does not pick one. */
+  defaultEffort?: EffortKey;
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -432,6 +445,7 @@ export function resolveRoute(
     effort: spec.effort,
     forceEffort: spec.forceEffort,
     minEffort: spec.minEffort,
+    defaultEffort: spec.defaultEffort,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
@@ -479,6 +493,7 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     configured: route.configured && !route.problem,
     ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
     ...(route.minEffort ? { minEffort: route.minEffort } : {}),
+    ...(route.defaultEffort ? { defaultEffort: route.defaultEffort } : {}),
   };
 }
 
