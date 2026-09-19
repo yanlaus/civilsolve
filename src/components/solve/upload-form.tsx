@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
-import type { EffortKey } from "../../../shared/prompt";
+import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   DEFAULT_INTERPRETERS,
@@ -135,6 +135,32 @@ export function UploadForm({
   const noneConfigured = Boolean(
     providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
   );
+
+  // Some routes pin the reasoning level (forceEffort) or put a floor under it
+  // (minEffort), and the Worker applies that regardless of what is sent. Show
+  // it here instead of letting the user pick a level that is silently raised:
+  // ChatGPT and MiniMax both floor at "high".
+  const selectedStatus = providerStatus?.[selectedProvider];
+  const pinnedEffort = selectedStatus?.forcedEffort;
+  const effortFloor = pinnedEffort ?? selectedStatus?.minEffort;
+  const floorIndex = effortFloor ? EFFORT_KEYS.indexOf(effortFloor as EffortKey) : -1;
+
+  const isEffortLocked = (key: EffortKey) =>
+    pinnedEffort ? key !== pinnedEffort : floorIndex > 0 && EFFORT_KEYS.indexOf(key) < floorIndex;
+
+  // Snap the visible level up when the floor rules the current pick out. Only
+  // ever upwards: switching to an unfloored provider keeps the level the user
+  // last chose rather than dropping it back.
+  useEffect(() => {
+    if (floorIndex < 0) return;
+    setEffort((current) =>
+      pinnedEffort
+        ? (pinnedEffort as EffortKey)
+        : EFFORT_KEYS.indexOf(current) < floorIndex
+          ? EFFORT_KEYS[floorIndex]
+          : current,
+    );
+  }, [pinnedEffort, floorIndex]);
 
   // Two readers that are the same model would just agree with themselves.
   const verifyConfigError =
@@ -491,21 +517,44 @@ export function UploadForm({
           <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(guides solution depth)</span>
         </p>
         <div className="flex flex-wrap gap-2">
-          {EFFORT_OPTIONS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => setEffort(option.key)}
-              className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
-                effort === option.key
-                  ? "border-[#b35c1e] bg-[#b35c1e] text-white shadow-[0_2px_10px_rgba(179,92,30,0.15)] dark:border-[#e8903a] dark:bg-[#e8903a] dark:text-[#0e1420]"
-                  : "border-[#d4cdc3] bg-white text-[#5c5347] hover:border-[#b35c1e] hover:text-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a] dark:hover:text-[#e8903a]"
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
+          {EFFORT_OPTIONS.map((option) => {
+            const locked = isEffortLocked(option.key);
+            return (
+              <button
+                key={option.key}
+                type="button"
+                disabled={locked}
+                title={
+                  locked
+                    ? `${PROVIDER_LABELS[selectedProvider]} runs at ${effortFloor} thinking${
+                        pinnedEffort ? "" : " or above"
+                      } on this route.`
+                    : undefined
+                }
+                onClick={() => setEffort(option.key)}
+                className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
+                  effort === option.key
+                    ? "border-[#b35c1e] bg-[#b35c1e] text-white shadow-[0_2px_10px_rgba(179,92,30,0.15)] dark:border-[#e8903a] dark:bg-[#e8903a] dark:text-[#0e1420]"
+                    : locked
+                      ? "cursor-not-allowed border-[#d4cdc3] bg-white text-[#5c5347] opacity-45 dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098]"
+                      : "border-[#d4cdc3] bg-white text-[#5c5347] hover:border-[#b35c1e] hover:text-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a] dark:hover:text-[#e8903a]"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
+        {effortFloor ? (
+          <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
+            {PROVIDER_LABELS[selectedProvider]} runs at{" "}
+            <strong>
+              {effortFloor}
+              {pinnedEffort ? "" : " or above"}
+            </strong>{" "}
+            on this route, so lower levels are disabled.
+          </p>
+        ) : null}
         <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
           Each model has its own reasoning scale, so the level is mapped per provider.
           Levels a model does not offer fall back to its own default (Gemini Pro, for

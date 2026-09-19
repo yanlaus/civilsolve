@@ -16,6 +16,8 @@ import {
   extractPayloadError,
   extractStructuredDelta,
   isReasoningOnlyFrame,
+  isTerminalFrame,
+  isThinkingExhausted,
   resolveRoute,
   streamTerminator,
   supportsEffort,
@@ -34,6 +36,12 @@ const SAFETY_TIMEOUT_MS = 280_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_TRANSIENT_RETRIES = 1;
 const RETRY_DELAY_MS = 3_000;
+/**
+ * Retries after the model thought itself out of tokens. One only: the wasted
+ * attempt runs to its full thinking budget (~120 s measured on MiniMax M3
+ * at "high"), and a second would risk the safety timeout below.
+ */
+const MAX_EFFORT_STEPDOWNS = 1;
 /** Unrecognised 400s that we speculatively treat as a rejected parameter. */
 const MAX_BLIND_DOWNGRADES = 1;
 
@@ -65,6 +73,18 @@ function raiseToFloor(requested: EffortKey, floor: EffortKey | undefined): Effor
   return EFFORT_KEYS.indexOf(requested) < EFFORT_KEYS.indexOf(floor) ? floor : requested;
 }
 
+/**
+ * Next lower level the route has a real value for, or null at the bottom.
+ * Deliberately ignores `minEffort`: the floor picks where a solve *starts*,
+ * and this is the recovery path for when that level cannot finish.
+ */
+function stepDownEffort(route: Route, current: EffortKey): EffortKey | null {
+  for (let index = EFFORT_KEYS.indexOf(current) - 1; index >= 0; index -= 1) {
+    if (supportsEffort(route, EFFORT_KEYS[index])) return EFFORT_KEYS[index];
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -73,6 +93,12 @@ type UpstreamError = Error & {
   status?: number;
   body?: string;
   retryable?: boolean;
+  /**
+   * The model spent its whole token budget thinking and wrote no answer. Not
+   * retryable as-is - the same request would do the same thing - but worth one
+   * attempt at a lower thinking level.
+   */
+  lowerEffort?: boolean;
 };
 
 function isRetryableStatus(status: number) {
@@ -206,8 +232,9 @@ export async function runTask(
 
   const route = resolveRoute(provider, env, routeOverride);
   // A route may pin its reasoning level (a deliberately "always max" model)
-  // or set a floor under the user's choice.
-  const effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
+  // or set a floor under the user's choice. Not const: a model that spends its
+  // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
+  let effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
 
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {
@@ -227,10 +254,11 @@ export async function runTask(
     await write({ type: "status", message: `Asking ${route.label}...` });
 
     const streamUpstream = wantsUpstreamStream(route, env);
-    const maxSteps = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES;
+    const maxSteps = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES + MAX_EFFORT_STEPDOWNS;
 
     let caps = startingCapabilities(route, effort);
     let transientRetries = 0;
+    let effortStepDowns = 0;
     let blindDowngrades = 0;
     let lastError: UpstreamError | null = null;
     let rawText = "";
@@ -286,6 +314,26 @@ export async function runTask(
             message: `${route.label} rejected ${dropped}. Retrying without it...`,
           });
           continue;
+        }
+
+        // The model spent everything it had on thinking. Repeating the request
+        // unchanged would repeat that, so shed a thinking level instead. This
+        // deliberately goes below the route's floor: the floor chooses where a
+        // solve starts, not what it must fail at.
+        if (lastError.lowerEffort && effortStepDowns < MAX_EFFORT_STEPDOWNS) {
+          const lowered = stepDownEffort(route, effort);
+          if (lowered) {
+            effortStepDowns += 1;
+            effort = lowered;
+            // Only the reasoning flag is recomputed; a schema downgrade already
+            // negotiated in an earlier step stays negotiated.
+            caps = { ...caps, reasoning: supportsEffort(route, lowered) };
+            await write({
+              type: "status",
+              message: `${route.label} used its whole budget thinking without answering. Retrying at ${lowered} thinking...`,
+            });
+            continue;
+          }
         }
 
         if (!isRetryable(lastError) || transientRetries >= MAX_TRANSIENT_RETRIES) break;
@@ -350,6 +398,7 @@ async function fetchNonStreamed(
   if (payloadError) {
     const error = new Error(`${label}: ${payloadError}`) as UpstreamError;
     error.retryable = false;
+    error.lowerEffort = isThinkingExhausted(dialect, payload);
     throw error;
   }
 
@@ -421,9 +470,14 @@ async function fetchStreamed(
   let structuredText = "";
   let completedText = "";
   let upstreamMessage = "";
+  let exhaustedThinking = false;
+  let sawTerminal = false;
 
   for await (const data of readSseData(response.body)) {
-    if (terminator && data === terminator) break;
+    if (terminator && data === terminator) {
+      sawTerminal = true;
+      break;
+    }
     if (isReasoningOnlyFrame(dialect, data)) continue;
 
     let event: Record<string, unknown>;
@@ -432,6 +486,10 @@ async function fetchStreamed(
     } catch {
       continue;
     }
+
+    // Noted before the frame is otherwise handled: a terminal may also carry
+    // the completed payload or an error, and those paths `continue`.
+    if (isTerminalFrame(dialect, event)) sawTerminal = true;
 
     const delta = extractDelta(dialect, event);
     if (delta) {
@@ -456,13 +514,31 @@ async function fetchStreamed(
     }
 
     const problem = extractPayloadError(dialect, event);
-    if (problem) upstreamMessage = problem;
+    if (problem) {
+      upstreamMessage = problem;
+      if (isThinkingExhausted(dialect, event)) exhaustedThinking = true;
+    }
   }
 
-  if (!accumulated && !structuredText && !completedText && upstreamMessage) {
-    const error = new Error(`${label}: ${upstreamMessage}`) as UpstreamError;
-    error.retryable = false;
-    throw error;
+  if (!accumulated && !structuredText && !completedText) {
+    if (upstreamMessage) {
+      const error = new Error(`${label}: ${upstreamMessage}`) as UpstreamError;
+      error.retryable = false;
+      error.lowerEffort = exhaustedThinking;
+      throw error;
+    }
+    // Nothing arrived and the upstream never said it was finished: the
+    // connection dropped mid-stream (measured on OpenCode Go: Kimi cut off
+    // mid-word after two minutes of reasoning). That is transient, so it
+    // takes the ordinary retry at the same effort - not the effort step-down,
+    // which would push Kimi below the floor it needs to read diagrams.
+    if (!sawTerminal) {
+      const error = new Error(
+        `${label}: the connection dropped while the model was still thinking.`,
+      ) as UpstreamError;
+      error.retryable = true;
+      throw error;
+    }
   }
 
   return structuredText || completedText || accumulated;

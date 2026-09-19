@@ -8,7 +8,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Claude | Poe | `claude-opus-4.8` | |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
 | Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | |
-| MiniMax | MiniMax (mainland) | `MiniMax-M3` | |
+| MiniMax | MiniMax (mainland) | `MiniMax-M3`, at least high thinking | |
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
 | Grok | OpenCode Go | `grok-4.6` | |
 | Qwen | OpenCode Go | `qwen3.8-max` | |
@@ -61,7 +61,7 @@ Channels speak four different API dialects, all handled in `worker/channels.ts`:
 
 One key and one base URL (`https://opencode.ai/zen/go/v1`) front three protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. Two routes use a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. Kimi: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium`. The upload form labels both.
+A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. Two OpenCode routes use a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. Kimi: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium`. MiniMax carries a `high` floor for a different reason (see below). The upload form labels all three.
 
 #### Getting structured output out of each dialect
 
@@ -75,7 +75,7 @@ The dialects disagree about how — and whether — a caller can pin the respons
 
 The two Anthropic-protocol gateways then differ from each other:
 
-- **MiniMax M3** honours a forced `tool_choice`, but only while extended thinking is on. Without thinking it quietly ignores the tool and answers in prose.
+- **MiniMax M3** honours a forced `tool_choice`, but only while extended thinking is on. Without thinking it quietly ignores the tool and answers in prose. This is why its route carries `minEffort: "high"`: `none` has no budget in `ANTHROPIC_BUDGET`, so picking it would send no `thinking` block at all and cost the structured output along with the accuracy. `max` is still honoured.
 - **Kimi Code** has thinking permanently on for its coding models and rejects any forced tool alongside it: *"tool_choice 'specified' is incompatible with thinking enabled"*. So that route is flagged `structured: false` and never offers tools.
 
 When a route cannot pin the shape, `buildTutorPrompt` appends an explicit six-field contract to the prompt instead. This matters more than it sounds: without it, Kimi returned a different envelope on nearly every run — `{problems:[…]}`, `{assignment_title, problems}`, a bare object — and the parser only handled some of them. With it, six consecutive runs returned the exact six fields.
@@ -94,6 +94,8 @@ The five UI levels (`none`/`low`/`medium`/`high`/`max`) do **not** mean the same
 A level with no mapping sends **nothing** rather than a value the model would reject.
 
 Because no vendor publishes a reliable per-model matrix, the Worker also **degrades itself**: if an upstream answers 400/422 complaining about a parameter, the request is retried one rung down a ladder — drop `reasoning`, then relax the strict JSON schema to plain JSON mode, then drop the schema entirely. Each downgrade is reported to the client as a `status` event. The parsing pipeline in `shared/solution.ts` is what makes the lower rungs safe.
+
+A thinking model can also fail by thinking too much: it spends every output token it has on reasoning and stops before writing a single answer character. MiniMax M3 does this against the `max_tokens` the Worker sends; the OpenCode Go routes do it against the gateway's own default cap, since the Worker sends none there (`stop_reason: "max_tokens"`, `incomplete_details.reason: "max_output_tokens"`, or `finish_reason: "length"`, depending on the dialect). Retrying that unchanged would repeat it, so the Worker retries **one effort level down** instead, reported as a `status` event too. The step-down goes below the route's `minEffort` on purpose — the floor decides where a solve starts, not what it has to fail at. Raising the cap is not a substitute: measured on MiniMax, the model simply thinks longer to fill the extra room (see `AGENTS.md`).
 
 ### Stack
 
@@ -243,10 +245,10 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |
 | `POE_GEMINI_MODEL` | `gemini-3.1-pro` | Poe bot handle |
-| `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro` | Google model id |
+| `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Google model id (Pro tier is preview-suffixed on Google) |
 | `KIMI_CODE_MODEL` | `kimi-for-coding` | Tier-dependent; also `k3`, `k3-256k` |
 | `MOONSHOT_KIMI_MODEL` | `kimi-latest` | **Must be vision-capable** |
-| `MINIMAX_MODEL` | `MiniMax-M3` | **Must be vision-capable**; `MiniMax-M3[1m]` for 1M context |
+| `MINIMAX_MODEL` | `MiniMax-M3` | **Must be vision-capable**; `MiniMax-M3[1m]` for 1M context. Floored at high effort; max is honoured |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
 | `KIMI_BASE_URL` | `https://api.kimi.com/coding` | Anthropic-protocol base |
 | `MOONSHOT_BASE_URL` | `https://api.moonshot.cn/v1/chat/completions` | Mainland; global is `api.moonshot.ai` |
