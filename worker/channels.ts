@@ -829,25 +829,34 @@ export function isThinkingExhausted(
   dialect: Dialect,
   payload: Record<string, unknown>,
 ): boolean {
+  if (!hitOutputCap(dialect, payload)) return false;
+  if (dialect === "responses") {
+    return !extractFinalText("responses", asRecord(payload.response) ?? payload);
+  }
+  return !extractFinalText(dialect, payload);
+}
+
+/**
+ * Whether this frame or payload says the model stopped because it ran out of
+ * output tokens - regardless of whether any answer text came first. With no
+ * text it is thinking exhaustion (above). With some text it is a truncated
+ * answer, which run.ts hands to the task's parser: usable, it is delivered;
+ * useless, the request is retried one effort level down, since less thinking
+ * is what leaves room for the answer.
+ */
+export function hitOutputCap(dialect: Dialect, payload: Record<string, unknown>): boolean {
   if (dialect === "responses") {
     // Streamed: a `response.incomplete` event wrapping the response object.
     // Non-streamed: the response object itself.
     const response = asRecord(payload.response) ?? payload;
     return (
       readString(response, "status") === "incomplete" &&
-      readString(asRecord(response.incomplete_details), "reason") === "max_output_tokens" &&
-      !extractFinalText("responses", response)
+      readString(asRecord(response.incomplete_details), "reason") === "max_output_tokens"
     );
   }
-
   if (dialect === "chat-completions") {
-    const choice = asRecord(asArray(payload.choices)[0]);
-    return (
-      readString(choice, "finish_reason") === "length" &&
-      !extractFinalText("chat-completions", payload)
-    );
+    return readString(asRecord(asArray(payload.choices)[0]), "finish_reason") === "length";
   }
-
   return false;
 }
 

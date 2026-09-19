@@ -152,9 +152,20 @@ function recoverTruncatedJson(
   };
 }
 
+export type ParseOptions = {
+  /**
+   * Accept a response that was cut off before the final answer, delivering
+   * the working that arrived with a note in place of the answer. Off by
+   * default: the caller retries instead, because a fresh attempt usually
+   * yields a whole answer and a stub never does. Set on the last attempt.
+   */
+  allowIncomplete?: boolean;
+};
+
 export function parseStructuredSolution(
   rawText: string,
   provider: ProviderKey,
+  options: ParseOptions = {},
 ): StructuredSolution {
   let parsed: unknown;
   const jsonCandidate = normalizeJsonCandidate(rawText);
@@ -171,17 +182,18 @@ export function parseStructuredSolution(
       } else if (cutField && typeof record[cutField] === "string") {
         record[cutField] = `${(record[cutField] as string).trimEnd()}\n\n${CUT_OFF_NOTE}`;
       }
-      // Cut before the answer was written: say so rather than fail, as long
-      // as there is working to show.
-      if (
-        typeof record.step_by_step === "string" &&
-        record.step_by_step.trim() &&
-        !(typeof record.final_answer === "string" && record.final_answer.trim())
-      ) {
+      // Cut before the answer was written. With attempts left this is not
+      // worth delivering - the caller retries. On the last attempt, say so
+      // rather than fail, as long as there is working to show.
+      const hasAnswer = typeof record.final_answer === "string" && record.final_answer.trim();
+      const hasWorking = typeof record.step_by_step === "string" && record.step_by_step.trim();
+      if (!hasAnswer && hasWorking && options.allowIncomplete) {
         record.final_answer = CUT_OFF_BEFORE_ANSWER;
       }
-      const salvaged = coerceStructuredSolution(record);
-      if (salvaged) return salvaged;
+      if (hasAnswer || options.allowIncomplete) {
+        const salvaged = coerceStructuredSolution(record);
+        if (salvaged) return salvaged;
+      }
     }
 
     const fallback = synthesizeStructuredSolutionFromText(rawText);
@@ -853,8 +865,9 @@ function hasMeaningfulContent(value: string, minimumLength = 10) {
 export function finalizeProviderArtifact(
   provider: ProviderKey,
   rawText: string,
+  options: ParseOptions = {},
 ): ProviderArtifact {
-  let solution = parseStructuredSolution(rawText, provider);
+  let solution = parseStructuredSolution(rawText, provider, options);
 
   let latexBody = stripCodeFence(solution.latex_body).trim();
   if (latexBody.length < 24) {
