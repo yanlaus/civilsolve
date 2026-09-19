@@ -41,7 +41,8 @@
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
-    "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro",
+    // Google ids are preview-suffixed on the Pro tier; "gemini-3.1-pro" 404s.
+    "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro-preview",
     // The optional interpretation pass runs on top-tier Poe models, set here.
     // gpt-5.4-pro reads well but is slow (~95s); gpt-5.4 is much faster.
     "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",

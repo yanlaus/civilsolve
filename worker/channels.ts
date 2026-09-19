@@ -316,6 +316,18 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // Mainland host. International deployments use https://api.minimax.io.
       defaultUrl: "https://api.minimaxi.com/anthropic",
       effort: ANTHROPIC_BUDGET,
+      // Floored at "high" (16384 thinking tokens). M3 only honours the forced
+      // tool call while thinking is on, and "none" has no budget at all, which
+      // would disable thinking entirely. "max" is still honoured.
+      //
+      // "high" is not safe on its own: on the B.8 momentum fixture M3 thinks
+      // until it hits max_tokens and never writes an answer, twice out of two,
+      // ~120 s each (the same fixture answers correctly at "medium" in ~81 s).
+      // Raising max_tokens does not help - it thinks longer to fill the room.
+      // That failure is detected by isThinkingExhausted and retried one level
+      // down by run.ts, so the floor buys the better answer when thinking fits
+      // and costs one wasted attempt when it does not.
+      minEffort: "high",
     },
   },
 };
@@ -593,8 +605,17 @@ function toAnthropicImage(dataUrl: string) {
 // writing a single answer character - stop_reason "max_tokens", empty answer.
 // So max_tokens gets a generous floor: thinking may overshoot its budget several
 // times over and there is still room for the answer.
+//
+// The floor alone is not enough once the budget itself is large. At the "high"
+// floor the budget is 16384, so a flat 32000 ceiling lets thinking consume
+// everything and leave nothing - the answer comes back empty. Headroom is
+// therefore proportional to the budget as well: the model may think to twice
+// its budget and still have a full answer's worth of tokens left. Measured:
+// MiniMax accepts max_tokens up to at least 100000, so this stays well inside
+// what the gateway allows.
 const ANTHROPIC_ANSWER_TOKENS = 8192;
 const ANTHROPIC_MIN_MAX_TOKENS = 32000;
+const ANTHROPIC_OVERSHOOT_FACTOR = 2;
 
 /** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
 function channelHeaders(route: Route, task: Task): Record<string, string> {
@@ -641,7 +662,10 @@ export function buildRequest(
       model: route.model,
       // Required by the Messages API, and it must leave room for the answer
       // after thinking - which can run well past its budget (see above).
-      max_tokens: Math.max((budget ?? 0) + ANTHROPIC_ANSWER_TOKENS, ANTHROPIC_MIN_MAX_TOKENS),
+      max_tokens: Math.max(
+        (budget ?? 0) * ANTHROPIC_OVERSHOOT_FACTOR + ANTHROPIC_ANSWER_TOKENS,
+        ANTHROPIC_MIN_MAX_TOKENS,
+      ),
       system: instructions,
       messages: [{ role: "user", content }],
     };
@@ -840,15 +864,48 @@ export function isReasoningOnlyFrame(dialect: Dialect, data: string): boolean {
   }
   if (dialect === "chat-completions") {
     // {"delta":{"reasoning_content":"..."}} - but never a frame that also has
-    // answer content, an error object, or MiniMax's in-body status.
+    // answer content, an error object, MiniMax's in-body status, or a real
+    // finish_reason (every chunk carries `"finish_reason":null`; only a string
+    // value is a terminal, and that must reach the parser).
     return (
       data.includes('"reasoning_content"') &&
       !/"content"\s*:\s*"/.test(data) &&
       !data.includes('"error"') &&
-      !data.includes('"base_resp"')
+      !data.includes('"base_resp"') &&
+      !/"finish_reason"\s*:\s*"/.test(data)
     );
   }
   return false;
+}
+
+/**
+ * Whether this frame is the upstream's own end-of-response marker. Tracked so
+ * a stream that simply stops - no terminal, no error, nothing accumulated -
+ * can be told apart from a completed-but-empty answer. Measured on OpenCode
+ * Go: kimi-k2.7-code streamed 20,725 characters of reasoning over 128 s and
+ * then the connection closed mid-word, with no finish_reason and no [DONE].
+ * That is a dropped connection, not a model decision, and run.ts retries it
+ * at the same effort rather than stepping down.
+ */
+export function isTerminalFrame(dialect: Dialect, event: Record<string, unknown>): boolean {
+  if (dialect === "responses") {
+    return (
+      event.type === "response.completed" ||
+      event.type === "response.incomplete" ||
+      event.type === "response.failed"
+    );
+  }
+  if (dialect === "chat-completions") {
+    return Boolean(readString(asRecord(asArray(event.choices)[0]), "finish_reason"));
+  }
+  if (dialect === "anthropic") {
+    return (
+      event.type === "message_stop" ||
+      Boolean(readString(asRecord(event.delta), "stop_reason"))
+    );
+  }
+  // gemini: a candidate carrying finishReason.
+  return asArray(event.candidates).some((c) => Boolean(readString(asRecord(c), "finishReason")));
 }
 
 /** SSE payload that ends the stream, if the dialect uses one. */
@@ -1001,6 +1058,63 @@ export function extractFinalText(dialect: Dialect, payload: Record<string, unkno
 }
 
 /**
+ * True when the model spent every output token it had on thinking and never
+ * wrote an answer. Each dialect reports it differently:
+ *
+ *   anthropic         stop_reason "max_tokens", no text and no tool block
+ *   responses         status "incomplete" with incomplete_details.reason
+ *                     "max_output_tokens", no output_text in the response
+ *   chat-completions  finish_reason "length" with no content
+ *
+ * Measured on MiniMax M3 (anthropic) at a 16384 budget, and on OpenCode Go
+ * (responses, chat-completions) where the worker sends no output cap and the
+ * gateway's own default is the ceiling: a gpt-5.6-luna run that succeeded
+ * used 16,343 output tokens, of which 11,912 were reasoning - 41 short of
+ * 16,384. Any run that thinks slightly harder is cut mid-reasoning with no
+ * message item at all. Raising the cap does not reliably help (M3 thinks
+ * longer to fill the room and drifted to a wrong answer), so run.ts treats
+ * this as a signal to retry one effort level down.
+ *
+ * A truncated answer is still an answer, so this requires the payload to carry
+ * no usable content. A streamed terminal frame (anthropic `message_delta`, a
+ * chat-completions chunk carrying only `finish_reason`) has no content to
+ * inspect, and fetchStreamed only consults this once nothing has accumulated,
+ * so the same guard holds on both paths. A frame that does carry content is
+ * consumed by extractDelta before this is ever reached.
+ */
+export function isThinkingExhausted(
+  dialect: Dialect,
+  payload: Record<string, unknown>,
+): boolean {
+  if (dialect === "anthropic") {
+    const stop =
+      readString(asRecord(payload.delta), "stop_reason") || readString(payload, "stop_reason");
+    return stop === "max_tokens" && !extractFinalText("anthropic", payload);
+  }
+
+  if (dialect === "responses") {
+    // Streamed: a `response.incomplete` event wrapping the response object.
+    // Non-streamed: the response object itself.
+    const response = asRecord(payload.response) ?? payload;
+    return (
+      readString(response, "status") === "incomplete" &&
+      readString(asRecord(response.incomplete_details), "reason") === "max_output_tokens" &&
+      !extractFinalText("responses", response)
+    );
+  }
+
+  if (dialect === "chat-completions") {
+    const choice = asRecord(asArray(payload.choices)[0]);
+    return (
+      readString(choice, "finish_reason") === "length" &&
+      !extractFinalText("chat-completions", payload)
+    );
+  }
+
+  return false;
+}
+
+/**
  * Error reported inside an otherwise successful payload or stream event.
  * MiniMax in particular answers HTTP 200 with a non-zero `base_resp.status_code`.
  */
@@ -1025,6 +1139,10 @@ export function extractPayloadError(dialect: Dialect, payload: Record<string, un
         "The provider reported a stream failure."
       );
     }
+  }
+
+  if (isThinkingExhausted(dialect, payload)) {
+    return "the model used its whole token budget thinking and never wrote an answer.";
   }
 
   if (dialect === "gemini") {
