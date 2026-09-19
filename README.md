@@ -5,12 +5,12 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
-| Claude | Poe | `claude-opus-4.8` | |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
 | Grok | OpenCode Go | `grok-4.6` | |
+| Claude | Poe | `claude-opus-4.8` | listed last; badged **Uses more credit** |
 
-Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
+The picker shows this order with an icon per provider. Claude runs as Opus on Poe, the priciest bot there by a wide margin, so its card carries a "Uses more credit" badge (`HIGHER_CREDIT_PROVIDERS` in `shared/providers.ts`) and sits at the end. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 

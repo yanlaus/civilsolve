@@ -1,15 +1,22 @@
 import { useEffect, useState } from "react";
 import {
+  Asterisk,
   BookOpen,
   Brain,
   Calculator,
   Eye,
   FileImage,
   FileText,
+  Flame,
+  Gem,
   Loader2,
   PenSquare,
+  Sparkles,
   Upload,
+  Waves,
   X,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
@@ -18,6 +25,7 @@ import {
   DEFAULT_INTERPRETERS,
   DEFAULT_PROVIDER,
   DEFAULT_VERIFIER,
+  HIGHER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type HealthResponse,
@@ -50,6 +58,17 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
+
+// One glyph per provider so the cards read at a glance. Lucide, like the rest
+// of the UI, rather than vendor logos: no assets, no trademark questions, and
+// they take the accent colour in both themes.
+const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
+  chatgpt: Sparkles,
+  gemini: Gem,
+  deepseek: Waves,
+  grok: Zap,
+  claude: Asterisk,
+};
 
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
@@ -460,6 +479,8 @@ export function UploadForm({
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
             const checked = selectedProvider === provider.key && available;
+            const Icon = PROVIDER_ICONS[provider.key];
+            const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const note = status
               ? status.configured
                 ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
@@ -490,9 +511,22 @@ export function UploadForm({
                   onChange={() => selectProvider(provider.key)}
                   className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
                 />
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+                    <Icon
+                      className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]"
+                      aria-hidden="true"
+                    />
                     {provider.label}
+                    {higherCredit ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e] dark:border-[#4a2f18] dark:bg-[#2b1d10] dark:text-[#e8903a]"
+                        title={`${provider.label} bills more per solve than the other providers.`}
+                      >
+                        <Flame className="h-3 w-3" aria-hidden="true" />
+                        Uses more credit
+                      </span>
+                    ) : null}
                   </span>
                   <span className="mt-1 block break-words text-xs text-[#8a7f72] dark:text-[#a8a098]">
                     {note}

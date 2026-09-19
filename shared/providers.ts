@@ -12,7 +12,8 @@
 
 export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok";
 
-export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "claude", "gemini", "deepseek", "grok"];
+/** Picker order. Claude sits last because it costs the most per solve (below). */
+export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "gemini", "deepseek", "grok", "claude"];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
@@ -25,6 +26,13 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   deepseek: "DeepSeek",
   grok: "Grok",
 };
+
+/**
+ * Providers whose upstream account bills noticeably more per solve than the
+ * rest. The picker shows a badge so the cost is visible before a solve, not
+ * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin.
+ */
+export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["claude"]);
 
 /**
  * Selected by default in the upload form. Only one provider runs per solve -
