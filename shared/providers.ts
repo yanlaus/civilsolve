@@ -2,29 +2,17 @@
 //
 // A "provider" is what the user picks in the UI (ChatGPT, Claude, ...).
 // A "channel" is the upstream account/API the key comes from (Poe, OpenCode
-// Go, Kimi Code, ...). One provider can be reachable over several channels;
-// the Worker resolves which one to use from env (see worker/channels.ts).
+// Go, Google). One provider can be reachable over several channels; the
+// Worker resolves which one to use from env (see worker/channels.ts).
+//
+// Kimi, MiniMax and Qwen were removed in September 2026: across two full runs
+// of the B.8 fixture (Kimi 0/4, Qwen 0/8, MiniMax 1/4) they never gave a
+// reliable answer. Their routes, the Kimi Code / Moonshot / MiniMax channels,
+// and the Anthropic-protocol dialect they alone used are in git history.
 
-export type ProviderKey =
-  | "chatgpt"
-  | "claude"
-  | "gemini"
-  | "kimi"
-  | "minimax"
-  | "deepseek"
-  | "grok"
-  | "qwen";
+export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok";
 
-export const PROVIDER_KEYS: ProviderKey[] = [
-  "chatgpt",
-  "claude",
-  "gemini",
-  "kimi",
-  "minimax",
-  "deepseek",
-  "grok",
-  "qwen",
-];
+export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "claude", "gemini", "deepseek", "grok"];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
@@ -34,11 +22,8 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   chatgpt: "ChatGPT",
   claude: "Claude",
   gemini: "Gemini",
-  kimi: "Kimi",
-  minimax: "MiniMax",
   deepseek: "DeepSeek",
   grok: "Grok",
-  qwen: "Qwen",
 };
 
 /**
@@ -56,16 +41,9 @@ export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
 export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
 export const DEFAULT_VERIFIER: ProviderKey = "claude";
 
-export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
+export type ChannelKey = "poe" | "opencode" | "google";
 
-export const CHANNEL_KEYS: ChannelKey[] = [
-  "poe",
-  "opencode",
-  "kimi",
-  "moonshot",
-  "minimax",
-  "google",
-];
+export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google"];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -75,9 +53,6 @@ export function isChannelKey(value: string): value is ChannelKey {
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   poe: "Poe",
   opencode: "OpenCode Go",
-  kimi: "Kimi Code",
-  moonshot: "Moonshot",
-  minimax: "MiniMax",
   google: "Google AI",
 };
 

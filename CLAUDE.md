@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Read first
 
-`AGENTS.md` holds the project invariants (keys server-side, providers vs channels, effort mapping, untrusted model output, no storage, CPU budget on the free plan) and the provider gotchas found by real testing. `README.md` holds the full architecture, API, and config reference. Both are authoritative; this file only adds what is not already written there. Keep all three in sync when architecture, provider behaviour, deployment, or error handling changes.
-
-Note: comments in `worker/channels.ts` and `AGENTS.md` that mention `worker/solve.ts` refer to what is now `worker/run.ts`.
+`AGENTS.md` holds the project invariants (keys server-side, providers vs channels, effort mapping, untrusted model output, no storage, CPU budget on the free plan), the five failure modes, and the provider gotchas found by real testing. `README.md` holds the full architecture, API, and config reference. Both are authoritative; this file only adds what is not already written there. Keep all three in sync when architecture, provider behaviour, deployment, or error handling changes.
 
 ## Commands
 
@@ -41,10 +39,10 @@ One Cloudflare Worker serves the Vite SPA as static assets and a Hono app for `/
 `worker/index.ts` → `worker/run.ts` → `worker/channels.ts`
 
 - **`index.ts`** validates the body (`readBoundedBody` counts real bytes against `MAX_BODY_BYTES`), then builds a **`Task`** — `{ prompt(fn), instructions, schemaName, schema, images, referenceImages?, session }` — and a `finalize(rawText)` callback, and hands both to `runTask`. `/api/solve` and `/api/interpret` differ *only* in the Task they build and the `finalize` they pass. A new model-calling feature is a new Task, not a new orchestrator.
-- **`run.ts`** is dialect- and task-agnostic: immediate SSE headers, 15 s heartbeats, 280 s safety timeout, delta coalescing (2048 chars / 400 ms), and the retry/downgrade loop. `Capabilities = { reasoning: bool, schema: "strict" | "loose" | "none" }` degrade independently when an upstream 400/422 names a parameter (`paramRejection`); transient statuses get one retry after 3 s; nothing is retried once a `delta` has reached the client.
-- **`channels.ts`** owns the `ROUTES` table (`Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>>`), `resolveRoute(provider, env, override?)`, and per-**dialect** request building + stream parsing for the four dialects: `responses`, `chat-completions`, `anthropic`, `gemini`. A `RouteSpec` carries `effort: EffortSpec` (enum or token budget, per level — a missing level sends nothing), optional `forceEffort` / `minEffort`, and `streaming` / `structured` flags that record what the upstream can actually do. `interpretOverride` is how `/api/interpret` pins itself to Poe top-tier models regardless of the solve-time channel.
+- **`run.ts`** is dialect- and task-agnostic: immediate SSE headers, 15 s heartbeats, 280 s safety timeout, delta coalescing (2048 chars / 400 ms), and the retry/downgrade loop. `Capabilities = { reasoning: bool, schema: "strict" | "loose" | "none" }` degrade independently when an upstream 400/422 names a parameter (`paramRejection`); transient statuses and dropped streams get one retry after 3 s at the same effort; thinking exhaustion gets one retry one effort level down; nothing is retried once a `delta` has reached the client.
+- **`channels.ts`** owns the `ROUTES` table (`Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>>`), `resolveRoute(provider, env, override?)`, and per-**dialect** request building + stream parsing for the three dialects: `responses`, `chat-completions`, `gemini`. A `RouteSpec` carries `effort: EffortSpec` (enum or token budget, per level — a missing level sends nothing), optional `forceEffort` / `minEffort`, and `streaming` / `structured` flags that record what the upstream can actually do. `interpretOverride` is how `/api/interpret` pins itself to Poe top-tier models regardless of the solve-time channel.
 
-Adding a channel = one entry in `ROUTES` plus its env vars in `WorkerEnv` and `wrangler.jsonc`. Adding a dialect = extending `buildRequest`, `extractDelta`, `extractFinalText`, `extractPayloadError`, `streamTerminator`, `isReasoningOnlyFrame`.
+Adding a channel = one entry in `ROUTES` plus its env vars in `WorkerEnv` and `wrangler.jsonc`. Adding a dialect = extending `buildRequest`, `extractDelta`, `extractFinalText`, `extractPayloadError`, `streamTerminator`, `isReasoningOnlyFrame`, `isTerminalFrame`, `isThinkingExhausted`.
 
 ### Shared contract (`shared/`)
 
@@ -53,7 +51,7 @@ Pure string logic compiled into both bundles — no DOM, no Workers APIs, no imp
 - `stream-protocol.ts` — request body types, `SolveEvent` / `InterpretEvent` (`status` | `delta` | `done` | `error`), and every size limit.
 - `providers.ts` — `ProviderKey` / `ChannelKey` registries, defaults (`DEFAULT_PROVIDER`, `DEFAULT_INTERPRETERS`, `DEFAULT_VERIFIER`), `HealthResponse` shape.
 - `prompt.ts` — `EffortKey` and the solve / interpret / verify prompt builders. `enforceShape` appends the six-field contract when the route cannot pin the schema (`structured: false`).
-- `solution.ts` — `solutionSchema` plus the repair pipeline (`finalizeProviderArtifact`) that makes the lower schema rungs safe: alternate field names, `problems[]` shapes, schema-name wrappers, JSON-in-a-field, plain-text synthesis, LaTeX fence stripping.
+- `solution.ts` — `solutionSchema` plus the repair pipeline (`finalizeProviderArtifact`) that makes the lower schema rungs safe: alternate field names, `problems[]` shapes, schema-name wrappers, JSON-in-a-field, a JSON prefix cut off mid-stream (`recoverTruncatedJson`), plain-text synthesis, LaTeX fence stripping.
 - `interpretation.ts` — the same pair (schema + parser) for the interpretation pass.
 
 ### Client (`src/`)

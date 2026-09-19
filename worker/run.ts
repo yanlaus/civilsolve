@@ -14,7 +14,6 @@ import {
   extractDelta,
   extractFinalText,
   extractPayloadError,
-  extractStructuredDelta,
   isReasoningOnlyFrame,
   isTerminalFrame,
   isThinkingExhausted,
@@ -38,8 +37,8 @@ const MAX_TRANSIENT_RETRIES = 1;
 const RETRY_DELAY_MS = 3_000;
 /**
  * Retries after the model thought itself out of tokens. One only: the wasted
- * attempt runs to its full thinking budget (~120 s measured on MiniMax M3
- * at "high"), and a second would risk the safety timeout below.
+ * attempt runs to its full thinking budget (~120 s measured), and a second
+ * would risk the safety timeout below.
  */
 const MAX_EFFORT_STEPDOWNS = 1;
 /** Unrecognised 400s that we speculatively treat as a rejected parameter. */
@@ -393,7 +392,7 @@ async function fetchNonStreamed(
 
   const payload = (await response.json()) as Record<string, unknown>;
 
-  // Some upstreams (MiniMax) report failures inside an HTTP 200 body.
+  // Some upstreams report failures inside an HTTP 200 body.
   const payloadError = extractPayloadError(dialect, payload);
   if (payloadError) {
     const error = new Error(`${label}: ${payloadError}`) as UpstreamError;
@@ -428,11 +427,11 @@ async function fetchStreamed(
     throw error;
   }
 
-  // A stream request does not guarantee a stream back. MiniMax answers an
-  // invalid request with HTTP 200 and a plain JSON body carrying base_resp,
-  // and some gateways simply ignore `stream: true`. Without this branch the
-  // SSE reader finds no `data:` lines and the real reason is replaced by a
-  // useless "returned an empty response".
+  // A stream request does not guarantee a stream back: a gateway may answer
+  // an invalid request with HTTP 200 and a plain JSON error body, or simply
+  // ignore `stream: true`. Without this branch the SSE reader finds no
+  // `data:` lines and the real reason is replaced by a useless "returned an
+  // empty response".
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("event-stream")) {
     const text = await response.text();
@@ -467,7 +466,6 @@ async function fetchStreamed(
 
   const terminator = streamTerminator(dialect);
   let accumulated = "";
-  let structuredText = "";
   let completedText = "";
   let upstreamMessage = "";
   let exhaustedThinking = false;
@@ -498,15 +496,6 @@ async function fetchStreamed(
       continue;
     }
 
-    // Forced structured output arrives on its own channel and outranks any
-    // prose in the same response.
-    const structured = extractStructuredDelta(dialect, event);
-    if (structured) {
-      structuredText += structured;
-      await onDelta(structured);
-      continue;
-    }
-
     const completed = extractCompleted(dialect, event);
     if (completed) {
       completedText = extractFinalText(dialect, completed);
@@ -520,7 +509,7 @@ async function fetchStreamed(
     }
   }
 
-  if (!accumulated && !structuredText && !completedText) {
+  if (!accumulated && !completedText) {
     if (upstreamMessage) {
       const error = new Error(`${label}: ${upstreamMessage}`) as UpstreamError;
       error.retryable = false;
@@ -528,10 +517,10 @@ async function fetchStreamed(
       throw error;
     }
     // Nothing arrived and the upstream never said it was finished: the
-    // connection dropped mid-stream (measured on OpenCode Go: Kimi cut off
+    // connection dropped mid-stream (measured on OpenCode Go: cut off
     // mid-word after two minutes of reasoning). That is transient, so it
     // takes the ordinary retry at the same effort - not the effort step-down,
-    // which would push Kimi below the floor it needs to read diagrams.
+    // since nothing says the effort was the problem.
     if (!sawTerminal) {
       const error = new Error(
         `${label}: the connection dropped while the model was still thinking.`,
@@ -541,7 +530,7 @@ async function fetchStreamed(
     }
   }
 
-  return structuredText || completedText || accumulated;
+  return completedText || accumulated;
 }
 
 /**

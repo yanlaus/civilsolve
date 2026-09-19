@@ -139,7 +139,7 @@ export function UploadForm({
   // Some routes pin the reasoning level (forceEffort) or put a floor under it
   // (minEffort), and the Worker applies that regardless of what is sent. Show
   // it here instead of letting the user pick a level that is silently raised:
-  // ChatGPT and MiniMax both floor at "high".
+  // ChatGPT floors at "high".
   const selectedStatus = providerStatus?.[selectedProvider];
   const pinnedEffort = selectedStatus?.forcedEffort;
   const effortFloor = pinnedEffort ?? selectedStatus?.minEffort;
@@ -505,7 +505,7 @@ export function UploadForm({
         {noneConfigured ? (
           <p className="mt-3 text-sm text-[#c0392b] dark:text-[#f2b8b2]">
             No provider keys are configured on the server. Add at least one key
-            (POE_API_KEY, MOONSHOT_API_KEY, MINIMAX_API_KEY, or GOOGLE_API_KEY) and restart.
+            (OPENCODE_API_KEY, POE_API_KEY, or GOOGLE_API_KEY) and restart.
           </p>
         ) : null}
       </section>

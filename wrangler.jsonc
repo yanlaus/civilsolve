@@ -12,16 +12,13 @@
   // and live in .dev.vars locally - never put a key in this file.
   "vars": {
     // Which upstream account serves each provider.
-    // poe | opencode | kimi | moonshot | minimax | google (see
-    // worker/channels.ts for what each provider actually supports).
+    // poe | opencode | google (see worker/channels.ts for what each provider
+    // actually supports).
     "CHATGPT_CHANNEL": "opencode",
     "CLAUDE_CHANNEL": "poe",
     "GEMINI_CHANNEL": "poe",
-    "KIMI_CHANNEL": "opencode",
-    "MINIMAX_CHANNEL": "minimax",
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
-    "QWEN_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the
     // assignment is sent as images, never as OCR text. List the Poe bots your
@@ -31,13 +28,8 @@
     // gpt-5.6-luna runs at "high" or "max" only; lower picks are raised to
     // "high" (see minEffort in channels.ts).
     "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
-    // k2.7-code over k3 on cost. It misreads diagrams at effort "low", so the
-    // route floors it at "medium" (minEffort in channels.ts).
-    "OPENCODE_KIMI_MODEL": "kimi-k2.7-code",
     "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4-flash-vision-exp",
     "OPENCODE_GROK_MODEL": "grok-4.6",
-    // qwen3.7-max is text-only; 3.8 reads images.
-    "OPENCODE_QWEN_MODEL": "qwen3.8-max",
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
@@ -48,23 +40,14 @@
     "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",
     "INTERPRET_GEMINI_MODEL": "gemini-3.1-pro",
     "INTERPRET_CLAUDE_MODEL": "claude-opus-4.8",
-    "KIMI_CODE_MODEL": "kimi-for-coding",
-    "MOONSHOT_KIMI_MODEL": "kimi-latest",
-    // MiniMax-M2/M2.1 are text-only and answer "I cannot view the image"
-    // instead of failing, so they would invent solutions. M3 reads images.
-    "MINIMAX_MODEL": "MiniMax-M3",
 
-    // Endpoint overrides, for switching between mainland and global hosts.
-    // Defaults are the mainland hosts for Moonshot and MiniMax:
+    // Endpoint overrides (proxies). Defaults:
     //   "OPENCODE_BASE_URL": "https://opencode.ai/zen/go/v1",
-    //   "KIMI_BASE_URL": "https://api.kimi.com/coding",
-    //   "MOONSHOT_BASE_URL": "https://api.moonshot.cn/v1/chat/completions",
-    //   "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
     //   "POE_BASE_URL": "https://api.poe.com/v1/responses",
     //   "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
 
     // Comma-separated provider keys that should skip upstream streaming
-    // (still delivered to the browser over SSE), e.g. "kimi".
+    // (still delivered to the browser over SSE), e.g. "deepseek".
     "NO_STREAM": ""
   },
   "observability": {
