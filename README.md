@@ -1,19 +1,16 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Eight providers are available; **one runs per solve** (see the CPU note below for why):
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Five providers are available; **one runs per solve** (see the CPU note below for why):
 
 | Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
-| Claude | Poe | `claude-opus-4.8` | |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
-| Kimi | OpenCode Go (switchable to Kimi Code / Moonshot) | `kimi-k2.7-code`, at least medium thinking | |
-| MiniMax | MiniMax (mainland) | `MiniMax-M3`, at least high thinking | |
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
 | Grok | OpenCode Go | `grok-4.6` | |
-| Qwen | OpenCode Go | `qwen3.8-max` | |
+| Claude | Poe | `claude-opus-4.8` | listed last; badged **Uses more credit** |
 
-Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
+The picker shows this order with an icon per provider. Claude runs as Opus on Poe, the priciest bot there by a wide margin, so its card carries a "Uses more credit" badge (`HIGHER_CREDIT_PROVIDERS` in `shared/providers.ts`) and sits at the end. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -38,49 +35,39 @@ Nothing is stored server-side. Closing the tab abandons an in-flight solve (acce
 A **provider** is what the user picks in the UI. A **channel** is the upstream account the key comes from. One provider can be reachable over several channels, and the channel is resolved from env per request:
 
 ```
-chatgpt  ──> opencode | poe              (CHATGPT_CHANNEL)
+chatgpt  ──> opencode | poe     (CHATGPT_CHANNEL)
 claude   ──> poe
-gemini   ──> poe | google                (GEMINI_CHANNEL)
-kimi     ──> opencode | kimi | moonshot  (KIMI_CHANNEL)
-minimax  ──> minimax
+gemini   ──> poe | google       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
-qwen     ──> opencode
 ```
 
-Channels speak four different API dialects, all handled in `worker/channels.ts`:
+Channels speak three different API dialects, all handled in `worker/channels.ts`:
 
 | Dialect | Used by | Endpoint shape | Reasoning parameter |
 |---|---|---|---|
 | `responses` | Poe; OpenCode Go (GPT Luna, Grok) | `POST /v1/responses` | `reasoning: { effort }` (enum) |
-| `chat-completions` | OpenCode Go (Kimi, DeepSeek, Qwen); Moonshot | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
-| `anthropic` | Kimi Code, MiniMax | `POST /v1/messages` | `thinking: { budget_tokens }` (tokens) |
+| `chat-completions` | OpenCode Go (DeepSeek) | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
 | `gemini` | Google | `:streamGenerateContent?alt=sse` | `generationConfig.thinkingConfig.thinkingBudget` (tokens) |
 
 #### OpenCode Go
 
-One key and one base URL (`https://opencode.ai/zen/go/v1`) front three protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
+One key and one base URL (`https://opencode.ai/zen/go/v1`) front several protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. Two OpenCode routes use a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. Kimi: `kimi-k2.7-code` misread a diagram at `low` but reads it correctly from `medium` up, so `none`/`low` are raised to `medium`. MiniMax carries a `high` floor for a different reason (see below). The upload form labels all three.
+A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. One route uses a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. The upload form disables the levels below a floor and labels the provider.
 
 #### Getting structured output out of each dialect
 
-The dialects disagree about how — and whether — a caller can pin the response shape, so `worker/channels.ts` records what each route can actually do instead of discovering it by trial:
+The dialects disagree about how a caller can pin the response shape, so `worker/channels.ts` records what each route can actually do instead of discovering it by trial:
 
 | Dialect | How the shape is pinned |
 |---|---|
 | `responses`, `chat-completions` | `json_schema` response format |
 | `gemini` | `responseSchema` (an OpenAPI subset that rejects `additionalProperties`) |
-| `anthropic` | No `response_format` exists — a **forced tool call** is the only lever |
 
-The two Anthropic-protocol gateways then differ from each other:
+A route can also be flagged `structured: false` when its upstream cannot be made to hold the shape at all; `buildTutorPrompt` then appends an explicit six-field contract to the prompt instead. No current route needs it, but the mechanism stays: on the since-removed Kimi Code route it turned a different envelope on nearly every run into six consecutive runs of the exact six fields.
 
-- **MiniMax M3** honours a forced `tool_choice`, but only while extended thinking is on. Without thinking it quietly ignores the tool and answers in prose. This is why its route carries `minEffort: "high"`: `none` has no budget in `ANTHROPIC_BUDGET`, so picking it would send no `thinking` block at all and cost the structured output along with the accuracy. `max` is still honoured.
-- **Kimi Code** has thinking permanently on for its coding models and rejects any forced tool alongside it: *"tool_choice 'specified' is incompatible with thinking enabled"*. So that route is flagged `structured: false` and never offers tools.
-
-When a route cannot pin the shape, `buildTutorPrompt` appends an explicit six-field contract to the prompt instead. This matters more than it sounds: without it, Kimi returned a different envelope on nearly every run — `{problems:[…]}`, `{assignment_title, problems}`, a bare object — and the parser only handled some of them. With it, six consecutive runs returned the exact six fields.
-
-`shared/solution.ts` remains the safety net behind all of this, including for providers that wrap the answer in the schema name (`{"civil_solution": {…}}`, which MiniMax does).
+`shared/solution.ts` remains the safety net behind all of this, including for providers that wrap the answer in the schema name (`{"civil_solution": {…}}`), and for a response that was cut off mid-stream (see below).
 
 ### Thinking effort is not portable
 
@@ -89,13 +76,14 @@ The five UI levels (`none`/`low`/`medium`/`high`/`max`) do **not** mean the same
 - OpenAI-style enums accept `none` and `xhigh` only on GPT-5.x. Other bots clamp: `max` → `high`, and `none` is omitted.
 - Claude has no "off" enum value — thinking is disabled by omitting the parameter.
 - Gemini takes an integer token budget (2048 / 8192 / 16384 / 32768). Pro-tier models reject a budget of `0`, so `none` falls back to the model default.
-- Anthropic-protocol routes take `thinking.budget_tokens`, capped lower (max 24576) because `max_tokens` must exceed the budget and these gateways cap total output. Kimi thinks regardless of what is sent.
 
 A level with no mapping sends **nothing** rather than a value the model would reject.
 
 Because no vendor publishes a reliable per-model matrix, the Worker also **degrades itself**: if an upstream answers 400/422 complaining about a parameter, the request is retried one rung down a ladder — drop `reasoning`, then relax the strict JSON schema to plain JSON mode, then drop the schema entirely. Each downgrade is reported to the client as a `status` event. The parsing pipeline in `shared/solution.ts` is what makes the lower rungs safe.
 
-A thinking model can also fail by thinking too much: it spends every output token it has on reasoning and stops before writing a single answer character. MiniMax M3 does this against the `max_tokens` the Worker sends; the OpenCode Go routes do it against the gateway's own default cap, since the Worker sends none there (`stop_reason: "max_tokens"`, `incomplete_details.reason: "max_output_tokens"`, or `finish_reason: "length"`, depending on the dialect). Retrying that unchanged would repeat it, so the Worker retries **one effort level down** instead, reported as a `status` event too. The step-down goes below the route's `minEffort` on purpose — the floor decides where a solve starts, not what it has to fail at. Raising the cap is not a substitute: measured on MiniMax, the model simply thinks longer to fill the extra room (see `AGENTS.md`).
+A thinking model can also fail by thinking too much: it spends every output token it has on reasoning and stops before writing a single answer character. The OpenCode Go routes do this against the gateway's own default cap, since the Worker sends none there (`incomplete_details.reason: "max_output_tokens"` or `finish_reason: "length"`, depending on the dialect). Retrying that unchanged would repeat it, so the Worker retries **one effort level down** instead, reported as a `status` event too. The step-down goes below the route's `minEffort` on purpose — the floor decides where a solve starts, not what it has to fail at. Raising the cap is not a substitute: measured, a model simply thinks longer to fill the extra room (see `AGENTS.md`).
+
+A stream can also just stop — no terminal frame, no error, nothing received — when the gateway drops the connection mid-reasoning. That is retried once at the same effort. When a stream stops *after* partial answer text, what arrived is a valid prefix of the solution JSON. If that prefix reaches the final answer, `shared/solution.ts` closes the open string and object, keeps every complete field, marks the cut one, and rebuilds the LaTeX body if that was the casualty. If it does not reach the answer, it is retried instead (same effort for a drop, one level down if the output cap was hit), and only when no retry remains is the working delivered with a note in place of the answer.
 
 ### Stack
 
@@ -108,7 +96,7 @@ A thinking model can also fail by thinking too much: it spends every output toke
 | Markdown | marked + DOMPurify (lazy-loaded chunk) |
 | PDF input | pdfjs-dist (lazy-loaded, browser-side rasterization) |
 | PDF export | Browser print stylesheet (`Save as PDF`) |
-| LLM access | Poe Responses API, Kimi Code + MiniMax (Anthropic protocol), Moonshot, Google Generative Language API |
+| LLM access | Poe Responses API, OpenCode Go (Responses + chat completions), Google Generative Language API |
 
 ### File structure
 
@@ -154,16 +142,16 @@ Reports which providers are usable, without exposing any secret value:
 ```json
 {
   "providers": {
-    "chatgpt": { "channel": "poe",      "model": "gpt-5.4",         "configured": true  },
-    "claude":  { "channel": "poe",      "model": "claude-opus-4.8", "configured": true  },
-    "gemini":  { "channel": "poe",      "model": "gemini-3.1-pro",  "configured": true  },
-    "kimi":    { "channel": "kimi",     "model": "kimi-for-coding", "configured": true  },
-    "minimax": { "channel": "minimax",  "model": "MiniMax-M3",      "configured": true  }
+    "chatgpt":  { "channel": "opencode", "model": "gpt-5.6-luna",                 "configured": true, "minEffort": "high" },
+    "claude":   { "channel": "poe",      "model": "claude-opus-4.8",              "configured": true },
+    "gemini":   { "channel": "poe",      "model": "gemini-3.1-pro",               "configured": true },
+    "deepseek": { "channel": "opencode", "model": "deepseek-v4-flash-vision-exp", "configured": true },
+    "grok":     { "channel": "opencode", "model": "grok-4.6",                     "configured": true }
   }
 }
 ```
 
-The upload form uses this to disable providers whose key is missing.
+The upload form uses this to disable providers whose key is missing, and to disable effort levels below a route's `minEffort`.
 
 ### `POST /api/interpret/:provider`
 
@@ -171,9 +159,9 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (Kimi, MiniMax, …) keeps its normal route if picked.
+Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (DeepSeek, Grok) keeps its normal route if picked.
 
-### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `kimi` | `minimax`)
+### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok`)
 
 Request JSON:
 
@@ -204,7 +192,7 @@ event: error    data: {"message":"..."}
 
 Only **visible output** is forwarded as `delta`. Reasoning summaries, tool-call arguments, and Gemini "thought" parts are filtered out per dialect — concatenating them would corrupt the JSON the parser expects, and they get more frequent at higher effort levels.
 
-Set the `NO_STREAM` var (e.g. `"kimi"`) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic.
+Set the `NO_STREAM` var (e.g. `"deepseek"`) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic.
 
 ## Configuration
 
@@ -212,11 +200,8 @@ Set the `NO_STREAM` var (e.g. `"kimi"`) to make those providers use a non-stream
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `OPENCODE_API_KEY` | ChatGPT, Kimi, DeepSeek, Grok, Qwen | <https://opencode.ai/go> |
+| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok | <https://opencode.ai/go> |
 | `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
-| `KIMI_API_KEY` | Kimi | Kimi Code Console, <https://www.kimi.com/code> |
-| `MOONSHOT_API_KEY` | Kimi, only when `KIMI_CHANNEL=moonshot` | <https://platform.moonshot.cn> (mainland) |
-| `MINIMAX_API_KEY` | MiniMax | <https://platform.minimaxi.com> (mainland) |
 | `GOOGLE_API_KEY` | Gemini, only when `GEMINI_CHANNEL=google` | <https://aistudio.google.com/apikey> |
 
 - Local: copy `.dev.vars.example` to `.dev.vars` and fill in the keys you have. `.dev.vars` is gitignored.
@@ -233,30 +218,21 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
-| `KIMI_CHANNEL` | `opencode` | `opencode`, `kimi`, or `moonshot` |
-| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `QWEN_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` | `opencode` | Only OpenCode Go serves these |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
-| `OPENCODE_KIMI_MODEL` | `kimi-k2.7-code` | Floored at medium effort; `kimi-k3` reads correctly at low but costs more |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
-| `OPENCODE_QWEN_MODEL` | `qwen3.8-max` | `qwen3.7-max` is text-only |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Endpoint override |
-| `MINIMAX_CHANNEL` | `minimax` | Channel for MiniMax |
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |
 | `POE_GEMINI_MODEL` | `gemini-3.1-pro` | Poe bot handle |
 | `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Google model id (Pro tier is preview-suffixed on Google) |
-| `KIMI_CODE_MODEL` | `kimi-for-coding` | Tier-dependent; also `k3`, `k3-256k` |
-| `MOONSHOT_KIMI_MODEL` | `kimi-latest` | **Must be vision-capable** |
-| `MINIMAX_MODEL` | `MiniMax-M3` | **Must be vision-capable**; `MiniMax-M3[1m]` for 1M context. Floored at high effort; max is honoured |
+| `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.4-pro` / `gemini-3.1-pro` / `claude-opus-4.8` | Poe bots for the interpretation pass |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
-| `KIMI_BASE_URL` | `https://api.kimi.com/coding` | Anthropic-protocol base |
-| `MOONSHOT_BASE_URL` | `https://api.moonshot.cn/v1/chat/completions` | Mainland; global is `api.moonshot.ai` |
-| `MINIMAX_BASE_URL` | `https://api.minimaxi.com/anthropic` | Mainland; international is `api.minimax.io` |
 | `GOOGLE_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Endpoint override |
 | `NO_STREAM` | *(empty)* | Providers that skip upstream streaming |
 
-The assignment is always sent as images, so **every model here must be vision-capable**. A text-only model does not necessarily fail: MiniMax-M2/M2.1 answer "I cannot view the image" and then invent a plausible solution, which is worse. Verify vision before changing a model id.
+The assignment is always sent as images, so **every model here must be vision-capable**. A text-only model does not necessarily fail: some answer "I cannot view the image" and then invent a plausible solution, which is worse. Verify vision before changing a model id.
 
 Poe bot handles change over time. List the ones your key can actually see with:
 
@@ -313,7 +289,7 @@ Free-tier fit: a solve is at most 5 requests (100k/day limit), static assets are
 
 Deduplicating the N uploads would need either server-side storage or a single fan-out request, and both are ruled out by design (see `AGENTS.md`) — so the lever available is payload size, not request count.
 
-**Only one provider runs per solve.** The picker is single-choice. On the free plan each per-token stream (OpenCode Go, MiniMax) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
+**Only one provider runs per solve.** The picker is single-choice. On the free plan each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
 
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
 

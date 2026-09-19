@@ -1,8 +1,8 @@
 // Upstream channel adapters.
 //
-// Every provider is reached through exactly one "channel" (Poe, Kimi Code,
-// Moonshot, MiniMax, Google), resolved from env at request time. Channels
-// speak four different API dialects, so this module owns:
+// Every provider is reached through exactly one "channel" (Poe, OpenCode Go,
+// Google), resolved from env at request time. Channels speak three different
+// API dialects, so this module owns:
 //
 //   - route resolution (which channel/model/key/endpoint for a provider)
 //   - request building per dialect, including the reasoning-effort parameter
@@ -20,55 +20,41 @@ import {
   type ProviderStatus,
 } from "../shared/providers";
 
-export type Dialect = "responses" | "chat-completions" | "gemini" | "anthropic";
+export type Dialect = "responses" | "chat-completions" | "gemini";
 
 export type WorkerEnv = {
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
   OPENCODE_API_KEY?: string;
-  KIMI_API_KEY?: string;
-  MOONSHOT_API_KEY?: string;
-  MINIMAX_API_KEY?: string;
   GOOGLE_API_KEY?: string;
 
   // --- Channel routing: which account serves each provider ---------------
   CHATGPT_CHANNEL?: string;
   CLAUDE_CHANNEL?: string;
   GEMINI_CHANNEL?: string;
-  KIMI_CHANNEL?: string;
-  MINIMAX_CHANNEL?: string;
   DEEPSEEK_CHANNEL?: string;
   GROK_CHANNEL?: string;
-  QWEN_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   POE_CHATGPT_MODEL?: string;
   POE_CLAUDE_MODEL?: string;
   POE_GEMINI_MODEL?: string;
   OPENCODE_CHATGPT_MODEL?: string;
-  OPENCODE_KIMI_MODEL?: string;
   OPENCODE_DEEPSEEK_MODEL?: string;
   OPENCODE_GROK_MODEL?: string;
-  OPENCODE_QWEN_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
-  KIMI_CODE_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
   INTERPRET_GEMINI_MODEL?: string;
   INTERPRET_CLAUDE_MODEL?: string;
-  MOONSHOT_KIMI_MODEL?: string;
-  MINIMAX_MODEL?: string;
 
-  // --- Endpoint overrides (mainland vs global hosts, proxies) ------------
+  // --- Endpoint overrides (proxies) --------------------------------------
   POE_BASE_URL?: string;
   OPENCODE_BASE_URL?: string;
-  KIMI_BASE_URL?: string;
-  MOONSHOT_BASE_URL?: string;
-  MINIMAX_BASE_URL?: string;
   GOOGLE_BASE_URL?: string;
 
   // --- Behaviour ---------------------------------------------------------
   // Comma-separated provider keys that should use a non-streamed upstream
-  // fetch (still delivered over the same SSE response), e.g. "kimi,minimax".
+  // fetch (still delivered over the same SSE response), e.g. "deepseek".
   NO_STREAM?: string;
   /** Superseded by NO_STREAM; still read so old configs keep working. */
   POE_NO_STREAM?: string;
@@ -110,13 +96,6 @@ const CLAMPED_EFFORT: EffortSpec = {
 const GEMINI_BUDGET: EffortSpec = {
   kind: "budget",
   values: { low: 2048, medium: 8192, high: 16384, max: 32768 },
-};
-
-// Anthropic extended-thinking budgets. Capped lower than Gemini because
-// max_tokens must exceed the budget and these gateways cap total output.
-const ANTHROPIC_BUDGET: EffortSpec = {
-  kind: "budget",
-  values: { low: 2048, medium: 8192, high: 16384, max: 24576 },
 };
 
 // ---------------------------------------------------------------------------
@@ -225,50 +204,6 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       effort: GEMINI_BUDGET,
     },
   },
-  kimi: {
-    opencode: {
-      ...OPENCODE_SPEC,
-      dialect: "chat-completions",
-      pathSuffix: "/chat/completions",
-      modelVar: "OPENCODE_KIMI_MODEL",
-      // k2.7-code over k3 on cost. At effort "low" it misread a 4 m UDL as 6 m
-      // on the overhanging-beam fixture (13.75/36.25 for 10/30); at "medium"
-      // and above it reads the same diagram correctly (55 s / 185 s), hence
-      // the floor. kimi-k3 got it right at "low" in 28 s but costs more.
-      defaultModel: "kimi-k2.7-code",
-      effort: CLAMPED_EFFORT,
-      minEffort: "medium",
-    },
-    // Kimi Code subscription ("token plan"), Anthropic-protocol endpoint.
-    // Unreachable from deployed Workers (see AGENTS.md); works in local dev.
-    kimi: {
-      dialect: "anthropic",
-      keyVar: "KIMI_API_KEY",
-      modelVar: "KIMI_CODE_MODEL",
-      // Tier-dependent: kimi-for-coding, kimi-for-coding-highspeed, k3, k3-256k.
-      defaultModel: "kimi-for-coding",
-      urlVar: "KIMI_BASE_URL",
-      defaultUrl: "https://api.kimi.com/coding",
-      effort: ANTHROPIC_BUDGET,
-      // Thinking is always on for these models, and the gateway rejects any
-      // forced tool_choice while it is: "tool_choice 'specified' is
-      // incompatible with thinking enabled". So never offer forced tools -
-      // the prompt plus the repair pipeline carry the JSON instead.
-      structured: false,
-    },
-    // Moonshot open platform, pay-as-you-go. Different account and key.
-    moonshot: {
-      dialect: "chat-completions",
-      keyVar: "MOONSHOT_API_KEY",
-      modelVar: "MOONSHOT_KIMI_MODEL",
-      // Must be a vision-capable model: the assignment arrives as images.
-      defaultModel: "kimi-latest",
-      urlVar: "MOONSHOT_BASE_URL",
-      // Mainland host. Global deployments use https://api.moonshot.ai/v1/...
-      defaultUrl: "https://api.moonshot.cn/v1/chat/completions",
-      effort: CLAMPED_EFFORT,
-    },
-  },
   deepseek: {
     opencode: {
       ...OPENCODE_SPEC,
@@ -290,68 +225,22 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       effort: CLAMPED_EFFORT,
     },
   },
-  qwen: {
-    opencode: {
-      ...OPENCODE_SPEC,
-      // The docs put Qwen on /messages, but images are only accepted on
-      // /chat/completions - and only by 3.8: qwen3.7-max rejects image parts
-      // on both protocols.
-      dialect: "chat-completions",
-      pathSuffix: "/chat/completions",
-      modelVar: "OPENCODE_QWEN_MODEL",
-      defaultModel: "qwen3.8-max",
-      effort: CLAMPED_EFFORT,
-    },
-  },
-  minimax: {
-    minimax: {
-      dialect: "anthropic",
-      keyVar: "MINIMAX_API_KEY",
-      modelVar: "MINIMAX_MODEL",
-      // M3 reads images. Note that M2/M2.1 do not, and answer "I cannot view
-      // the image" instead of failing - they would invent solutions. Verify
-      // vision before changing this. "MiniMax-M3[1m]" selects 1M context.
-      defaultModel: "MiniMax-M3",
-      urlVar: "MINIMAX_BASE_URL",
-      // Mainland host. International deployments use https://api.minimax.io.
-      defaultUrl: "https://api.minimaxi.com/anthropic",
-      effort: ANTHROPIC_BUDGET,
-      // Floored at "high" (16384 thinking tokens). M3 only honours the forced
-      // tool call while thinking is on, and "none" has no budget at all, which
-      // would disable thinking entirely. "max" is still honoured.
-      //
-      // "high" is not safe on its own: on the B.8 momentum fixture M3 thinks
-      // until it hits max_tokens and never writes an answer, twice out of two,
-      // ~120 s each (the same fixture answers correctly at "medium" in ~81 s).
-      // Raising max_tokens does not help - it thinks longer to fill the room.
-      // That failure is detected by isThinkingExhausted and retried one level
-      // down by run.ts, so the floor buys the better answer when thinking fits
-      // and costs one wasted attempt when it does not.
-      minEffort: "high",
-    },
-  },
 };
 
 const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   chatgpt: "opencode",
   claude: "poe",
   gemini: "poe",
-  kimi: "opencode",
-  minimax: "minimax",
   deepseek: "opencode",
   grok: "opencode",
-  qwen: "opencode",
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   chatgpt: "CHATGPT_CHANNEL",
   claude: "CLAUDE_CHANNEL",
   gemini: "GEMINI_CHANNEL",
-  kimi: "KIMI_CHANNEL",
-  minimax: "MINIMAX_CHANNEL",
   deepseek: "DEEPSEEK_CHANNEL",
   grok: "GROK_CHANNEL",
-  qwen: "QWEN_CHANNEL",
 };
 
 export type Route = {
@@ -456,7 +345,7 @@ export function resolveRoute(
 // Reading the diagram is a comprehension task where a misread poisons the
 // solve, so the interpretation pass uses top-tier Poe models - which are also
 // the cheap CPU routes (Poe buffers upstream). Only providers with a Poe route
-// are pinned; a non-Poe pick (Kimi, MiniMax, ...) keeps its normal route.
+// are pinned; a non-Poe pick (DeepSeek, Grok) keeps its normal route.
 //
 // gpt-5.4-pro reads correctly but the pro tier over-thinks a transcription
 // task (~95 s vs ~5 s for gemini); set INTERPRET_CHATGPT_MODEL=gpt-5.4 to
@@ -518,7 +407,7 @@ export function wantsUpstreamStream(route: Route, env: WorkerEnv) {
 
 /**
  * Optional request features, dropped one rung at a time when an upstream
- * rejects them (see the downgrade ladder in solve.ts). Not every bot on every
+ * rejects them (see the downgrade ladder in run.ts). Not every bot on every
  * channel accepts reasoning parameters or strict JSON schemas, and no vendor
  * publishes a reliable per-model matrix.
  */
@@ -557,12 +446,9 @@ export type Task = {
 
 /**
  * Workers' fetch sends no User-Agent at all. Identifying the app truthfully is
- * good manners toward upstreams and makes their logs legible.
- *
- * It is NOT what unblocks api.kimi.com. That host sits behind Cloudflare and
- * rejects traffic from Workers' egress before looking at the request: a bare
- * GET to https://api.kimi.com/ with no key and no headers gets the same 403
- * challenge page as a fully formed API call. See AGENTS.md.
+ * good manners toward upstreams and makes their logs legible. (It does not
+ * unblock a host that rejects Workers' egress outright; Kimi Code did, and was
+ * removed - see AGENTS.md.)
  */
 const UPSTREAM_UA =
   "CivilSolve/1.0 (Cloudflare Worker; +https://civilsolve.yanlaus.workers.dev)";
@@ -593,30 +479,6 @@ function toInlineData(dataUrl: string) {
   return { inline_data: { mime_type: match[1], data: match[2] } };
 }
 
-function toAnthropicImage(dataUrl: string) {
-  const match = DATA_URL.exec(dataUrl);
-  if (!match) return null;
-  return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
-}
-
-// Room for the answer, on top of the thinking budget. But `thinking.budget_tokens`
-// is only advisory on these gateways: MiniMax M3 blew a 2048 budget out to
-// 10,239 thinking tokens on a hard problem and hit max_tokens (10,240) before
-// writing a single answer character - stop_reason "max_tokens", empty answer.
-// So max_tokens gets a generous floor: thinking may overshoot its budget several
-// times over and there is still room for the answer.
-//
-// The floor alone is not enough once the budget itself is large. At the "high"
-// floor the budget is 16384, so a flat 32000 ceiling lets thinking consume
-// everything and leave nothing - the answer comes back empty. Headroom is
-// therefore proportional to the budget as well: the model may think to twice
-// its budget and still have a full answer's worth of tokens left. Measured:
-// MiniMax accepts max_tokens up to at least 100000, so this stays well inside
-// what the gateway allows.
-const ANTHROPIC_ANSWER_TOKENS = 8192;
-const ANTHROPIC_MIN_MAX_TOKENS = 32000;
-const ANTHROPIC_OVERSHOOT_FACTOR = 2;
-
 /** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
 function channelHeaders(route: Route, task: Task): Record<string, string> {
   if (route.channel === "opencode") {
@@ -633,75 +495,13 @@ export function buildRequest(
   stream: boolean,
 ): UpstreamRequest {
   // Whether this exact request makes the upstream itself hold the shape. When
-  // it does not - a relaxed rung, or a gateway that cannot force tools - the
-  // prompt has to carry the contract instead.
-  const schemaEnforced =
-    caps.schema === "strict" && (route.dialect !== "anthropic" || route.structured);
+  // it does not - a relaxed rung, or a route flagged as unable to force the
+  // shape - the prompt has to carry the contract instead.
+  const schemaEnforced = caps.schema === "strict" && route.structured;
   const prompt = task.prompt({ enforceShape: !schemaEnforced, effort });
   const extraHeaders = channelHeaders(route, task);
   const { images, instructions, schema, schemaName } = task;
   const referenceImages = task.referenceImages || [];
-
-  if (route.dialect === "anthropic") {
-    const budget = caps.reasoning ? budgetEffort(route, effort) : undefined;
-
-    const content: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
-    for (const image of images) {
-      const block = toAnthropicImage(image);
-      if (block) content.push(block);
-    }
-    if (referenceImages.length) {
-      content.push({ type: "text", text: REFERENCE_MARKER });
-      for (const image of referenceImages) {
-        const block = toAnthropicImage(image);
-        if (block) content.push(block);
-      }
-    }
-
-    const body: Record<string, unknown> = {
-      model: route.model,
-      // Required by the Messages API, and it must leave room for the answer
-      // after thinking - which can run well past its budget (see above).
-      max_tokens: Math.max(
-        (budget ?? 0) * ANTHROPIC_OVERSHOOT_FACTOR + ANTHROPIC_ANSWER_TOKENS,
-        ANTHROPIC_MIN_MAX_TOKENS,
-      ),
-      system: instructions,
-      messages: [{ role: "user", content }],
-    };
-
-    // The Messages API has no response_format. Structured output comes from a
-    // forced tool call, where the gateway allows one.
-    if (caps.schema === "strict" && route.structured) {
-      body.tools = [
-        {
-          name: schemaName,
-          description: "Return the result using exactly these fields.",
-          input_schema: schema,
-        },
-      ];
-      body.tool_choice = { type: "tool", name: schemaName };
-    }
-    if (budget !== undefined) {
-      body.thinking = { type: "enabled", budget_tokens: budget };
-    }
-    if (stream) body.stream = true;
-
-    return {
-      url: `${route.endpoint.replace(/\/$/, "")}/v1/messages`,
-      headers: {
-        // Both gateways also accept `Authorization: Bearer`, but x-api-key is
-        // the canonical Anthropic header and works on both.
-        "x-api-key": route.apiKey,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-        "User-Agent": UPSTREAM_UA,
-        ...extraHeaders,
-        ...(stream ? { Accept: "text/event-stream" } : {}),
-      },
-      body: JSON.stringify(body),
-    };
-  }
 
   if (route.dialect === "gemini") {
     const generationConfig: Record<string, unknown> = {};
@@ -859,19 +659,15 @@ export function isReasoningOnlyFrame(dialect: Dialect, data: string): boolean {
   if (dialect === "responses") {
     return /"type"\s*:\s*"response\.reasoning/.test(data);
   }
-  if (dialect === "anthropic") {
-    return /"type"\s*:\s*"(?:thinking_delta|signature_delta)"/.test(data);
-  }
   if (dialect === "chat-completions") {
     // {"delta":{"reasoning_content":"..."}} - but never a frame that also has
-    // answer content, an error object, MiniMax's in-body status, or a real
-    // finish_reason (every chunk carries `"finish_reason":null`; only a string
-    // value is a terminal, and that must reach the parser).
+    // answer content, an error object, or a real finish_reason (every chunk
+    // carries `"finish_reason":null`; only a string value is a terminal, and
+    // that must reach the parser).
     return (
       data.includes('"reasoning_content"') &&
       !/"content"\s*:\s*"/.test(data) &&
       !data.includes('"error"') &&
-      !data.includes('"base_resp"') &&
       !/"finish_reason"\s*:\s*"/.test(data)
     );
   }
@@ -882,10 +678,11 @@ export function isReasoningOnlyFrame(dialect: Dialect, data: string): boolean {
  * Whether this frame is the upstream's own end-of-response marker. Tracked so
  * a stream that simply stops - no terminal, no error, nothing accumulated -
  * can be told apart from a completed-but-empty answer. Measured on OpenCode
- * Go: kimi-k2.7-code streamed 20,725 characters of reasoning over 128 s and
- * then the connection closed mid-word, with no finish_reason and no [DONE].
- * That is a dropped connection, not a model decision, and run.ts retries it
- * at the same effort rather than stepping down.
+ * Go (on a Kimi route since removed, but the gateway is the same): 20,725
+ * characters of reasoning streamed over 128 s, then the connection closed
+ * mid-word with no finish_reason and no [DONE]. That is a dropped connection,
+ * not a model decision, and run.ts retries it at the same effort rather than
+ * stepping down.
  */
 export function isTerminalFrame(dialect: Dialect, event: Record<string, unknown>): boolean {
   if (dialect === "responses") {
@@ -898,19 +695,13 @@ export function isTerminalFrame(dialect: Dialect, event: Record<string, unknown>
   if (dialect === "chat-completions") {
     return Boolean(readString(asRecord(asArray(event.choices)[0]), "finish_reason"));
   }
-  if (dialect === "anthropic") {
-    return (
-      event.type === "message_stop" ||
-      Boolean(readString(asRecord(event.delta), "stop_reason"))
-    );
-  }
   // gemini: a candidate carrying finishReason.
   return asArray(event.candidates).some((c) => Boolean(readString(asRecord(c), "finishReason")));
 }
 
 /** SSE payload that ends the stream, if the dialect uses one. */
 export function streamTerminator(dialect: Dialect) {
-  return dialect === "gemini" || dialect === "anthropic" ? null : "[DONE]";
+  return dialect === "gemini" ? null : "[DONE]";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -971,60 +762,13 @@ export function extractDelta(dialect: Dialect, event: Record<string, unknown>): 
     return readString(delta, "content");
   }
 
-  if (dialect === "anthropic") {
-    if (event.type !== "content_block_delta") return "";
-    const delta = asRecord(event.delta);
-    // Only text_delta. thinking_delta and signature_delta carry the model's
-    // reasoning, which must never be concatenated into the answer.
-    return readString(delta, "type") === "text_delta" ? readString(delta, "text") : "";
-  }
-
   return geminiText(event);
-}
-
-/**
- * Fragment of a forced structured result, streamed separately from prose.
- * Anthropic sends a tool call's arguments as `input_json_delta` fragments; the
- * same response may also contain plain text blocks, so the two are collected
- * apart and the structured one wins.
- */
-export function extractStructuredDelta(
-  dialect: Dialect,
-  event: Record<string, unknown>,
-): string {
-  if (dialect !== "anthropic") return "";
-  if (event.type !== "content_block_delta") return "";
-  const delta = asRecord(event.delta);
-  return readString(delta, "type") === "input_json_delta"
-    ? readString(delta, "partial_json")
-    : "";
 }
 
 /** Final text from a completed (streamed or non-streamed) payload. */
 export function extractFinalText(dialect: Dialect, payload: Record<string, unknown>): string {
   if (dialect === "gemini") {
     return geminiText(payload).trim();
-  }
-
-  if (dialect === "anthropic") {
-    const blocks = asArray(payload.content);
-    // A forced tool call is the structured answer; a response can carry both a
-    // prose block and the tool block, and the tool block is authoritative.
-    for (const block of blocks) {
-      const record = asRecord(block);
-      if (record?.type === "tool_use" && asRecord(record.input)) {
-        return JSON.stringify(record.input);
-      }
-    }
-    const texts: string[] = [];
-    for (const block of blocks) {
-      const record = asRecord(block);
-      // "thinking" and "redacted_thinking" blocks are reasoning, not answer.
-      if (record?.type === "text" && typeof record.text === "string") {
-        texts.push(record.text);
-      }
-    }
-    return texts.join("").trim();
   }
 
   if (dialect === "chat-completions") {
@@ -1061,73 +805,70 @@ export function extractFinalText(dialect: Dialect, payload: Record<string, unkno
  * True when the model spent every output token it had on thinking and never
  * wrote an answer. Each dialect reports it differently:
  *
- *   anthropic         stop_reason "max_tokens", no text and no tool block
  *   responses         status "incomplete" with incomplete_details.reason
  *                     "max_output_tokens", no output_text in the response
  *   chat-completions  finish_reason "length" with no content
  *
- * Measured on MiniMax M3 (anthropic) at a 16384 budget, and on OpenCode Go
- * (responses, chat-completions) where the worker sends no output cap and the
+ * Measured on OpenCode Go, where the worker sends no output cap and the
  * gateway's own default is the ceiling: a gpt-5.6-luna run that succeeded
  * used 16,343 output tokens, of which 11,912 were reasoning - 41 short of
  * 16,384. Any run that thinks slightly harder is cut mid-reasoning with no
- * message item at all. Raising the cap does not reliably help (M3 thinks
- * longer to fill the room and drifted to a wrong answer), so run.ts treats
- * this as a signal to retry one effort level down.
+ * message item at all. Raising the cap does not reliably help (on the
+ * since-removed MiniMax route the model simply thought longer to fill the
+ * room, and drifted to a wrong answer), so run.ts treats this as a signal to
+ * retry one effort level down.
  *
  * A truncated answer is still an answer, so this requires the payload to carry
- * no usable content. A streamed terminal frame (anthropic `message_delta`, a
- * chat-completions chunk carrying only `finish_reason`) has no content to
- * inspect, and fetchStreamed only consults this once nothing has accumulated,
- * so the same guard holds on both paths. A frame that does carry content is
- * consumed by extractDelta before this is ever reached.
+ * no usable content. A streamed terminal frame (a chat-completions chunk
+ * carrying only `finish_reason`) has no content to inspect, and fetchStreamed
+ * only consults this once nothing has accumulated, so the same guard holds on
+ * both paths. A frame that does carry content is consumed by extractDelta
+ * before this is ever reached.
  */
 export function isThinkingExhausted(
   dialect: Dialect,
   payload: Record<string, unknown>,
 ): boolean {
-  if (dialect === "anthropic") {
-    const stop =
-      readString(asRecord(payload.delta), "stop_reason") || readString(payload, "stop_reason");
-    return stop === "max_tokens" && !extractFinalText("anthropic", payload);
+  if (!hitOutputCap(dialect, payload)) return false;
+  if (dialect === "responses") {
+    return !extractFinalText("responses", asRecord(payload.response) ?? payload);
   }
+  return !extractFinalText(dialect, payload);
+}
 
+/**
+ * Whether this frame or payload says the model stopped because it ran out of
+ * output tokens - regardless of whether any answer text came first. With no
+ * text it is thinking exhaustion (above). With some text it is a truncated
+ * answer, which run.ts hands to the task's parser: usable, it is delivered;
+ * useless, the request is retried one effort level down, since less thinking
+ * is what leaves room for the answer.
+ */
+export function hitOutputCap(dialect: Dialect, payload: Record<string, unknown>): boolean {
   if (dialect === "responses") {
     // Streamed: a `response.incomplete` event wrapping the response object.
     // Non-streamed: the response object itself.
     const response = asRecord(payload.response) ?? payload;
     return (
       readString(response, "status") === "incomplete" &&
-      readString(asRecord(response.incomplete_details), "reason") === "max_output_tokens" &&
-      !extractFinalText("responses", response)
+      readString(asRecord(response.incomplete_details), "reason") === "max_output_tokens"
     );
   }
-
   if (dialect === "chat-completions") {
-    const choice = asRecord(asArray(payload.choices)[0]);
-    return (
-      readString(choice, "finish_reason") === "length" &&
-      !extractFinalText("chat-completions", payload)
-    );
+    return readString(asRecord(asArray(payload.choices)[0]), "finish_reason") === "length";
   }
-
   return false;
 }
 
 /**
  * Error reported inside an otherwise successful payload or stream event.
- * MiniMax in particular answers HTTP 200 with a non-zero `base_resp.status_code`.
+ * Some gateways answer HTTP 200 with the failure in the body.
  */
 export function extractPayloadError(dialect: Dialect, payload: Record<string, unknown>): string {
   const error = asRecord(payload.error);
   if (error) {
     const message = readString(error, "message");
     if (message) return message;
-  }
-
-  const baseResp = asRecord(payload.base_resp);
-  if (baseResp && typeof baseResp.status_code === "number" && baseResp.status_code !== 0) {
-    return readString(baseResp, "status_msg") || `Upstream error ${baseResp.status_code}.`;
   }
 
   if (dialect === "responses") {
