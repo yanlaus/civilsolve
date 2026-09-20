@@ -290,6 +290,14 @@ export type Route = {
   channel: ChannelKey;
   dialect: Dialect;
   model: string;
+  /**
+   * Models to switch to, in order, when an attempt on `model` fails in a way
+   * worth retrying (503, 429, a dropped stream, a useless fragment). Comes
+   * from a comma-separated model var: "gemini-3.8-flash,gemini-3.5-flash"
+   * tries 3.8 first and 3.5 if it does not answer. Switching model does not
+   * spend the transient-retry budget - the fallback gets a fresh start.
+   */
+  fallbackModels: string[];
   endpoint: string;
   apiKey: string;
   effort: EffortSpec;
@@ -350,6 +358,7 @@ export function resolveRoute(
       channel,
       dialect: "responses",
       model: "",
+      fallbackModels: [],
       endpoint: "",
       apiKey: "",
       effort: { kind: "none" },
@@ -364,11 +373,21 @@ export function resolveRoute(
   }
 
   const apiKey = readVar(env, spec.keyVar);
+  // A model var may be a chain: primary first, fallbacks after.
+  const [model, ...fallbackModels] = (
+    override?.model ||
+    readVar(env, spec.modelVar) ||
+    spec.defaultModel
+  )
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
   return {
     provider,
     channel,
     dialect: spec.dialect,
-    model: override?.model || readVar(env, spec.modelVar) || spec.defaultModel,
+    model,
+    fallbackModels,
     endpoint:
       (readVar(env, spec.urlVar) || spec.defaultUrl).replace(/\/$/, "") + (spec.pathSuffix || ""),
     apiKey,
@@ -385,13 +404,21 @@ export function resolveRoute(
 }
 
 // Reading the diagram is a comprehension task where a misread poisons the
-// solve, so the interpretation pass uses top-tier Poe models - which are also
-// the cheap CPU routes (Poe buffers upstream). Only providers with a Poe route
-// are pinned; a non-Poe pick (DeepSeek, Grok) keeps its normal route.
+// solve, so the interpretation pass pins its providers to routes chosen for
+// it rather than the solve-time channel. They are also the cheap CPU routes:
+// Poe buffers upstream (median chunk 177 B), Google more so (435 B), against
+// OpenCode Go's per-token 54 B. Only providers listed here are pinned; any
+// other pick (DeepSeek, Grok, ...) keeps its normal route.
 //
 // gpt-5.4-pro reads correctly but the pro tier over-thinks a transcription
 // task (~95 s vs ~5 s for gemini); set INTERPRET_CHATGPT_MODEL=gpt-5.4 to
 // trade a little away for a much faster reader.
+//
+// Gemini reads on Google, free-tier Flash, with a model chain: 3.8-flash
+// first, 3.5-flash when 3.8 is unavailable (it answered 503 "high demand" on
+// four of six solves the day this was added; 3.5 was 3/3). If GOOGLE_API_KEY
+// is not configured the reader falls back to the Poe pin so the pass keeps
+// working.
 const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
   chatgpt: "INTERPRET_CHATGPT_MODEL",
   gemini: "INTERPRET_GEMINI_MODEL",
@@ -400,17 +427,31 @@ const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
 
 const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
   chatgpt: "gpt-5.4-pro",
-  gemini: "gemini-3.1-pro",
+  gemini: "gemini-3.8-flash,gemini-3.5-flash",
   claude: "claude-opus-4.8",
 };
+
+/** Where each pinned reader runs. Gemini needs its key; see interpretOverride. */
+const INTERPRET_CHANNEL: Partial<Record<ProviderKey, ChannelKey>> = {
+  chatgpt: "poe",
+  gemini: "google",
+  claude: "poe",
+};
+
+const INTERPRET_GEMINI_POE_FALLBACK = "gemini-3.1-pro";
 
 export function interpretOverride(
   provider: ProviderKey,
   env: WorkerEnv,
 ): RouteOverride | undefined {
+  const channel = INTERPRET_CHANNEL[provider];
+  if (!channel) return undefined;
+  if (provider === "gemini" && !readVar(env, "GOOGLE_API_KEY")) {
+    return { channel: "poe", model: INTERPRET_GEMINI_POE_FALLBACK };
+  }
   const varName = INTERPRET_MODEL_VAR[provider];
   const model = (varName && readVar(env, varName)) || INTERPRET_MODEL_DEFAULT[provider];
-  return model ? { channel: "poe", model } : undefined;
+  return model ? { channel, model } : undefined;
 }
 
 /** Health payload for one provider. Never exposes key values. */
@@ -422,6 +463,7 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     configured: route.configured && !route.problem,
     ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
     ...(route.minEffort ? { minEffort: route.minEffort } : {}),
+    ...(route.fallbackModels.length ? { fallbackModels: route.fallbackModels } : {}),
   };
 }
 

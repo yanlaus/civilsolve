@@ -491,6 +491,10 @@ export function UploadForm({
             const note = status
               ? status.configured
                 ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
+                    status.fallbackModels?.length
+                      ? ` (falls back to ${status.fallbackModels.join(", ")})`
+                      : ""
+                  }${
                     status.forcedEffort
                       ? ` - always ${status.forcedEffort} thinking`
                       : status.minEffort

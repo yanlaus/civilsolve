@@ -165,7 +165,11 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (DeepSeek, Grok) keeps its normal route if picked.
+Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to routes chosen for the job, independent of the solve-time channel: ChatGPT (`gpt-5.4-pro` on Poe) and Gemini (**Google, free-tier Flash**) as readers, **Claude Opus** (`claude-opus-4.8` on Poe) as judge. These are also the cheap CPU routes — Poe buffers upstream, Google more so. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. The Gemini reader uses a **model chain**, `gemini-3.8-flash,gemini-3.5-flash`: 3.8 first, 3.5 when 3.8 does not answer (see "Model chains" below). If `GOOGLE_API_KEY` is not configured it reads on Poe's `gemini-3.1-pro` instead, so the pass keeps working. A provider not pinned here (DeepSeek, Grok, MiMo, Muse Spark) keeps its normal route if picked.
+
+#### Model chains
+
+Any model var may hold a comma-separated chain, primary first. When an attempt fails in a way worth retrying — 503, 429, a dropped stream, a fragment the parser cannot use — the Worker moves to the next model in the chain instead of repeating the same one, after the same 3 s pause as a transient retry, and reports it as a `status` event ("gemini-3.8-flash did not answer. Trying gemini-3.5-flash..."). The fallback starts with a fresh transient budget. `/api/health` reports the chain as `fallbackModels`, and the picker shows it on the card. Measured on Google the day this was added: `gemini-3.8-flash` closed the socket on a 190 KB request four times out of six and once answered with empty fields; `gemini-3.5-flash` behind it was 4/4.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 
@@ -234,8 +238,8 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |
 | `POE_GEMINI_MODEL` | `gemini-3.1-pro` | Poe bot handle |
-| `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Google model id (Pro tier is preview-suffixed on Google) |
-| `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.4-pro` / `gemini-3.1-pro` / `claude-opus-4.8` | Poe bots for the interpretation pass |
+| `GOOGLE_GEMINI_MODEL` | `gemini-3.8-flash,gemini-3.5-flash` | Google model chain for `GEMINI_CHANNEL=google`. The owner's key is free-tier: Flash works, `gemini-3.1-pro-preview` answers 429 |
+| `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.4-pro` / `gemini-3.8-flash,gemini-3.5-flash` / `claude-opus-4.8` | Readers and judge for the interpretation pass; ChatGPT and Claude are Poe bots, Gemini is a Google chain |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
 | `GOOGLE_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Endpoint override |
 | `NO_STREAM` | *(empty)* | Providers that skip upstream streaming |

@@ -258,7 +258,8 @@ export async function runTask(
     });
   }, HEARTBEAT_INTERVAL_MS);
 
-  const route = resolveRoute(provider, env, routeOverride);
+  // Not const: a model chain ("a,b") swaps `model` in on a retryable failure.
+  let route = resolveRoute(provider, env, routeOverride);
   // A route may pin its reasoning level (a deliberately "always max" model)
   // or set a floor under the user's choice. Not const: a model that spends its
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
@@ -282,14 +283,46 @@ export async function runTask(
     await write({ type: "status", message: `Asking ${route.label}...` });
 
     const streamUpstream = wantsUpstreamStream(route, env);
-    const maxSteps = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES + MAX_EFFORT_STEPDOWNS;
+    const maxSteps =
+      1 +
+      MAX_DOWNGRADES +
+      MAX_TRANSIENT_RETRIES +
+      MAX_EFFORT_STEPDOWNS +
+      // Each fallback model gets its own attempt plus its own transient retry.
+      route.fallbackModels.length * (1 + MAX_TRANSIENT_RETRIES);
 
     let caps = startingCapabilities(route, effort);
     let transientRetries = 0;
     let effortStepDowns = 0;
     let blindDowngrades = 0;
+    let modelFallbacks = 0;
     let lastError: UpstreamError | null = null;
     let rawText = "";
+
+    /**
+     * Switches to the next model in the chain, if any, and says so. Used
+     * wherever the same request would otherwise be retried as-is: a model
+     * that did not answer is more likely fixed by a different model than by
+     * asking it again. The fallback starts with a fresh transient budget.
+     */
+    const switchModel = async (): Promise<boolean> => {
+      const next = route.fallbackModels[modelFallbacks];
+      if (!next) return false;
+      modelFallbacks += 1;
+      const previous = route.model;
+      route = { ...route, model: next };
+      transientRetries = 0;
+      await write({
+        type: "status",
+        message: `${route.label}: ${previous} did not answer. Trying ${next}...`,
+      });
+      // Same pause as a transient retry. Measured on Google: after 3.8-flash
+      // closed the socket on a 190 KB request, an immediate 3.5-flash call to
+      // the same host failed too while the same call from a cold client
+      // succeeded - the host needs a moment, whichever model comes next.
+      await sleep(RETRY_DELAY_MS);
+      return true;
+    };
     // Set when a cut-off response was accepted by `finalize` inside the loop,
     // so it is not parsed a second time under stricter terms at the end.
     let donePayload: Record<string, unknown> | null = null;
@@ -339,7 +372,9 @@ export async function runTask(
         if (lastError.partialText !== undefined) {
           const lowered = lastError.lowerEffort ? stepDownEffort(route, effort) : null;
           const canStepDown = Boolean(lowered) && effortStepDowns < MAX_EFFORT_STEPDOWNS;
-          const canRetry = transientRetries < MAX_TRANSIENT_RETRIES;
+          const canRetry =
+            modelFallbacks < route.fallbackModels.length ||
+            transientRetries < MAX_TRANSIENT_RETRIES;
           try {
             donePayload = finalize(lastError.partialText, {
               lastAttempt: !canStepDown && !canRetry,
@@ -359,6 +394,7 @@ export async function runTask(
             });
             continue;
           }
+          if (await switchModel()) continue;
           if (canRetry) {
             transientRetries += 1;
             await write({
@@ -411,7 +447,9 @@ export async function runTask(
           }
         }
 
-        if (!isRetryable(lastError) || transientRetries >= MAX_TRANSIENT_RETRIES) break;
+        if (!isRetryable(lastError)) break;
+        if (await switchModel()) continue;
+        if (transientRetries >= MAX_TRANSIENT_RETRIES) break;
         transientRetries += 1;
         await write({
           type: "status",

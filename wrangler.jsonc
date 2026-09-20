@@ -43,12 +43,20 @@
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
-    // Google ids are preview-suffixed on the Pro tier; "gemini-3.1-pro" 404s.
-    "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro-preview",
-    // The optional interpretation pass runs on top-tier Poe models, set here.
-    // gpt-5.4-pro reads well but is slow (~95s); gpt-5.4 is much faster.
+    // Only used when GEMINI_CHANNEL is "google". A model var may be a chain,
+    // primary first: on a 503 / 429 / dropped stream the Worker moves to the
+    // next model instead of retrying the same one. The owner's Google key is
+    // free-tier: Flash models work, "gemini-3.1-pro-preview" answers 429.
+    // 3.8-flash reads best but answered 503 "high demand" on four of six
+    // solves the day this was set; 3.5-flash was 3/3.
+    "GOOGLE_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
+    // The optional interpretation pass pins its readers and judge here.
+    // ChatGPT and Claude read on Poe; gpt-5.4-pro reads well but is slow
+    // (~95s), gpt-5.4 is much faster. Gemini reads on Google (free-tier
+    // Flash, cheapest CPU of any route) with the same chain as above, and
+    // falls back to Poe's gemini-3.1-pro only if GOOGLE_API_KEY is unset.
     "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",
-    "INTERPRET_GEMINI_MODEL": "gemini-3.1-pro",
+    "INTERPRET_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
     "INTERPRET_CLAUDE_MODEL": "claude-opus-4.8",
 
     // Endpoint overrides (proxies). Defaults:

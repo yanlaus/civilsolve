@@ -93,6 +93,8 @@ export type ProviderStatus = {
   forcedEffort?: string;
   /** Present when the route raises low choices to a floor. */
   minEffort?: string;
+  /** Present when the route switches to these models, in order, if `model` fails. */
+  fallbackModels?: string[];
 };
 
 export type HealthResponse = {
