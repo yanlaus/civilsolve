@@ -355,7 +355,23 @@ export async function runTask(
           : await fetchNonStreamed(route.dialect, route.label, request, abort.signal);
         await flushDeltas();
         lastError = null;
-        break;
+        if (!rawText.trim()) break; // reported as empty below
+
+        // A completed response the task cannot use - not JSON, or JSON with
+        // the substance missing - is a reason to try the next model in the
+        // chain, if there is one, rather than an error. With no chain left
+        // the parser is told so and delivers what it can.
+        const canSwitch = modelFallbacks < route.fallbackModels.length;
+        try {
+          donePayload = finalize(rawText, { lastAttempt: !canSwitch });
+          break;
+        } catch (error) {
+          if (canSwitch && (await switchModel())) continue;
+          // The same model would most likely produce the same output.
+          const unusable = toError(error);
+          unusable.retryable = false;
+          throw unusable;
+        }
       } catch (error) {
         pending = "";
         lastError = toError(error);
@@ -460,11 +476,11 @@ export async function runTask(
     }
 
     if (lastError) throw lastError;
-    if (!donePayload && !rawText.trim()) {
+    if (!donePayload) {
       throw new Error(`${route.label} returned an empty response.`);
     }
 
-    await write({ type: "done", ...(donePayload ?? finalize(rawText, { lastAttempt: true })) });
+    await write({ type: "done", ...donePayload });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {

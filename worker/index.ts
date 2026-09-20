@@ -246,7 +246,9 @@ app.post("/api/interpret/:provider", async (c) => {
       schema: interpretationSchema as unknown as Record<string, unknown>,
       images: assignment.images,
     },
-    finalize: (rawText) => ({ interpretation: parseInterpretation(rawText, provider) }),
+    finalize: (rawText, { lastAttempt }) => ({
+      interpretation: parseInterpretation(rawText, provider, { allowIncomplete: lastAttempt }),
+    }),
   });
 });
 
