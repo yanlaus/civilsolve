@@ -112,9 +112,26 @@ function isRetryableStatus(status: number) {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
+/**
+ * The human-readable part of an error body, when there is one. Gateways
+ * answer `{"error":{"message":"Insufficient balance. Manage your billing
+ * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
+ * body stays on the error for paramRejection, which pattern-matches it.
+ */
+function errorBodyMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
+    const message = parsed?.error?.message ?? parsed?.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  } catch {
+    // Not JSON - the raw body is the message.
+  }
+  return body.slice(0, 500);
+}
+
 function upstreamError(label: string, status: number, body: string): UpstreamError {
   const error = new Error(
-    `${label} failed with HTTP ${status}: ${body.slice(0, 500)}`,
+    `${label} failed with HTTP ${status}: ${errorBodyMessage(body)}`,
   ) as UpstreamError;
   error.status = status;
   error.body = body;
