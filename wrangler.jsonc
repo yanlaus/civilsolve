@@ -16,7 +16,10 @@
     // actually supports).
     "CHATGPT_CHANNEL": "opencode",
     "CLAUDE_CHANNEL": "poe",
-    "GEMINI_CHANNEL": "poe",
+    // Google since 21 September 2026: free-tier Flash, the cheapest CPU route
+    // of any, and correct on both fixtures. "poe" serves gemini-3.1-pro (Pro,
+    // paid) if the Google key is ever lost.
+    "GEMINI_CHANNEL": "google",
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
     "MIMO_CHANNEL": "opencode",

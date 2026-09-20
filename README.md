@@ -5,7 +5,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
-| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
+| Gemini | Google (switchable to Poe) | `gemini-3.8-flash`, falling back to `gemini-3.5-flash` | free-tier key |
 | DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | |
 | Grok | OpenCode Go | `grok-4.6` | |
 | MiMo | OpenCode Go | `mimo-v2.5` | badged **Free** |
@@ -39,7 +39,7 @@ A **provider** is what the user picks in the UI. A **channel** is the upstream a
 ```
 chatgpt  ──> opencode | poe     (CHATGPT_CHANNEL)
 claude   ──> poe
-gemini   ──> poe | google       (GEMINI_CHANNEL)
+gemini   ──> google | poe       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
 mimo     ──> opencode
@@ -148,7 +148,7 @@ Reports which providers are usable, without exposing any secret value:
   "providers": {
     "chatgpt":  { "channel": "opencode", "model": "gpt-5.6-luna",                 "configured": true, "minEffort": "high" },
     "claude":   { "channel": "poe",      "model": "claude-opus-4.8",              "configured": true },
-    "gemini":   { "channel": "poe",      "model": "gemini-3.1-pro",               "configured": true },
+    "gemini":   { "channel": "google",   "model": "gemini-3.8-flash",             "configured": true, "fallbackModels": ["gemini-3.5-flash"] },
     "deepseek": { "channel": "opencode", "model": "deepseek-v4.1-flash",          "configured": true },
     "grok":     { "channel": "opencode", "model": "grok-4.6",                     "configured": true },
     "mimo":     { "channel": "opencode", "model": "mimo-v2.5",                    "configured": true },
@@ -227,7 +227,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 |---|---|---|
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
-| `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
+| `GEMINI_CHANNEL` | `google` | `google` or `poe` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4.1-flash` | Reads diagrams (undocumented) and beat `deepseek-v4-flash-vision-exp` on the fixture; the latter is the documented vision model and the fallback if this regresses |
