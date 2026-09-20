@@ -1,6 +1,6 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Six providers are available; **one runs per solve** (see the CPU note below for why):
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Seven providers are available; **one runs per solve** (see the CPU note below for why):
 
 | Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
@@ -9,9 +9,10 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
 | Grok | OpenCode Go | `grok-4.6` | |
 | MiMo | OpenCode Go | `mimo-v2.5` | badged **Free** |
+| Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | badged **Free**; needs a workspace opt-in |
 | Claude | Poe | `claude-opus-4.8` | listed last; badged **Uses more credit** |
 
-The picker shows this order with an icon per provider and a cost badge where it matters: MiMo is OpenCode Zen's free tier (`FREE_PROVIDERS` in `shared/providers.ts`); Claude runs as Opus on Poe, the priciest bot there by a wide margin, so its card says "Uses more credit" (`HIGHER_CREDIT_PROVIDERS`) and sits at the end. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
+The picker shows this order with an icon per provider and a cost badge where it matters. MiMo and Muse Spark are OpenCode Zen's free tiers (`FREE_PROVIDERS` in `shared/providers.ts`) — free because they collect what is sent to them, assignment images included, for training; Muse Spark's "contributor" tier will not answer at all until the OpenCode workspace has opted in to that. Claude runs as Opus on Poe, the priciest bot there by a wide margin, so its card says "Uses more credit" (`HIGHER_CREDIT_PROVIDERS`) and sits at the end. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -42,13 +43,14 @@ gemini   ──> poe | google       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
 mimo     ──> opencode
+muse     ──> opencode
 ```
 
 Channels speak three different API dialects, all handled in `worker/channels.ts`:
 
 | Dialect | Used by | Endpoint shape | Reasoning parameter |
 |---|---|---|---|
-| `responses` | Poe; OpenCode Go (GPT Luna, Grok) | `POST /v1/responses` | `reasoning: { effort }` (enum) |
+| `responses` | Poe; OpenCode Go (GPT Luna, Grok, Muse Spark) | `POST /v1/responses` | `reasoning: { effort }` (enum) |
 | `chat-completions` | OpenCode Go (DeepSeek, MiMo) | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
 | `gemini` | Google | `:streamGenerateContent?alt=sse` | `generationConfig.thinkingConfig.thinkingBudget` (tokens) |
 
@@ -149,7 +151,8 @@ Reports which providers are usable, without exposing any secret value:
     "gemini":   { "channel": "poe",      "model": "gemini-3.1-pro",               "configured": true },
     "deepseek": { "channel": "opencode", "model": "deepseek-v4-flash-vision-exp", "configured": true },
     "grok":     { "channel": "opencode", "model": "grok-4.6",                     "configured": true },
-    "mimo":     { "channel": "opencode", "model": "mimo-v2.5",                    "configured": true }
+    "mimo":     { "channel": "opencode", "model": "mimo-v2.5",                    "configured": true },
+    "muse":     { "channel": "opencode", "model": "muse-spark-1.3-contributor",   "configured": true }
   }
 }
 ```
@@ -164,7 +167,7 @@ The browser drives it as: two providers run `interpret` in parallel, a third run
 
 Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (DeepSeek, Grok) keeps its normal route if picked.
 
-### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo`)
+### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 
 Request JSON:
 
@@ -203,7 +206,7 @@ Set the `NO_STREAM` var (e.g. `"deepseek"`) to make those providers use a non-st
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo | <https://opencode.ai/go> |
+| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark | <https://opencode.ai/go> |
 | `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `GOOGLE_API_KEY` | Gemini, only when `GEMINI_CHANNEL=google` | <https://aistudio.google.com/apikey> |
 
@@ -221,11 +224,12 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
-| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
 | `OPENCODE_MIMO_MODEL` | `mimo-v2.5` | OpenCode Zen's free tier; the docs' `mimo-v2.5-free` id is rejected on the Go gateway |
+| `OPENCODE_MUSE_MODEL` | `muse-spark-1.3-contributor` | Free "contributor" tier; the workspace must opt in or the gateway answers 403 `DataPolicyError` |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Endpoint override |
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |

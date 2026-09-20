@@ -14,8 +14,9 @@
 # --- Keys: one per upstream account ----------------------------------------
 
 # OpenCode Go (https://opencode.ai/go) - serves ChatGPT (GPT 5.6 Luna),
-# DeepSeek, Grok and MiMo (the free tier) by default. One key, two protocols
-# behind it.
+# DeepSeek, Grok, and the free MiMo and Muse Spark tiers by default. One key,
+# two protocols behind it. Muse Spark needs a one-time data-collection opt-in
+# in the OpenCode workspace, or it answers 403 DataPolicyError.
 OPENCODE_API_KEY=
 
 # Poe (https://poe.com/api_key) - serves Claude and Gemini by default; can also

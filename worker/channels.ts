@@ -35,6 +35,7 @@ export type WorkerEnv = {
   DEEPSEEK_CHANNEL?: string;
   GROK_CHANNEL?: string;
   MIMO_CHANNEL?: string;
+  MUSE_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   POE_CHATGPT_MODEL?: string;
@@ -44,6 +45,7 @@ export type WorkerEnv = {
   OPENCODE_DEEPSEEK_MODEL?: string;
   OPENCODE_GROK_MODEL?: string;
   OPENCODE_MIMO_MODEL?: string;
+  OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
   INTERPRET_GEMINI_MODEL?: string;
@@ -241,6 +243,21 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       effort: CLAMPED_EFFORT,
     },
   },
+  muse: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "responses",
+      pathSuffix: "/responses",
+      modelVar: "OPENCODE_MUSE_MODEL",
+      // The free "contributor" tier of Muse Spark: the workspace must opt in
+      // to its data collection first, or the gateway answers 403
+      // DataPolicyError. The docs' "-free" suffixed id is not supported on
+      // the Go gateway. Verified to read the diagram after the opt-in: all
+      // six values from the B.8 image.
+      defaultModel: "muse-spark-1.3-contributor",
+      effort: CLAMPED_EFFORT,
+    },
+  },
 };
 
 const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
@@ -250,6 +267,7 @@ const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   deepseek: "opencode",
   grok: "opencode",
   mimo: "opencode",
+  muse: "opencode",
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
@@ -259,6 +277,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   deepseek: "DEEPSEEK_CHANNEL",
   grok: "GROK_CHANNEL",
   mimo: "MIMO_CHANNEL",
+  muse: "MUSE_CHANNEL",
 };
 
 export type Route = {

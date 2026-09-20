@@ -10,10 +10,18 @@
 // reliable answer. Their routes, the Kimi Code / Moonshot / MiniMax channels,
 // and the Anthropic-protocol dialect they alone used are in git history.
 
-export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok" | "mimo";
+export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok" | "mimo" | "muse";
 
 /** Picker order. Claude sits last because it costs the most per solve (below). */
-export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "gemini", "deepseek", "grok", "mimo", "claude"];
+export const PROVIDER_KEYS: ProviderKey[] = [
+  "chatgpt",
+  "gemini",
+  "deepseek",
+  "grok",
+  "mimo",
+  "muse",
+  "claude",
+];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
@@ -26,6 +34,7 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   deepseek: "DeepSeek",
   grok: "Grok",
   mimo: "MiMo",
+  muse: "Muse Spark",
 };
 
 /**
@@ -39,8 +48,11 @@ export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provide
  * Providers that cost nothing on their upstream account, badged likewise.
  * `mimo-v2.5` is OpenCode Zen's free MiMo tier ("available for a limited
  * time", and the docs say its data may be used for model improvement).
+ * `muse-spark-1.3-contributor` is free because it is a data-collecting
+ * "contributor" tier: the workspace must opt in, and what is sent - the
+ * assignment images included - may be used to train it.
  */
-export const FREE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["mimo"]);
+export const FREE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["mimo", "muse"]);
 
 /**
  * Selected by default in the upload form. Only one provider runs per solve -

@@ -10,6 +10,7 @@ import {
   Flame,
   Gem,
   Gift,
+  Lightbulb,
   Loader2,
   Orbit,
   PenSquare,
@@ -71,6 +72,7 @@ const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
   deepseek: Waves,
   grok: Zap,
   mimo: Orbit,
+  muse: Lightbulb,
   claude: Asterisk,
 };
 
