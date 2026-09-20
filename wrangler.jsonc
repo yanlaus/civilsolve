@@ -30,7 +30,9 @@
     // gpt-5.6-luna runs at "high" or "max" only; lower picks are raised to
     // "high" (see minEffort in channels.ts).
     "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
-    "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4-flash-vision-exp",
+    // Undocumented as vision but reads diagrams, and beat -vision-exp on the
+    // fixture. Revert to "deepseek-v4-flash-vision-exp" if it regresses.
+    "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4.1-flash",
     "OPENCODE_GROK_MODEL": "grok-4.6",
     // OpenCode Zen's free MiMo tier. The docs say "mimo-v2.5-free"; the Go
     // gateway serves it as "mimo-v2.5" ("mimo-v2.5-pro" is the paid one).

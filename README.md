@@ -6,7 +6,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 |---|---|---|---|
 | ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
 | Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
-| DeepSeek | OpenCode Go | `deepseek-v4-flash-vision-exp` | |
+| DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | |
 | Grok | OpenCode Go | `grok-4.6` | |
 | MiMo | OpenCode Go | `mimo-v2.5` | badged **Free** |
 | Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | badged **Free**; needs a workspace opt-in |
@@ -149,7 +149,7 @@ Reports which providers are usable, without exposing any secret value:
     "chatgpt":  { "channel": "opencode", "model": "gpt-5.6-luna",                 "configured": true, "minEffort": "high" },
     "claude":   { "channel": "poe",      "model": "claude-opus-4.8",              "configured": true },
     "gemini":   { "channel": "poe",      "model": "gemini-3.1-pro",               "configured": true },
-    "deepseek": { "channel": "opencode", "model": "deepseek-v4-flash-vision-exp", "configured": true },
+    "deepseek": { "channel": "opencode", "model": "deepseek-v4.1-flash",          "configured": true },
     "grok":     { "channel": "opencode", "model": "grok-4.6",                     "configured": true },
     "mimo":     { "channel": "opencode", "model": "mimo-v2.5",                    "configured": true },
     "muse":     { "channel": "opencode", "model": "muse-spark-1.3-contributor",   "configured": true }
@@ -226,7 +226,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
-| `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4-flash-vision-exp` | The one model OpenCode Go documents as vision |
+| `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4.1-flash` | Reads diagrams (undocumented) and beat `deepseek-v4-flash-vision-exp` on the fixture; the latter is the documented vision model and the fallback if this regresses |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
 | `OPENCODE_MIMO_MODEL` | `mimo-v2.5` | OpenCode Zen's free tier; the docs' `mimo-v2.5-free` id is rejected on the Go gateway |
 | `OPENCODE_MUSE_MODEL` | `muse-spark-1.3-contributor` | Free "contributor" tier; the workspace must opt in or the gateway answers 403 `DataPolicyError` |

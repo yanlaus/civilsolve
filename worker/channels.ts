@@ -214,8 +214,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "chat-completions",
       pathSuffix: "/chat/completions",
       modelVar: "OPENCODE_DEEPSEEK_MODEL",
-      // The one model OpenCode Go documents as vision-capable.
-      defaultModel: "deepseek-v4-flash-vision-exp",
+      // Reads diagrams although OpenCode Go only documents
+      // "deepseek-v4-flash-vision-exp" as vision. Measured on the B.8 fixture:
+      // 4/5 correct (its one miss at "none") against 5/8 for -vision-exp,
+      // and right at "high" where -vision-exp was 0/2. Probed with the
+      // workspace's China-hosted-models opt-in ON; whether it needs that is
+      // untested. "deepseek-v4-pro" and "deepseek-v4-flash" are text-only.
+      defaultModel: "deepseek-v4.1-flash",
       effort: CLAMPED_EFFORT,
     },
   },
