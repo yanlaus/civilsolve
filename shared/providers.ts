@@ -10,10 +10,10 @@
 // reliable answer. Their routes, the Kimi Code / Moonshot / MiniMax channels,
 // and the Anthropic-protocol dialect they alone used are in git history.
 
-export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok";
+export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok" | "mimo";
 
 /** Picker order. Claude sits last because it costs the most per solve (below). */
-export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "gemini", "deepseek", "grok", "claude"];
+export const PROVIDER_KEYS: ProviderKey[] = ["chatgpt", "gemini", "deepseek", "grok", "mimo", "claude"];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
@@ -25,6 +25,7 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   gemini: "Gemini",
   deepseek: "DeepSeek",
   grok: "Grok",
+  mimo: "MiMo",
 };
 
 /**
@@ -33,6 +34,13 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
  * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin.
  */
 export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["claude"]);
+
+/**
+ * Providers that cost nothing on their upstream account, badged likewise.
+ * `mimo-v2.5` is OpenCode Zen's free MiMo tier ("available for a limited
+ * time", and the docs say its data may be used for model improvement).
+ */
+export const FREE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["mimo"]);
 
 /**
  * Selected by default in the upload form. Only one provider runs per solve -

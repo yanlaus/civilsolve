@@ -9,7 +9,9 @@ import {
   FileText,
   Flame,
   Gem,
+  Gift,
   Loader2,
+  Orbit,
   PenSquare,
   Sparkles,
   Upload,
@@ -25,6 +27,7 @@ import {
   DEFAULT_INTERPRETERS,
   DEFAULT_PROVIDER,
   DEFAULT_VERIFIER,
+  FREE_PROVIDERS,
   HIGHER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
@@ -67,6 +70,7 @@ const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
   gemini: Gem,
   deepseek: Waves,
   grok: Zap,
+  mimo: Orbit,
   claude: Asterisk,
 };
 
@@ -481,6 +485,7 @@ export function UploadForm({
             const checked = selectedProvider === provider.key && available;
             const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
+            const free = FREE_PROVIDERS.has(provider.key);
             const note = status
               ? status.configured
                 ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
@@ -525,6 +530,15 @@ export function UploadForm({
                       >
                         <Flame className="h-3 w-3" aria-hidden="true" />
                         Uses more credit
+                      </span>
+                    ) : null}
+                    {free ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]"
+                        title={`${provider.label} costs nothing on its upstream account.`}
+                      >
+                        <Gift className="h-3 w-3" aria-hidden="true" />
+                        Free
                       </span>
                     ) : null}
                   </span>

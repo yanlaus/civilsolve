@@ -19,6 +19,7 @@
     "GEMINI_CHANNEL": "poe",
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
+    "MIMO_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the
     // assignment is sent as images, never as OCR text. List the Poe bots your
@@ -30,6 +31,9 @@
     "OPENCODE_CHATGPT_MODEL": "gpt-5.6-luna",
     "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4-flash-vision-exp",
     "OPENCODE_GROK_MODEL": "grok-4.6",
+    // OpenCode Zen's free MiMo tier. The docs say "mimo-v2.5-free"; the Go
+    // gateway serves it as "mimo-v2.5" ("mimo-v2.5-pro" is the paid one).
+    "OPENCODE_MIMO_MODEL": "mimo-v2.5",
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",

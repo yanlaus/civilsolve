@@ -34,6 +34,7 @@ export type WorkerEnv = {
   GEMINI_CHANNEL?: string;
   DEEPSEEK_CHANNEL?: string;
   GROK_CHANNEL?: string;
+  MIMO_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   POE_CHATGPT_MODEL?: string;
@@ -42,6 +43,7 @@ export type WorkerEnv = {
   OPENCODE_CHATGPT_MODEL?: string;
   OPENCODE_DEEPSEEK_MODEL?: string;
   OPENCODE_GROK_MODEL?: string;
+  OPENCODE_MIMO_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
   INTERPRET_GEMINI_MODEL?: string;
@@ -225,6 +227,20 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       effort: CLAMPED_EFFORT,
     },
   },
+  mimo: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_MIMO_MODEL",
+      // OpenCode Zen's free MiMo tier. The docs call it "mimo-v2.5-free", but
+      // the Go gateway rejects that id and serves it as plain "mimo-v2.5"
+      // (the paid sibling is "mimo-v2.5-pro"). Verified to read the diagram:
+      // asked for the values shown in the B.8 image it returned all six.
+      defaultModel: "mimo-v2.5",
+      effort: CLAMPED_EFFORT,
+    },
+  },
 };
 
 const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
@@ -233,6 +249,7 @@ const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   gemini: "poe",
   deepseek: "opencode",
   grok: "opencode",
+  mimo: "opencode",
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
@@ -241,6 +258,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   gemini: "GEMINI_CHANNEL",
   deepseek: "DEEPSEEK_CHANNEL",
   grok: "GROK_CHANNEL",
+  mimo: "MIMO_CHANNEL",
 };
 
 export type Route = {
