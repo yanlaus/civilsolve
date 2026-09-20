@@ -76,15 +76,126 @@ export function normalizeJsonCandidate(rawText: string) {
   return withoutFence;
 }
 
+const SCHEMA_FIELDS = [
+  "title",
+  "interpreted_problem",
+  "assumptions",
+  "step_by_step",
+  "final_answer",
+  "latex_body",
+] as const;
+
+const CUT_OFF_NOTE = "[The response was cut off here.]";
+const CUT_OFF_BEFORE_ANSWER = "The response was cut off before reaching the final answer.";
+
+/**
+ * Salvages a JSON object that stopped mid-stream. Streams get cut (a gateway
+ * closing the connection, a token cap landing inside a string), and what
+ * arrives is a valid prefix of the object: every field before the cut is
+ * complete, and the field being written is a partial string. Closing that
+ * string and the object usually yields something JSON.parse accepts.
+ *
+ * Returns the parsed record plus the name of the field whose value was cut,
+ * or null when the prefix is not salvageable. The caller decides what a
+ * partial field is worth.
+ */
+function recoverTruncatedJson(
+  rawText: string,
+): { record: Record<string, unknown>; cutField: string | null } | null {
+  const text = sanitizeText(rawText).replace(/^```(?:json)?\s*/i, "");
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  // To the END, not to the last "}": a LaTeX body is full of braces.
+  let body = text.slice(start);
+
+  // Where did the cut land - inside a string, or between tokens?
+  let inString = false;
+  let escaped = false;
+  for (const ch of body) {
+    if (escaped) {
+      escaped = false;
+    } else if (ch === "\\" && inString) {
+      escaped = true;
+    } else if (ch === '"') {
+      inString = !inString;
+    }
+  }
+
+  if (inString) {
+    // A dangling backslash or half a \uXXXX would make the closing quote an
+    // escape instead of a terminator.
+    body = body.replace(/\\u[0-9a-fA-F]{0,3}$/, "").replace(/\\$/, "");
+    body += '"';
+  }
+
+  // Strip whatever cannot be closed into a value: a trailing comma, a key
+  // with no value ("latex_body": ), or a key string cut before its colon.
+  // A value is preceded by ":", a key by "," or "{" - only the latter go.
+  const beforeKeyStrip = body.replace(/\s+$/, "");
+  body = beforeKeyStrip.replace(/([,{])\s*"(?:[^"\\]|\\.)*"\s*:?\s*$/, "$1").replace(/,\s*$/, "");
+
+  // The cut landed inside a value only if it landed inside a string AND that
+  // string survived the key strip (a cut key is removed, not kept partial).
+  const cutInsideValue = inString && body === beforeKeyStrip;
+  let record: unknown;
+  try {
+    record = JSON.parse(body + "}");
+  } catch {
+    return null;
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null;
+
+  const keys = Object.keys(record);
+  return {
+    record: record as Record<string, unknown>,
+    cutField: cutInsideValue && keys.length ? keys[keys.length - 1] : null,
+  };
+}
+
+export type ParseOptions = {
+  /**
+   * Accept a response that was cut off before the final answer, delivering
+   * the working that arrived with a note in place of the answer. Off by
+   * default: the caller retries instead, because a fresh attempt usually
+   * yields a whole answer and a stub never does. Set on the last attempt.
+   */
+  allowIncomplete?: boolean;
+};
+
 export function parseStructuredSolution(
   rawText: string,
   provider: ProviderKey,
+  options: ParseOptions = {},
 ): StructuredSolution {
   let parsed: unknown;
   const jsonCandidate = normalizeJsonCandidate(rawText);
   try {
     parsed = JSON.parse(jsonCandidate);
   } catch (error) {
+    const recovered = recoverTruncatedJson(rawText);
+    if (recovered) {
+      const { record, cutField } = recovered;
+      if (cutField === "latex_body") {
+        // Half a LaTeX document is worse than none: finalizeProviderArtifact
+        // rebuilds one from the other fields when this is empty.
+        record.latex_body = "";
+      } else if (cutField && typeof record[cutField] === "string") {
+        record[cutField] = `${(record[cutField] as string).trimEnd()}\n\n${CUT_OFF_NOTE}`;
+      }
+      // Cut before the answer was written. With attempts left this is not
+      // worth delivering - the caller retries. On the last attempt, say so
+      // rather than fail, as long as there is working to show.
+      const hasAnswer = typeof record.final_answer === "string" && record.final_answer.trim();
+      const hasWorking = typeof record.step_by_step === "string" && record.step_by_step.trim();
+      if (!hasAnswer && hasWorking && options.allowIncomplete) {
+        record.final_answer = CUT_OFF_BEFORE_ANSWER;
+      }
+      if (hasAnswer || options.allowIncomplete) {
+        const salvaged = coerceStructuredSolution(record);
+        if (salvaged) return salvaged;
+      }
+    }
+
     const fallback = synthesizeStructuredSolutionFromText(rawText);
     if (fallback) {
       return fallback;
@@ -132,6 +243,15 @@ export function parseStructuredSolution(
 function synthesizeStructuredSolutionFromText(rawText: string): StructuredSolution | null {
   const text = sanitizeText(rawText);
   if (text.length < 40) {
+    return null;
+  }
+
+  // This is a prose fallback. Text that is plainly an attempt at our JSON
+  // schema (it starts with "{" and names schema fields) is not prose, and
+  // treating it as such produced a "solution" whose final answer was a
+  // stray `"latex_body": …` fragment. Let the caller report invalid JSON.
+  const unfenced = text.replace(/^```(?:json)?\s*/i, "");
+  if (unfenced.startsWith("{") && SCHEMA_FIELDS.some((f) => unfenced.includes(`"${f}"`))) {
     return null;
   }
 
@@ -745,8 +865,9 @@ function hasMeaningfulContent(value: string, minimumLength = 10) {
 export function finalizeProviderArtifact(
   provider: ProviderKey,
   rawText: string,
+  options: ParseOptions = {},
 ): ProviderArtifact {
-  let solution = parseStructuredSolution(rawText, provider);
+  let solution = parseStructuredSolution(rawText, provider, options);
 
   let latexBody = stripCodeFence(solution.latex_body).trim();
   if (latexBody.length < 24) {

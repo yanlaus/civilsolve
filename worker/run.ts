@@ -14,7 +14,7 @@ import {
   extractDelta,
   extractFinalText,
   extractPayloadError,
-  extractStructuredDelta,
+  hitOutputCap,
   isReasoningOnlyFrame,
   isTerminalFrame,
   isThinkingExhausted,
@@ -38,8 +38,8 @@ const MAX_TRANSIENT_RETRIES = 1;
 const RETRY_DELAY_MS = 3_000;
 /**
  * Retries after the model thought itself out of tokens. One only: the wasted
- * attempt runs to its full thinking budget (~120 s measured on MiniMax M3
- * at "high"), and a second would risk the safety timeout below.
+ * attempt runs to its full thinking budget (~120 s measured), and a second
+ * would risk the safety timeout below.
  */
 const MAX_EFFORT_STEPDOWNS = 1;
 /** Unrecognised 400s that we speculatively treat as a rejected parameter. */
@@ -99,15 +99,39 @@ type UpstreamError = Error & {
    * attempt at a lower thinking level.
    */
   lowerEffort?: boolean;
+  /**
+   * The stream ended early - dropped, or the output cap hit - after SOME
+   * answer text arrived. Whether that text is a usable truncated answer or a
+   * useless fragment is the task's call, so it travels with the error and
+   * runTask asks `finalize` before deciding between delivering and retrying.
+   */
+  partialText?: string;
 };
 
 function isRetryableStatus(status: number) {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
+/**
+ * The human-readable part of an error body, when there is one. Gateways
+ * answer `{"error":{"message":"Insufficient balance. Manage your billing
+ * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
+ * body stays on the error for paramRejection, which pattern-matches it.
+ */
+function errorBodyMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
+    const message = parsed?.error?.message ?? parsed?.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  } catch {
+    // Not JSON - the raw body is the message.
+  }
+  return body.slice(0, 500);
+}
+
 function upstreamError(label: string, status: number, body: string): UpstreamError {
   const error = new Error(
-    `${label} failed with HTTP ${status}: ${body.slice(0, 500)}`,
+    `${label} failed with HTTP ${status}: ${errorBodyMessage(body)}`,
   ) as UpstreamError;
   error.status = status;
   error.body = body;
@@ -206,8 +230,12 @@ export type RunTaskParams = {
   /**
    * Turns the raw model text into the payload of the `done` event, e.g.
    * `{ solution }` or `{ interpretation }`. Throws on unusable output.
+   *
+   * `lastAttempt` is true when no retry remains, so a task may accept a
+   * cut-off response then (delivering the working with a note) that it
+   * would rather see retried while it still can be.
    */
-  finalize: (rawText: string) => Record<string, unknown>;
+  finalize: (rawText: string, context: { lastAttempt: boolean }) => Record<string, unknown>;
 };
 
 type TaskEvent = { type: string } & Record<string, unknown>;
@@ -262,6 +290,9 @@ export async function runTask(
     let blindDowngrades = 0;
     let lastError: UpstreamError | null = null;
     let rawText = "";
+    // Set when a cut-off response was accepted by `finalize` inside the loop,
+    // so it is not parsed a second time under stricter terms at the end.
+    let donePayload: Record<string, unknown> | null = null;
 
     for (let step = 0; step < maxSteps; step += 1) {
       const request = buildRequest(route, caps, task, effort, streamUpstream);
@@ -296,9 +327,53 @@ export async function runTask(
         pending = "";
         lastError = toError(error);
 
-        // Never retry once partial output reached the client, and never
-        // retry the safety abort.
-        if (deltaEmitted || abort.signal.aborted) break;
+        if (abort.signal.aborted) break;
+
+        // A stream that ended early with some answer text. If the task can
+        // make a solution of the prefix, that is the answer - a truncated one,
+        // marked as such by the parser. If it cannot, the fragment was worth
+        // nothing, and the user has already paid the wait: this is the one
+        // deliberate exception to "never retry after a delta reached the
+        // client". A drop retries as-is; hitting the output cap retries a
+        // level down, since less thinking is what leaves room for the answer.
+        if (lastError.partialText !== undefined) {
+          const lowered = lastError.lowerEffort ? stepDownEffort(route, effort) : null;
+          const canStepDown = Boolean(lowered) && effortStepDowns < MAX_EFFORT_STEPDOWNS;
+          const canRetry = transientRetries < MAX_TRANSIENT_RETRIES;
+          try {
+            donePayload = finalize(lastError.partialText, {
+              lastAttempt: !canStepDown && !canRetry,
+            });
+            lastError = null;
+            break;
+          } catch {
+            // A fragment, or a cut-off answer while a retry is still worth it.
+          }
+          if (canStepDown && lowered) {
+            effortStepDowns += 1;
+            effort = lowered;
+            caps = { ...caps, reasoning: supportsEffort(route, lowered) };
+            await write({
+              type: "status",
+              message: `${route.label} ran out of room before finishing the answer. Retrying at ${lowered} thinking...`,
+            });
+            continue;
+          }
+          if (canRetry) {
+            transientRetries += 1;
+            await write({
+              type: "status",
+              message: `${route.label} was cut off partway through the answer. Retrying...`,
+            });
+            await sleep(RETRY_DELAY_MS);
+            continue;
+          }
+          break;
+        }
+
+        // Never retry once partial output reached the client (the case above
+        // excepted).
+        if (deltaEmitted) break;
 
         const drop = paramRejection(lastError);
         if (
@@ -347,11 +422,11 @@ export async function runTask(
     }
 
     if (lastError) throw lastError;
-    if (!rawText.trim()) {
+    if (!donePayload && !rawText.trim()) {
       throw new Error(`${route.label} returned an empty response.`);
     }
 
-    await write({ type: "done", ...finalize(rawText) });
+    await write({ type: "done", ...(donePayload ?? finalize(rawText, { lastAttempt: true })) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {
@@ -393,7 +468,7 @@ async function fetchNonStreamed(
 
   const payload = (await response.json()) as Record<string, unknown>;
 
-  // Some upstreams (MiniMax) report failures inside an HTTP 200 body.
+  // Some upstreams report failures inside an HTTP 200 body.
   const payloadError = extractPayloadError(dialect, payload);
   if (payloadError) {
     const error = new Error(`${label}: ${payloadError}`) as UpstreamError;
@@ -428,11 +503,11 @@ async function fetchStreamed(
     throw error;
   }
 
-  // A stream request does not guarantee a stream back. MiniMax answers an
-  // invalid request with HTTP 200 and a plain JSON body carrying base_resp,
-  // and some gateways simply ignore `stream: true`. Without this branch the
-  // SSE reader finds no `data:` lines and the real reason is replaced by a
-  // useless "returned an empty response".
+  // A stream request does not guarantee a stream back: a gateway may answer
+  // an invalid request with HTTP 200 and a plain JSON error body, or simply
+  // ignore `stream: true`. Without this branch the SSE reader finds no
+  // `data:` lines and the real reason is replaced by a useless "returned an
+  // empty response".
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("event-stream")) {
     const text = await response.text();
@@ -467,11 +542,11 @@ async function fetchStreamed(
 
   const terminator = streamTerminator(dialect);
   let accumulated = "";
-  let structuredText = "";
   let completedText = "";
   let upstreamMessage = "";
   let exhaustedThinking = false;
   let sawTerminal = false;
+  let sawCap = false;
 
   for await (const data of readSseData(response.body)) {
     if (terminator && data === terminator) {
@@ -490,20 +565,12 @@ async function fetchStreamed(
     // Noted before the frame is otherwise handled: a terminal may also carry
     // the completed payload or an error, and those paths `continue`.
     if (isTerminalFrame(dialect, event)) sawTerminal = true;
+    if (hitOutputCap(dialect, event)) sawCap = true;
 
     const delta = extractDelta(dialect, event);
     if (delta) {
       accumulated += delta;
       await onDelta(delta);
-      continue;
-    }
-
-    // Forced structured output arrives on its own channel and outranks any
-    // prose in the same response.
-    const structured = extractStructuredDelta(dialect, event);
-    if (structured) {
-      structuredText += structured;
-      await onDelta(structured);
       continue;
     }
 
@@ -520,7 +587,7 @@ async function fetchStreamed(
     }
   }
 
-  if (!accumulated && !structuredText && !completedText) {
+  if (!accumulated && !completedText) {
     if (upstreamMessage) {
       const error = new Error(`${label}: ${upstreamMessage}`) as UpstreamError;
       error.retryable = false;
@@ -528,10 +595,10 @@ async function fetchStreamed(
       throw error;
     }
     // Nothing arrived and the upstream never said it was finished: the
-    // connection dropped mid-stream (measured on OpenCode Go: Kimi cut off
+    // connection dropped mid-stream (measured on OpenCode Go: cut off
     // mid-word after two minutes of reasoning). That is transient, so it
     // takes the ordinary retry at the same effort - not the effort step-down,
-    // which would push Kimi below the floor it needs to read diagrams.
+    // since nothing says the effort was the problem.
     if (!sawTerminal) {
       const error = new Error(
         `${label}: the connection dropped while the model was still thinking.`,
@@ -541,7 +608,24 @@ async function fetchStreamed(
     }
   }
 
-  return structuredText || completedText || accumulated;
+  // Answer text arrived, but the upstream either never said it finished or
+  // said it ran out of output tokens. Either way what we hold is a prefix of
+  // the answer, and only the task's parser can tell a usable truncated
+  // solution from a fragment cut off in the first field (measured on Grok:
+  // 676 characters, then nothing). Hand it up rather than deliver it blind.
+  if (!completedText && accumulated && (!sawTerminal || sawCap)) {
+    const error = new Error(
+      sawCap
+        ? `${label}: the model ran out of output tokens partway through the answer.`
+        : `${label}: the connection dropped partway through the answer.`,
+    ) as UpstreamError;
+    error.retryable = !sawCap;
+    error.lowerEffort = sawCap;
+    error.partialText = accumulated;
+    throw error;
+  }
+
+  return completedText || accumulated;
 }
 
 /**

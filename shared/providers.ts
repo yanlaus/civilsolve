@@ -2,28 +2,25 @@
 //
 // A "provider" is what the user picks in the UI (ChatGPT, Claude, ...).
 // A "channel" is the upstream account/API the key comes from (Poe, OpenCode
-// Go, Kimi Code, ...). One provider can be reachable over several channels;
-// the Worker resolves which one to use from env (see worker/channels.ts).
+// Go, Google). One provider can be reachable over several channels; the
+// Worker resolves which one to use from env (see worker/channels.ts).
+//
+// Kimi, MiniMax and Qwen were removed in September 2026: across two full runs
+// of the B.8 fixture (Kimi 0/4, Qwen 0/8, MiniMax 1/4) they never gave a
+// reliable answer. Their routes, the Kimi Code / Moonshot / MiniMax channels,
+// and the Anthropic-protocol dialect they alone used are in git history.
 
-export type ProviderKey =
-  | "chatgpt"
-  | "claude"
-  | "gemini"
-  | "kimi"
-  | "minimax"
-  | "deepseek"
-  | "grok"
-  | "qwen";
+export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok" | "mimo" | "muse";
 
+/** Picker order. Claude sits last because it costs the most per solve (below). */
 export const PROVIDER_KEYS: ProviderKey[] = [
   "chatgpt",
-  "claude",
   "gemini",
-  "kimi",
-  "minimax",
   "deepseek",
   "grok",
-  "qwen",
+  "mimo",
+  "muse",
+  "claude",
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
@@ -34,12 +31,28 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   chatgpt: "ChatGPT",
   claude: "Claude",
   gemini: "Gemini",
-  kimi: "Kimi",
-  minimax: "MiniMax",
   deepseek: "DeepSeek",
   grok: "Grok",
-  qwen: "Qwen",
+  mimo: "MiMo",
+  muse: "Muse Spark",
 };
+
+/**
+ * Providers whose upstream account bills noticeably more per solve than the
+ * rest. The picker shows a badge so the cost is visible before a solve, not
+ * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin.
+ */
+export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["claude"]);
+
+/**
+ * Providers that cost nothing on their upstream account, badged likewise.
+ * `mimo-v2.5` is OpenCode Zen's free MiMo tier ("available for a limited
+ * time", and the docs say its data may be used for model improvement).
+ * `muse-spark-1.3-contributor` is free because it is a data-collecting
+ * "contributor" tier: the workspace must opt in, and what is sent - the
+ * assignment images included - may be used to train it.
+ */
+export const FREE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["mimo", "muse"]);
 
 /**
  * Selected by default in the upload form. Only one provider runs per solve -
@@ -56,16 +69,9 @@ export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
 export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
 export const DEFAULT_VERIFIER: ProviderKey = "claude";
 
-export type ChannelKey = "poe" | "opencode" | "kimi" | "moonshot" | "minimax" | "google";
+export type ChannelKey = "poe" | "opencode" | "google";
 
-export const CHANNEL_KEYS: ChannelKey[] = [
-  "poe",
-  "opencode",
-  "kimi",
-  "moonshot",
-  "minimax",
-  "google",
-];
+export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google"];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -75,9 +81,6 @@ export function isChannelKey(value: string): value is ChannelKey {
 export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   poe: "Poe",
   opencode: "OpenCode Go",
-  kimi: "Kimi Code",
-  moonshot: "Moonshot",
-  minimax: "MiniMax",
   google: "Google AI",
 };
 

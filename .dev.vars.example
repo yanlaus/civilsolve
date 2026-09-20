@@ -13,27 +13,15 @@
 
 # --- Keys: one per upstream account ----------------------------------------
 
-# OpenCode Go (https://opencode.ai/go) - serves ChatGPT (GPT 5.6 Luna), Kimi,
-# DeepSeek, Grok, and Qwen by default. One key, three protocols behind it.
+# OpenCode Go (https://opencode.ai/go) - serves ChatGPT (GPT 5.6 Luna),
+# DeepSeek, Grok, and the free MiMo and Muse Spark tiers by default. One key,
+# two protocols behind it. Muse Spark needs a one-time data-collection opt-in
+# in the OpenCode workspace, or it answers 403 DataPolicyError.
 OPENCODE_API_KEY=
 
 # Poe (https://poe.com/api_key) - serves Claude and Gemini by default; can also
 # serve ChatGPT (CHATGPT_CHANNEL=poe).
 POE_API_KEY=
-
-# Kimi Code token plan (https://www.kimi.com/code) - alternative channel for
-# Kimi (KIMI_CHANNEL=kimi). Works in local dev only: api.kimi.com rejects
-# requests from deployed Workers (see AGENTS.md).
-KIMI_API_KEY=
-
-# Moonshot open platform (https://platform.moonshot.cn) - pay-as-you-go
-# alternative for Kimi. Only used when KIMI_CHANNEL=moonshot. A Kimi Code
-# token is NOT valid here and vice versa.
-MOONSHOT_API_KEY=
-
-# MiniMax mainland (https://platform.minimaxi.com) - serves MiniMax.
-# Anthropic-protocol endpoint (token plan), model MiniMax-M3.
-MINIMAX_API_KEY=
 
 # Google AI Studio (https://aistudio.google.com/apikey) - only needed when
 # GEMINI_CHANNEL is set to "google".
@@ -43,19 +31,14 @@ GOOGLE_API_KEY=
 # Anything in wrangler.jsonc "vars" can be overridden here for local runs,
 # for example:
 #   GEMINI_CHANNEL=google
-#   OPENCODE_KIMI_MODEL=kimi-k2.7-code
 #   CHATGPT_CHANNEL=poe
 #   POE_CHATGPT_MODEL=gpt-5.4-pro
-#   KIMI_CODE_MODEL=k3-256k
-#   MINIMAX_MODEL=MiniMax-M3[1m]
-#   KIMI_CHANNEL=moonshot
-#   MOONSHOT_KIMI_MODEL=moonshot-v1-128k-vision-preview
-#   MOONSHOT_BASE_URL=https://api.moonshot.ai/v1/chat/completions
-#   NO_STREAM=kimi
+#   OPENCODE_GROK_MODEL=grok-4.5
+#   NO_STREAM=deepseek
 #   INTERPRET_CHATGPT_MODEL=gpt-5.4   # faster interpretation reader than gpt-5.4-pro
 #
 # Check a key without spending tokens:
-#   curl -H "Authorization: Bearer $POE_API_KEY"      https://api.poe.com/v1/models
-#   curl -H "Authorization: Bearer $MOONSHOT_API_KEY" https://api.moonshot.cn/v1/models
+#   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
+#   curl -H "Authorization: Bearer $OPENCODE_API_KEY" -H "x-opencode-session: any-uuid" https://opencode.ai/zen/go/v1/models
 # A 401 means the key itself is rejected; the model name is a separate problem
 # and shows up as a 404 or an "unknown model" message.

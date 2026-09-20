@@ -150,9 +150,11 @@ async function streamProvider(
       }
 
       if (event.name === "status" && typeof payload.message === "string") {
-        if (charsReceived === 0) {
-          update(provider, { status: "waiting", message: payload.message });
-        }
+        // Every status precedes a fresh attempt. After partial output that
+        // means the Worker discarded a useless fragment and is retrying, so
+        // the count starts over rather than continuing from the discarded text.
+        charsReceived = 0;
+        update(provider, { status: "waiting", message: payload.message });
       } else if (event.name === "delta" && typeof payload.text === "string") {
         charsReceived += payload.text.length;
         update(provider, { status: "streaming", charsReceived });

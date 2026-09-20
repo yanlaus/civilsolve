@@ -188,7 +188,9 @@ app.post("/api/solve/:provider", async (c) => {
       images: assignment.images,
       referenceImages: reference.images,
     },
-    finalize: (rawText) => ({ solution: finalizeProviderArtifact(provider, rawText) }),
+    finalize: (rawText, { lastAttempt }) => ({
+      solution: finalizeProviderArtifact(provider, rawText, { allowIncomplete: lastAttempt }),
+    }),
   });
 });
 
