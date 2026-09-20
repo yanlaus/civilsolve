@@ -69,7 +69,7 @@
 
     // Comma-separated provider keys that should skip upstream streaming
     // (still delivered to the browser over SSE), e.g. "deepseek".
-    "NO_STREAM": ""
+    "NO_STREAM": "deepseek"
   },
   "observability": {
     "enabled": true

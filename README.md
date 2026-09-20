@@ -202,7 +202,7 @@ event: error    data: {"message":"..."}
 
 Only **visible output** is forwarded as `delta`. Reasoning summaries, tool-call arguments, and Gemini "thought" parts are filtered out per dialect — concatenating them would corrupt the JSON the parser expects, and they get more frequent at higher effort levels.
 
-Set the `NO_STREAM` var (e.g. `"deepseek"`) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic.
+Set the `NO_STREAM` var (production: `"deepseek"`) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic. This is what keeps DeepSeek alive on the free Workers plan: its `chat-completions` route streams every reasoning token as its own chunk, and the runtime bills each one — a streamed B.8 solve was killed at 2,010 ms of CPU with no answer written, where the same solve non-streamed costs 13 ms. It only suits a model that finishes inside OpenCode's ~100–120 s idle cut.
 
 ## Configuration
 
@@ -242,7 +242,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.4-pro` / `gemini-3.8-flash,gemini-3.5-flash` / `claude-opus-4.8` | Readers and judge for the interpretation pass; ChatGPT and Claude are Poe bots, Gemini is a Google chain |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
 | `GOOGLE_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Endpoint override |
-| `NO_STREAM` | *(empty)* | Providers that skip upstream streaming |
+| `NO_STREAM` | `deepseek` | Providers that skip upstream streaming. DeepSeek streams its reasoning token by token, which the free plan bills as CPU and kills mid-solve (2,010 ms → `exceededCpu`); non-streamed the same solve costs 13 ms. Only for models that finish inside OpenCode's ~100–120 s idle cut |
 
 The assignment is always sent as images, so **every model here must be vision-capable**. A text-only model does not necessarily fail: some answer "I cannot view the image" and then invent a plausible solution, which is worse. Verify vision before changing a model id.
 
