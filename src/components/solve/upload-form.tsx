@@ -5,11 +5,11 @@ import {
   Brain,
   Calculator,
   Eye,
+  Feather,
   FileImage,
   FileText,
   Flame,
   Gem,
-  Gift,
   Lightbulb,
   Loader2,
   Orbit,
@@ -28,8 +28,8 @@ import {
   DEFAULT_INTERPRETERS,
   DEFAULT_PROVIDER,
   DEFAULT_VERIFIER,
-  FREE_PROVIDERS,
   HIGHER_CREDIT_PROVIDERS,
+  LOWER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type HealthResponse,
@@ -487,20 +487,13 @@ export function UploadForm({
             const checked = selectedProvider === provider.key && available;
             const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
-            const free = FREE_PROVIDERS.has(provider.key);
+            const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
+            // Brand, account, model - nothing else. Effort floors are shown
+            // under Thinking Effort, and a model chain announces itself in the
+            // status line when it actually switches.
             const note = status
               ? status.configured
-                ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
-                    status.fallbackModels?.length
-                      ? ` (falls back to ${status.fallbackModels.join(", ")})`
-                      : ""
-                  }${
-                    status.forcedEffort
-                      ? ` - always ${status.forcedEffort} thinking`
-                      : status.minEffort
-                        ? ` - at least ${status.minEffort} thinking`
-                        : ""
-                  }`
+                ? `${CHANNEL_LABELS[status.channel]} · ${status.model}`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
             return (
@@ -532,19 +525,19 @@ export function UploadForm({
                     {higherCredit ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e] dark:border-[#4a2f18] dark:bg-[#2b1d10] dark:text-[#e8903a]"
-                        title={`${provider.label} bills more per solve than the other providers.`}
+                        title={`${provider.label} draws more credit per solve than the other providers.`}
                       >
                         <Flame className="h-3 w-3" aria-hidden="true" />
-                        Uses more credit
+                        More credit
                       </span>
                     ) : null}
-                    {free ? (
+                    {lowerCredit ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]"
-                        title={`${provider.label} costs nothing on its upstream account.`}
+                        title={`${provider.label} draws less credit per solve than the other providers.`}
                       >
-                        <Gift className="h-3 w-3" aria-hidden="true" />
-                        Free
+                        <Feather className="h-3 w-3" aria-hidden="true" />
+                        Less credit
                       </span>
                     ) : null}
                   </span>

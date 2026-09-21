@@ -40,19 +40,27 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 /**
  * Providers whose upstream account bills noticeably more per solve than the
  * rest. The picker shows a badge so the cost is visible before a solve, not
- * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin.
+ * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin;
+ * Grok is the heaviest draw per solve on the owner's OpenCode Go plan.
  */
-export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["claude"]);
+export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
+  "grok",
+  "claude",
+]);
 
 /**
- * Providers that cost nothing on their upstream account, badged likewise.
- * `mimo-v2.5` is OpenCode Zen's free MiMo tier ("available for a limited
- * time", and the docs say its data may be used for model improvement).
+ * Providers that draw the least from their upstream account, badged likewise.
+ * DeepSeek Flash is the lightest draw per solve on the OpenCode Go plan;
  * `muse-spark-1.3-contributor` is free because it is a data-collecting
  * "contributor" tier: the workspace must opt in, and what is sent - the
- * assignment images included - may be used to train it.
+ * assignment images included - may be used to train it. MiMo (`mimo-v2.5`,
+ * OpenCode Zen's free tier) is unbadged: neither notably dear nor notably
+ * cheap on that plan.
  */
-export const FREE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["mimo", "muse"]);
+export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
+  "deepseek",
+  "muse",
+]);
 
 /**
  * Selected by default in the upload form. Only one provider runs per solve -
