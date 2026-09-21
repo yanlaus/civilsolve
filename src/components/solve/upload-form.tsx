@@ -14,6 +14,7 @@ import {
   Loader2,
   Orbit,
   PenSquare,
+  Scale,
   Sparkles,
   Upload,
   Waves,
@@ -26,7 +27,9 @@ import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   DEFAULT_INTERPRETERS,
+  DEFAULT_JUDGE,
   DEFAULT_PROVIDER,
+  DEFAULT_SECOND_SOLVER,
   DEFAULT_VERIFIER,
   HIGHER_CREDIT_PROVIDERS,
   LOWER_CREDIT_PROVIDERS,
@@ -48,12 +51,14 @@ export type SolveSubmission = {
   files: File[];
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
-  /** Exactly one provider runs per solve. */
+  /** One provider per solve, or two when the answer cross-check is on. */
   providers: ProviderKey[];
   notes: string;
   effort: EffortKey;
   /** Null when the user leaves the interpretation pass switched off. */
   verify: InterpretConfig | null;
+  /** The judge for the answer cross-check; null when it is switched off. */
+  judge: ProviderKey | null;
 };
 
 const MAX_FILES = 10;
@@ -114,6 +119,9 @@ export function UploadForm({
   const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
+  const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
+  const [secondSolver, setSecondSolver] = useState<ProviderKey>(DEFAULT_SECOND_SOLVER);
+  const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
   const [effort, setEffort] = useState<EffortKey>("low");
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>(DEFAULT_PROVIDER);
   const [providerStatus, setProviderStatus] =
@@ -193,8 +201,20 @@ export function UploadForm({
       ? "Pick two different models to read the question independently."
       : "";
 
+  // Likewise two solvers: the second must differ from the one picked above.
+  const crossCheckConfigError =
+    crossCheckEnabled && secondSolver === selectedProvider
+      ? `Pick a second solver other than ${PROVIDER_LABELS[selectedProvider]} for the cross-check.`
+      : crossCheckEnabled && !isAvailable(secondSolver)
+        ? `${PROVIDER_LABELS[secondSolver]} is not configured on the server.`
+        : "";
+
   const canSubmit =
-    queuedFiles.length > 0 && isAvailable(selectedProvider) && !verifyConfigError && !busy;
+    queuedFiles.length > 0 &&
+    isAvailable(selectedProvider) &&
+    !verifyConfigError &&
+    !crossCheckConfigError &&
+    !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -296,14 +316,15 @@ export function UploadForm({
     onSolve({
       files: queuedFiles.map((item) => item.file),
       lectureFiles: lectureFiles.map((item) => item.file),
-      providers: [selectedProvider],
+      providers: crossCheckEnabled ? [selectedProvider, secondSolver] : [selectedProvider],
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
+      judge: crossCheckEnabled ? judge : null,
     });
   }
 
-  const bannerError = error || fileError || verifyConfigError;
+  const bannerError = error || fileError || verifyConfigError || crossCheckConfigError;
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -478,7 +499,9 @@ export function UploadForm({
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
           AI Provider
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(one per solve)</span>
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
+            {crossCheckEnabled ? "(first solver)" : "(one per solve)"}
+          </span>
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
@@ -675,6 +698,62 @@ export function UploadForm({
                 The reconciler always thinks at its maximum.
               </span>
             </label>
+          </div>
+        ) : null}
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Answer Cross-check
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+        </p>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border-2 border-[#d4cdc3] bg-white p-4 transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:hover:border-[#e8903a]">
+          <input
+            type="checkbox"
+            checked={crossCheckEnabled}
+            onChange={(event) => setCrossCheckEnabled(event.target.checked)}
+            className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+              Have a second model solve it too, and a third judge both
+            </span>
+            <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              Both solvers work at the same time, then the judge re-derives the numbers from
+              the images and says which solution is right — or corrects both. Catches a
+              plausible-looking wrong answer, at the cost of two extra model calls. Combine
+              with the interpretation check above for the most robust result.
+            </span>
+          </span>
+        </label>
+
+        {crossCheckEnabled ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {[
+              { label: "Second solver", value: secondSolver, set: setSecondSolver },
+              { label: "Judge", value: judge, set: setJudge },
+            ].map((field) => (
+              <label key={field.label} className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+                {field.label}
+                <select
+                  value={field.value}
+                  onChange={(event) => field.set(event.target.value as ProviderKey)}
+                  className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+                >
+                  {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <p className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960] sm:col-span-2">
+              Both solvers use the thinking effort chosen above. The judge thinks at
+              <strong> high</strong> and never learns which model wrote which solution.
+            </p>
           </div>
         ) : null}
       </section>

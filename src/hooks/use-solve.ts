@@ -1,11 +1,20 @@
 // Per-provider solve state machine over the app-level SSE protocol.
 // Fires one streaming POST per selected provider; each tab progresses
-// independently (spinner -> live progress -> rendered solution).
+// independently (spinner -> live progress -> rendered solution). With the
+// optional answer cross-check, two solvers run together and a judge then
+// grades both solutions against the images.
 
 import { useCallback, useRef, useState } from "react";
-import { PROVIDER_KEYS, type ProviderKey } from "../../shared/providers";
-import type { ProviderArtifact } from "../../shared/solution";
-import type { SolveRequestBody } from "../../shared/stream-protocol";
+import type { JudgementResult } from "../../shared/judgement";
+import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
+import { artifactToText, type ProviderArtifact } from "../../shared/solution";
+import {
+  estimateBodyBytes,
+  MAX_BODY_BYTES,
+  MAX_SOLUTION_TEXT,
+  type JudgeRequestBody,
+  type SolveRequestBody,
+} from "../../shared/stream-protocol";
 import { fetchSseStream, readSseEvents } from "@/lib/sse";
 
 export type ProviderRun =
@@ -17,16 +26,46 @@ export type ProviderRun =
 
 export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
+/**
+ * The cross-check judge's progress. `solvers` records which provider was
+ * Solution A and which Solution B, since the judge only ever sees letters.
+ */
+export type JudgeRun =
+  | { status: "idle" }
+  | { status: "waiting"; judge: ProviderKey; message: string }
+  | { status: "streaming"; judge: ProviderKey; charsReceived: number }
+  | {
+      status: "done";
+      judge: ProviderKey;
+      solvers: [ProviderKey, ProviderKey];
+      judgement: JudgementResult;
+    }
+  | { status: "error"; judge: ProviderKey; message: string };
+
 const IDLE_RUNS = Object.fromEntries(
   PROVIDER_KEYS.map((key) => [key, { status: "idle" } as ProviderRun]),
 ) as ProviderRuns;
+
+/**
+ * How many solvers stream at once. Two, because the cross-check runs its two
+ * solvers together and nothing runs more than two. This was 1 on the free
+ * Workers plan, where concurrent per-token streams drained the CPU budget
+ * and got a stream killed (see the CPU section of AGENTS.md); the account
+ * moved to Workers Paid on 22 September 2026.
+ */
+const SOLVE_CONCURRENCY = 2;
 
 export function isRunActive(run: ProviderRun) {
   return run.status === "waiting" || run.status === "streaming";
 }
 
+export function isJudgeActive(run: JudgeRun) {
+  return run.status === "waiting" || run.status === "streaming";
+}
+
 export function useSolve() {
   const [runs, setRuns] = useState<ProviderRuns>(IDLE_RUNS);
+  const [judgeRun, setJudgeRun] = useState<JudgeRun>({ status: "idle" });
   const abortRef = useRef<AbortController | null>(null);
 
   const cancel = useCallback(() => {
@@ -41,10 +80,15 @@ export function useSolve() {
       }
       return next;
     });
+    setJudgeRun((current) =>
+      isJudgeActive(current)
+        ? { status: "error", judge: current.judge, message: "Cancelled." }
+        : current,
+    );
   }, []);
 
   const start = useCallback(
-    (providers: ProviderKey[], body: SolveRequestBody) => {
+    (providers: ProviderKey[], body: SolveRequestBody, judge: ProviderKey | null = null) => {
       abortRef.current?.abort();
       const abort = new AbortController();
       abortRef.current = abort;
@@ -56,22 +100,29 @@ export function useSolve() {
         }
         return next;
       });
+      setJudgeRun(
+        judge
+          ? { status: "waiting", judge, message: "Waiting for both solutions..." }
+          : { status: "idle" },
+      );
 
+      // Finished solutions, kept here as well as in state so the judge step
+      // can read them without waiting on a render.
+      const solutions = new Map<ProviderKey, ProviderArtifact>();
       const update = (provider: ProviderKey, run: ProviderRun) => {
+        if (run.status === "done") solutions.set(provider, run.solution);
         setRuns((current) => ({ ...current, [provider]: run }));
       };
 
       void (async () => {
-        // Providers run one at a time. On the free plan every provider is a
-        // per-token stream that draws CPU for its whole duration, so anything
-        // above one at a time can drain the budget and get a stream killed.
         const interrupted: ProviderKey[] = [];
-        await runPool(providers, 1, async (provider) => {
+        await runPool(providers, SOLVE_CONCURRENCY, async (provider) => {
           const outcome = await streamProvider(provider, body, abort.signal, update);
           if (outcome === "interrupted" && !abort.signal.aborted) {
             // A stream that closed with no `done` and no `error` was almost
-            // certainly a CPU kill (the isolate is gone, so the Worker cannot
-            // send an error). Leave an honest waiting state and retry later.
+            // certainly killed server side (the isolate is gone, so the
+            // Worker cannot send an error). Leave an honest waiting state
+            // and retry later.
             update(provider, {
               status: "waiting",
               message: "Interrupted by server load — will retry shortly.",
@@ -80,8 +131,8 @@ export function useSolve() {
           }
         });
 
-        // Retries run strictly one at a time, on a budget the finished wave
-        // has let refill, so they never recreate the overload.
+        // Retries run one at a time, after the wave, so they never stack on
+        // top of whatever overloaded the server the first time.
         await runPool(interrupted, 1, async (provider) => {
           if (abort.signal.aborted) return;
           update(provider, {
@@ -97,12 +148,15 @@ export function useSolve() {
             });
           }
         });
+
+        if (!judge || abort.signal.aborted) return;
+        await runJudge(judge, providers, solutions, body, abort.signal, setJudgeRun);
       })();
     },
     [],
   );
 
-  return { runs, start, cancel };
+  return { runs, judgeRun, start, cancel };
 }
 
 /**
@@ -184,5 +238,105 @@ async function streamProvider(
       message: error instanceof Error ? error.message : "The solve request failed.",
     });
     return "error";
+  }
+}
+
+/**
+ * The cross-check's last step: both solutions, flattened to text, go to the
+ * judge with the same images (and confirmed interpretation, if any). The
+ * judge sees them as Solution A and B in picker order.
+ */
+async function runJudge(
+  judge: ProviderKey,
+  providers: ProviderKey[],
+  solutions: Map<ProviderKey, ProviderArtifact>,
+  body: SolveRequestBody,
+  signal: AbortSignal,
+  setJudgeRun: (run: JudgeRun) => void,
+) {
+  const [first, second] = providers;
+  const solutionA = first ? solutions.get(first) : undefined;
+  const solutionB = second ? solutions.get(second) : undefined;
+  if (!first || !second || !solutionA || !solutionB) {
+    const missing = providers.filter((provider) => !solutions.has(provider));
+    setJudgeRun({
+      status: "error",
+      judge,
+      message: `Cross-check skipped: ${missing.map((p) => PROVIDER_LABELS[p]).join(" and ") || "a solver"} did not return a solution to compare.`,
+    });
+    return;
+  }
+
+  const judgeBody: JudgeRequestBody = {
+    images: body.images,
+    notes: body.notes,
+    ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+    solutions: [
+      artifactToText(solutionA, MAX_SOLUTION_TEXT),
+      artifactToText(solutionB, MAX_SOLUTION_TEXT),
+    ],
+  };
+  if (estimateBodyBytes(judgeBody) > MAX_BODY_BYTES) {
+    setJudgeRun({
+      status: "error",
+      judge,
+      message: "Cross-check skipped: the images plus both solutions exceed the request size limit.",
+    });
+    return;
+  }
+
+  setJudgeRun({ status: "waiting", judge, message: "Submitting both solutions..." });
+  let charsReceived = 0;
+
+  try {
+    const stream = await fetchSseStream(`/api/judge/${judge}`, judgeBody, signal);
+    let terminal = false;
+
+    for await (const event of readSseEvents(stream)) {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(event.data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      if (event.name === "status" && typeof payload.message === "string") {
+        charsReceived = 0;
+        setJudgeRun({ status: "waiting", judge, message: payload.message });
+      } else if (event.name === "delta" && typeof payload.text === "string") {
+        charsReceived += payload.text.length;
+        setJudgeRun({ status: "streaming", judge, charsReceived });
+      } else if (
+        event.name === "done" &&
+        payload.judgement &&
+        typeof payload.judgement === "object"
+      ) {
+        terminal = true;
+        setJudgeRun({
+          status: "done",
+          judge,
+          solvers: [first, second],
+          judgement: payload.judgement as JudgementResult,
+        });
+      } else if (event.name === "error" && typeof payload.message === "string") {
+        terminal = true;
+        setJudgeRun({ status: "error", judge, message: payload.message });
+      }
+    }
+
+    if (!terminal) {
+      setJudgeRun({
+        status: "error",
+        judge,
+        message: "The cross-check stream ended unexpectedly. Try again.",
+      });
+    }
+  } catch (error) {
+    if (signal.aborted) return;
+    setJudgeRun({
+      status: "error",
+      judge,
+      message: error instanceof Error ? error.message : "The cross-check request failed.",
+    });
   }
 }

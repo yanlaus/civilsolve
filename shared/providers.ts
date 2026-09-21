@@ -77,6 +77,17 @@ export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
 export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
 export const DEFAULT_VERIFIER: ProviderKey = "claude";
 
+/**
+ * Defaults for the optional answer cross-check: the picked provider solves,
+ * a second solver solves independently, and a judge grades both against the
+ * images. Muse Spark was 3/3 on the hard fixture where it finished, for free;
+ * Gemini Flash on Google was right on both fixtures and is the cheapest route
+ * of any. Neither default is a Poe or "More credit" provider, so switching the
+ * check on costs little beyond the extra calls.
+ */
+export const DEFAULT_SECOND_SOLVER: ProviderKey = "muse";
+export const DEFAULT_JUDGE: ProviderKey = "gemini";
+
 export type ChannelKey = "poe" | "opencode" | "google";
 
 export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google"];

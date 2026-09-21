@@ -862,6 +862,28 @@ function hasMeaningfulContent(value: string, minimumLength = 10) {
 // Finalization: raw model text -> normalized ProviderArtifact
 // ---------------------------------------------------------------------------
 
+/**
+ * Flattens a solution into the text a judge reads (see /api/judge). The
+ * LaTeX body is left out - it duplicates the working - and the whole thing
+ * is capped at `limit` characters with the working kept ahead of the tail,
+ * so a runaway solution still hands the judge its reading and its answer.
+ */
+export function artifactToText(artifact: ProviderArtifact, limit = Infinity) {
+  const head = [
+    `Interpreted problem:\n${artifact.interpretedProblem}`,
+    artifact.assumptions ? `Assumptions:\n${artifact.assumptions}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const answer = `Final answer:\n${artifact.finalAnswer}`;
+  const budget = limit - head.length - answer.length - 24;
+  let working = `Solution:\n${artifact.stepByStep}`;
+  if (working.length > budget) {
+    working = budget > 80 ? `${working.slice(0, budget - 16)}\n[... cut ...]` : "";
+  }
+  return [head, working, answer].filter(Boolean).join("\n\n").trim();
+}
+
 export function finalizeProviderArtifact(
   provider: ProviderKey,
   rawText: string,

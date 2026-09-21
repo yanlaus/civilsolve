@@ -1,8 +1,9 @@
 // Prompts shared by the Worker. The assignment arrives as attached images
 // (native vision input), so there are no OCR text sections.
 //
-// Two tasks live here: solving, and the optional interpret/verify pass that
-// reads the diagram first and pauses for the user to confirm.
+// Three tasks live here: solving; the optional interpret/verify pass that
+// reads the diagram first and pauses for the user to confirm; and the
+// optional answer cross-check, where a judge grades two solvers' work.
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
 
@@ -17,6 +18,9 @@ export const SOLVE_INSTRUCTIONS =
 
 export const INTERPRET_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English.";
+
+export const JUDGE_INSTRUCTIONS =
+  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading two candidate solutions against the attached assignment; verify, do not trust. Use English.";
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -49,6 +53,15 @@ const INTERPRETATION_FIELDS = [
   "given",
   "required",
   "discrepancies",
+] as const;
+
+const JUDGEMENT_FIELDS = [
+  "verdict",
+  "final_answer",
+  "assessment_a",
+  "assessment_b",
+  "comparison",
+  "confidence",
 ] as const;
 
 export type TutorPromptExtras = {
@@ -184,6 +197,66 @@ export function buildVerifyPrompt(
 
   if (options?.enforceShape) {
     sections.push(...shapeContract(INTERPRETATION_FIELDS));
+  }
+
+  return sections.join("\n");
+}
+
+export type JudgePromptExtras = {
+  /** Human-confirmed problem statement from the interpretation pass. */
+  interpretation?: string;
+  enforceShape?: boolean;
+};
+
+/**
+ * The answer cross-check. The two solutions are anonymised as A and B so the
+ * judge grades the work, not the brand. It is told to re-derive the numbers
+ * itself: every wrong answer seen on the fixtures came from a plausible
+ * looking solution (a jet velocity assumed instead of derived, a pressure
+ * force counted twice), and a judge that only reads for consistency would
+ * pass both.
+ */
+export function buildJudgePrompt(
+  userNotes: string,
+  solutionA: string,
+  solutionB: string,
+  extras: JudgePromptExtras = {},
+) {
+  const sections = [
+    "Two solvers independently answered the attached civil engineering assignment images. Your job is to decide which of the two solutions is correct - if either - and to state the correct final answer.",
+    "Verify, do not trust. Re-derive every numerical result yourself from the images before grading, in enough depth to confirm or refute each solution's numbers. Check in particular:",
+    "- Whether each solution read the diagram and the givens correctly (geometry, supports, loads, directions, units), and whether a quantity was assumed that should have been derived.",
+    "- Continuity, equilibrium and compatibility conditions; sign conventions; unit conversions.",
+    "- Double counting or omission of a term (a pressure force counted in both a momentum flux and separately, a weight left out, a reaction on the wrong body).",
+    "- The arithmetic of the final substitution.",
+    "Then fill the fields:",
+    '- `verdict`: "a" if only Solution A is correct, "b" if only Solution B, "both" if both reach the correct final answers (presentation and rounding differences do not matter), "neither" if both are wrong or you could not verify either.',
+    "- `final_answer`: the correct final answer(s) with units, as you verified them. If neither solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
+    "- `assessment_a` and `assessment_b`: for each solution, what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.",
+    "- `comparison`: where the two solutions differ and the decisive reason for the verdict.",
+    '- `confidence`: "high", "medium" or "low" in the verdict.',
+    "Format formulas in `final_answer`, `assessment_a`, `assessment_b` and `comparison` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
+    "Return JSON matching the required schema exactly.",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  ];
+
+  if (extras.interpretation) {
+    sections.push(
+      "",
+      "Confirmed problem interpretation (cross-checked by two readers and reviewed by the user):",
+      extras.interpretation,
+      "Treat this interpretation as the authoritative reading of the problem. A solution that contradicts it has misread the question.",
+    );
+  }
+
+  sections.push("", "Solution A:", solutionA, "", "Solution B:", solutionB);
+
+  if (extras.enforceShape) {
+    sections.push(
+      ...shapeContract(JUDGEMENT_FIELDS),
+      'Allowed values: `verdict` is one of "a", "b", "both", "neither"; `confidence` is one of "high", "medium", "low".',
+    );
   }
 
   return sections.join("\n");

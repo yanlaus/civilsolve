@@ -12,7 +12,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | badged **Less credit**; needs a workspace opt-in |
 | Claude | Poe | `claude-opus-4.8` | listed last; badged **More credit** |
 
-Each card shows three things — brand, the account it runs on, and the model id — plus a cost badge where it matters. Grok and Claude are badged "More credit" (`HIGHER_CREDIT_PROVIDERS` in `shared/providers.ts`): Claude runs as Opus on Poe, the priciest bot there by a wide margin, and Grok is the heaviest draw on the OpenCode Go plan, so Claude sits at the end. DeepSeek and Muse Spark are badged "Less credit" (`LOWER_CREDIT_PROVIDERS`): DeepSeek Flash is the lightest draw on that plan, and Muse Spark is one of OpenCode Zen's free tiers — free because it collects what is sent to it, assignment images included, for training, and its "contributor" tier will not answer at all until the OpenCode workspace has opted in to that. MiMo is the other free tier but is unbadged. Effort floors and model chains are not on the card: the floor is shown under Thinking Effort, and a chain announces itself in the status line only when it actually switches. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
+Each card shows three things — brand, the account it runs on, and the model id — plus a cost badge where it matters. Grok and Claude are badged "More credit" (`HIGHER_CREDIT_PROVIDERS` in `shared/providers.ts`): Claude runs as Opus on Poe, the priciest bot there by a wide margin, and Grok is the heaviest draw on the OpenCode Go plan, so Claude sits at the end. DeepSeek and Muse Spark are badged "Less credit" (`LOWER_CREDIT_PROVIDERS`): DeepSeek Flash is the lightest draw on that plan, and Muse Spark is one of OpenCode Zen's free tiers — free because it collects what is sent to it, assignment images included, for training, and its "contributor" tier will not answer at all until the OpenCode workspace has opted in to that. MiMo is the other free tier but is unbadged. Effort floors and model chains are not on the card: the floor is shown under Thinking Effort, and a chain announces itself in the status line only when it actually switches. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default. The optional answer cross-check is the other: a second solver runs alongside the picked one and a judge grades both (see `POST /api/judge`); also off by default.
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -106,24 +106,25 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret
+│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret, /api/judge
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
 │   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE output
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── providers.ts        # Provider + channel registry, health payload types
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
 │   ├── interpretation.ts   # Interpret/verify schema and parsing
-│   ├── prompt.ts           # Solve + interpret/verify prompts, shape contract
+│   ├── judgement.ts        # Answer cross-check (judge) schema and parsing
+│   ├── prompt.ts           # Solve, interpret/verify and judge prompts, shape contract
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
 │   ├── pages/civil-answer-app.tsx      # Page composition
 │   ├── components/solve/
-│   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort
+│   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort, both optional passes
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
-│   │   ├── solution-panel.tsx          # Tabs, streaming states, exports (lazy)
+│   │   ├── solution-panel.tsx          # Tabs, streaming states, verdict card, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
 │   ├── hooks/
-│   │   ├── use-solve.ts                # Per-provider SSE state machine
+│   │   ├── use-solve.ts                # Per-provider SSE state machine, solvers -> judge
 │   │   └── use-interpret.ts            # interpret -> verify -> review
 │   └── lib/
 │       ├── sse.ts                      # Shared SSE reader over fetch
@@ -170,6 +171,14 @@ Off by default — it costs three model calls and delays the first solution. It 
 #### Model chains
 
 Any model var may hold a comma-separated chain, primary first. When an attempt fails in a way worth retrying — 503, 429, a dropped stream, a fragment the parser cannot use — the Worker moves to the next model in the chain instead of repeating the same one, after the same 3 s pause as a transient retry, and reports it as a `status` event ("gemini-3.8-flash did not answer. Trying gemini-3.5-flash..."). The fallback starts with a fresh transient budget. `/api/health` reports the chain as `fallbackModels`, and the picker shows it on the card. Measured on Google the day this was added: `gemini-3.8-flash` closed the socket on a 190 KB request four times out of six and once answered with empty fields; `gemini-3.5-flash` behind it was 4/4.
+
+### `POST /api/judge/:provider`
+
+Optional post-pass, the **answer cross-check**. Body: `{ images, notes, interpretation?, solutions: [textA, textB], effort? }`. Returns the same SSE shape with `done → { judgement }`: `{ verdict: "a" | "b" | "both" | "neither", final_answer, assessment_a, assessment_b, comparison, confidence: "high" | "medium" | "low" }`.
+
+The browser drives it as: the picked provider and a second solver run `/api/solve` **at the same time**, then the judge gets both solutions (flattened by `artifactToText`, capped at 24,000 characters each, working cut before the answer) with the same images and the confirmed interpretation if there was one. The two solutions are anonymised as Solution A and B — the judge never learns which provider wrote which, so it grades the work, not the brand — and the browser maps the letters back to provider names in the verdict card. The prompt tells the judge to re-derive the numbers from the images rather than read the two solutions for consistency: every wrong answer seen on the fixtures was internally consistent (a jet velocity assumed instead of derived, a pressure force counted twice), and a consistency check would pass both.
+
+The judge runs on the provider's normal solve route at `high` by default (the most reliable level in the B.8 matrix; `effort` in the body overrides). Defaults in the form are Muse Spark as the second solver and Gemini as judge — neither is a Poe or "More credit" provider — and the user can pick any configured provider for either. Measured on the B.8 fixture: Muse ‖ DeepSeek at `low` finished together in 85 s (the slower of the two), Gemini judged in 43 s, verdict **A, high confidence**, with the correct −143 N / −178 N as the verified answer and B's error named to the term (a pressure force of 565.5 N where 282.7 N was right). Combining it with the interpretation pass gives the most robust run: a reviewed reading feeds both solvers and the judge.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 
@@ -301,7 +310,7 @@ The account is on **Workers Paid** ($5/month) since 22 September 2026, which rai
 
 Deduplicating the N uploads would need either server-side storage or a single fan-out request, and both are ruled out by design (see `AGENTS.md`) — so the lever available is payload size, not request count.
 
-**Only one provider runs per solve.** The picker is single-choice. On the free plan each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
+**Only one provider runs per solve** (two with the answer cross-check, which is why `SOLVE_CONCURRENCY` in `use-solve.ts` is 2). The picker is single-choice. On the free plan each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
 
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
 

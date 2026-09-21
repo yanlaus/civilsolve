@@ -3,12 +3,15 @@ import {
   interpretationSchema,
   parseInterpretation,
 } from "../shared/interpretation";
+import { judgementSchema, parseJudgement } from "../shared/judgement";
 import {
   buildInterpretPrompt,
+  buildJudgePrompt,
   buildTutorPrompt,
   buildVerifyPrompt,
   INTERPRET_INSTRUCTIONS,
   isEffortKey,
+  JUDGE_INSTRUCTIONS,
   SOLVE_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
@@ -28,6 +31,7 @@ import {
   MAX_NOTES_LENGTH,
   MAX_REFERENCE_IMAGES,
   MAX_REFERENCE_TEXT,
+  MAX_SOLUTION_TEXT,
 } from "../shared/stream-protocol";
 import { interpretOverride, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, type RunTaskParams } from "./run";
@@ -248,6 +252,55 @@ app.post("/api/interpret/:provider", async (c) => {
     },
     finalize: (rawText, { lastAttempt }) => ({
       interpretation: parseInterpretation(rawText, provider, { allowIncomplete: lastAttempt }),
+    }),
+  });
+});
+
+// The answer cross-check: grades two solvers' solutions against the images.
+// Runs on the provider's normal solve route - no override - so the judge is
+// whatever the user picked, at the effort the most reliable solves used.
+app.post("/api/judge/:provider", async (c) => {
+  const parsed = await readRequest(c);
+  if ("response" in parsed) return parsed.response;
+  const { provider, body } = parsed;
+
+  const assignment = readImages(body.images, MAX_IMAGES, "Images");
+  if ("error" in assignment) return c.json({ error: assignment.error }, 400);
+  if (assignment.images.length < 1) {
+    return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
+  }
+
+  const solutions = Array.isArray(body.solutions) ? body.solutions : [];
+  const [a, b] = solutions;
+  if (typeof a !== "string" || typeof b !== "string" || !a.trim() || !b.trim()) {
+    return c.json({ error: "The cross-check needs two solutions." }, 400);
+  }
+
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "high";
+  const solutionA = a.slice(0, MAX_SOLUTION_TEXT);
+  const solutionB = b.slice(0, MAX_SOLUTION_TEXT);
+
+  return startSse(c, {
+    provider,
+    env: c.env,
+    effort,
+    task: {
+      session: crypto.randomUUID(),
+      prompt: ({ enforceShape }) =>
+        buildJudgePrompt(notes, solutionA, solutionB, {
+          enforceShape,
+          interpretation: interpretation || undefined,
+        }),
+      instructions: JUDGE_INSTRUCTIONS,
+      schemaName: "civil_judgement",
+      schema: judgementSchema as unknown as Record<string, unknown>,
+      images: assignment.images,
+    },
+    finalize: (rawText, { lastAttempt }) => ({
+      judgement: parseJudgement(rawText, provider, { allowIncomplete: lastAttempt }),
     }),
   });
 });

@@ -41,7 +41,8 @@ A stream request does not guarantee a stream back: a gateway may answer an inval
 - The repo previously carried a second, unused backend from the original Bun/Zo deployment (`server.ts`, `backend-lib/`, root `index.tsx`, `zosite.json`). It was outside both tsconfig `include` globs, so `npm run check` never covered it. It has been removed — recover it from git history if you need to consult the old provider logic. Everything that ships now lives in `worker/`, `shared/`, and `src/`, and all three are typechecked.
 
 - **The interpretation pass is opt-in.** `/api/interpret` costs three extra model calls before the first solution appears, so it stays off unless the user ticks it. Do not make it the default.
-- **`worker/run.ts` is task-agnostic.** Solve and interpret differ only in prompt, schema, and `finalize`. Add new model-calling features as another `Task`, not another orchestrator.
+- **The answer cross-check is opt-in, and the judge is blind.** `/api/judge` grades two solvers' solutions against the images; the browser labels them Solution A and B in picker order and never sends provider names, so the judge grades the work rather than the brand (the verdict card maps the letters back). The prompt makes the judge re-derive the numbers: the wrong answers seen on the fixtures were all internally consistent, so a consistency read would pass them. Off by default - two extra calls - and the judge runs at `high`, the most reliable level in the B.8 matrix, not the top one.
+- **`worker/run.ts` is task-agnostic.** Solve, interpret and judge differ only in prompt, schema, and `finalize`. Add new model-calling features as another `Task`, not another orchestrator.
 
 ## CPU budget
 
