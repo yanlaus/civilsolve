@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Read first
 
-`AGENTS.md` holds the project invariants (keys server-side, providers vs channels, effort mapping, untrusted model output, no storage, CPU budget on the free plan), the five failure modes, and the provider gotchas found by real testing. `README.md` holds the full architecture, API, and config reference. Both are authoritative; this file only adds what is not already written there. Keep all three in sync when architecture, provider behaviour, deployment, or error handling changes.
+`AGENTS.md` holds the project invariants (keys server-side, providers vs channels, effort mapping, untrusted model output, no storage, CPU budget - the account is on Workers Paid since 22 September 2026, and the free-plan findings explain the code's shape), the five failure modes, and the provider gotchas found by real testing. `README.md` holds the full architecture, API, and config reference. Both are authoritative; this file only adds what is not already written there. Keep all three in sync when architecture, provider behaviour, deployment, or error handling changes.
 
 ## Commands
 

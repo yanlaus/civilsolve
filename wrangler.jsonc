@@ -68,8 +68,13 @@
     //   "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
 
     // Comma-separated provider keys that should skip upstream streaming
-    // (still delivered to the browser over SSE), e.g. "deepseek".
-    "NO_STREAM": "deepseek"
+    // (still delivered to the browser over SSE). Was "deepseek" while the
+    // account was on the free plan (10 ms CPU): DeepSeek streams its
+    // reasoning token by token and was killed at 2,010 ms. On Workers Paid
+    // (since 22 September 2026, 30 s CPU) the stream fits, so it is empty:
+    // streaming shows progress and is not subject to OpenCode's ~100-120 s
+    // idle cut. Set it back to "deepseek" if the account ever drops to free.
+    "NO_STREAM": ""
   },
   "observability": {
     "enabled": true

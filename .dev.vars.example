@@ -34,7 +34,7 @@ GOOGLE_API_KEY=
 #   CHATGPT_CHANNEL=poe
 #   POE_CHATGPT_MODEL=gpt-5.4-pro
 #   OPENCODE_GROK_MODEL=grok-4.5
-#   NO_STREAM=deepseek
+#   NO_STREAM=deepseek                # only needed on the free Workers plan (10 ms CPU)
 #   INTERPRET_CHATGPT_MODEL=gpt-5.4   # faster interpretation reader than gpt-5.4-pro
 #
 # Check a key without spending tokens:
