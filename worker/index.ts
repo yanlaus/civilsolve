@@ -3,7 +3,7 @@ import {
   interpretationSchema,
   parseInterpretation,
 } from "../shared/interpretation";
-import { judgementSchema, parseJudgement } from "../shared/judgement";
+import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
 import {
   buildInterpretPrompt,
   buildJudgePrompt,
@@ -235,7 +235,7 @@ app.post("/api/interpret/:provider", async (c) => {
   return startSse(c, {
     provider,
     env: c.env,
-    // The interpretation pass runs on Poe top-tier models (see interpretOverride).
+    // The interpretation pass pins some providers to routes chosen for it (see interpretOverride).
     routeOverride: interpretOverride(provider, c.env),
     // Readers default to a modest budget - they transcribe, they do not
     // derive - and the user can raise it. The judge defaults to the strongest
@@ -256,9 +256,10 @@ app.post("/api/interpret/:provider", async (c) => {
   });
 });
 
-// The answer cross-check: grades two solvers' solutions against the images.
-// Runs on the provider's normal solve route - no override - so the judge is
-// whatever the user picked, at the effort the most reliable solves used.
+// The answer cross-check: grades the selected solvers' solutions against the
+// images. Runs on the provider's normal solve route - no override - so the
+// judge is whatever the user picked, at the effort the most reliable solves
+// used.
 app.post("/api/judge/:provider", async (c) => {
   const parsed = await readRequest(c);
   if ("response" in parsed) return parsed.response;
@@ -270,18 +271,23 @@ app.post("/api/judge/:provider", async (c) => {
     return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
   }
 
-  const solutions = Array.isArray(body.solutions) ? body.solutions : [];
-  const [a, b] = solutions;
-  if (typeof a !== "string" || typeof b !== "string" || !a.trim() || !b.trim()) {
-    return c.json({ error: "The cross-check needs two solutions." }, 400);
+  const candidates = Array.isArray(body.solutions) ? body.solutions : [];
+  if (
+    candidates.length < 2 ||
+    candidates.length > MAX_JUDGED_SOLUTIONS ||
+    candidates.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    return c.json(
+      { error: `The cross-check needs between 2 and ${MAX_JUDGED_SOLUTIONS} solutions.` },
+      400,
+    );
   }
+  const solutions = (candidates as string[]).map((entry) => entry.slice(0, MAX_SOLUTION_TEXT));
 
   const notes = readText(body.notes, MAX_NOTES_LENGTH);
   const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
   const effort: EffortKey =
     typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "high";
-  const solutionA = a.slice(0, MAX_SOLUTION_TEXT);
-  const solutionB = b.slice(0, MAX_SOLUTION_TEXT);
 
   return startSse(c, {
     provider,
@@ -290,7 +296,7 @@ app.post("/api/judge/:provider", async (c) => {
     task: {
       session: crypto.randomUUID(),
       prompt: ({ enforceShape }) =>
-        buildJudgePrompt(notes, solutionA, solutionB, {
+        buildJudgePrompt(notes, solutions, {
           enforceShape,
           interpretation: interpretation || undefined,
         }),
@@ -300,7 +306,9 @@ app.post("/api/judge/:provider", async (c) => {
       images: assignment.images,
     },
     finalize: (rawText, { lastAttempt }) => ({
-      judgement: parseJudgement(rawText, provider, { allowIncomplete: lastAttempt }),
+      judgement: parseJudgement(rawText, provider, solutions.length, {
+        allowIncomplete: lastAttempt,
+      }),
     }),
   });
 });

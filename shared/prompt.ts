@@ -55,15 +55,6 @@ const INTERPRETATION_FIELDS = [
   "discrepancies",
 ] as const;
 
-const JUDGEMENT_FIELDS = [
-  "verdict",
-  "final_answer",
-  "assessment_a",
-  "assessment_b",
-  "comparison",
-  "confidence",
-] as const;
-
 export type TutorPromptExtras = {
   /** Human-confirmed problem statement from the interpretation pipeline. */
   interpretation?: string;
@@ -209,33 +200,35 @@ export type JudgePromptExtras = {
 };
 
 /**
- * The answer cross-check. The two solutions are anonymised as A and B so the
+ * The answer cross-check. The solutions are anonymised as A, B, C... so the
  * judge grades the work, not the brand. It is told to re-derive the numbers
  * itself: every wrong answer seen on the fixtures came from a plausible
  * looking solution (a jet velocity assumed instead of derived, a pressure
  * force counted twice), and a judge that only reads for consistency would
- * pass both.
+ * pass them all.
  */
 export function buildJudgePrompt(
   userNotes: string,
-  solutionA: string,
-  solutionB: string,
+  solutions: string[],
   extras: JudgePromptExtras = {},
 ) {
+  const count = solutions.length;
+  const letters = solutions.map((_, index) => String.fromCharCode(65 + index));
+  const letterList = letters.join(", ");
   const sections = [
-    "Two solvers independently answered the attached civil engineering assignment images. Your job is to decide which of the two solutions is correct - if either - and to state the correct final answer.",
+    `${count} solvers independently answered the attached civil engineering assignment images. Your job is to decide which of the ${count} solutions are correct - if any - and to state the correct final answer.`,
     "Verify, do not trust. Re-derive every numerical result yourself from the images before grading, in enough depth to confirm or refute each solution's numbers. Check in particular:",
     "- Whether each solution read the diagram and the givens correctly (geometry, supports, loads, directions, units), and whether a quantity was assumed that should have been derived.",
     "- Continuity, equilibrium and compatibility conditions; sign conventions; unit conversions.",
     "- Double counting or omission of a term (a pressure force counted in both a momentum flux and separately, a weight left out, a reaction on the wrong body).",
     "- The arithmetic of the final substitution.",
     "Then fill the fields:",
-    '- `verdict`: "a" if only Solution A is correct, "b" if only Solution B, "both" if both reach the correct final answers (presentation and rounding differences do not matter), "neither" if both are wrong or you could not verify either.',
-    "- `final_answer`: the correct final answer(s) with units, as you verified them. If neither solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
-    "- `assessment_a` and `assessment_b`: for each solution, what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.",
-    "- `comparison`: where the two solutions differ and the decisive reason for the verdict.",
+    `- \`correct_solutions\`: the letters of the solutions that reach the correct final answers (presentation and rounding differences do not matter), from ${letterList}. An empty list means none is correct or none could be verified.`,
+    "- `final_answer`: the correct final answer(s) with units, as you verified them. If no solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
+    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}): what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.`,
+    "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
-    "Format formulas in `final_answer`, `assessment_a`, `assessment_b` and `comparison` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
+    "Format formulas in `final_answer`, `assessments` and `comparison` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
     "Return JSON matching the required schema exactly.",
     "",
     userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
@@ -250,12 +243,20 @@ export function buildJudgePrompt(
     );
   }
 
-  sections.push("", "Solution A:", solutionA, "", "Solution B:", solutionB);
+  solutions.forEach((solution, index) => {
+    sections.push("", `Solution ${letters[index]}:`, solution);
+  });
 
   if (extras.enforceShape) {
+    // Bespoke contract: two of the fields are arrays, which the generic
+    // all-strings skeleton cannot express.
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high"}`;
     sections.push(
-      ...shapeContract(JUDGEMENT_FIELDS),
-      'Allowed values: `verdict` is one of "a", "b", "both", "neither"; `confidence` is one of "high", "medium", "low".',
+      "",
+      "Return exactly one JSON object with these 5 fields:",
+      skeleton,
+      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` has exactly ${count} strings, in order; \`confidence\` is one of "high", "medium", "low".`,
+      "Do not add other fields. Do not nest this object inside another object or array.",
     );
   }
 

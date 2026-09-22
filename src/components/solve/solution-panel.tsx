@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, CheckCircle2, Download, ExternalLink, Loader2, Scale, X } from "lucide-react";
-import type { JudgementResult, Verdict } from "../../../shared/judgement";
+import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../../shared/providers";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
@@ -36,10 +36,20 @@ function solverMark(
   if (judgeRun.status !== "done") return null;
   const index = judgeRun.solvers.indexOf(provider);
   if (index < 0) return null;
-  const { verdict } = judgeRun.judgement;
-  if (verdict === "both") return "correct";
-  if (verdict === "neither") return "wrong";
-  return (index === 0) === (verdict === "a") ? "correct" : "wrong";
+  return judgeRun.judgement.correct.includes(index) ? "correct" : "wrong";
+}
+
+/** "Gemini's solution is correct", "Gemini and Muse Spark are correct", ... */
+function verdictHeadline(labels: string[], correct: number[]) {
+  if (correct.length === 0) {
+    return labels.length === 2 ? "Neither solution is correct" : "None of the solutions is correct";
+  }
+  if (correct.length === labels.length) {
+    return labels.length === 2 ? "Both solutions are correct" : "All solutions are correct";
+  }
+  const names = correct.map((index) => labels[index]);
+  if (names.length === 1) return `${names[0]}'s solution is correct`;
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are correct`;
 }
 
 export default function SolutionPanel({
@@ -246,13 +256,6 @@ export default function SolutionPanel({
   );
 }
 
-const VERDICT_HEADLINE: Record<Verdict, (a: string, b: string) => string> = {
-  a: (a) => `${a}'s solution is correct`,
-  b: (_a, b) => `${b}'s solution is correct`,
-  both: () => "Both solutions are correct",
-  neither: () => "Neither solution is correct",
-};
-
 const CONFIDENCE_CLASS = {
   high: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]",
   medium:
@@ -278,7 +281,7 @@ function Assessment({
   correct,
 }: {
   label: string;
-  letter: "A" | "B";
+  letter: string;
   text: string;
   correct: boolean;
 }) {
@@ -298,10 +301,10 @@ function Assessment({
 }
 
 /**
- * The answer cross-check's result: which solver the judge found correct,
+ * The answer cross-check's result: which solvers the judge found correct,
  * the judge's own verified answer, and what each solution got wrong. The
- * judge only ever saw "Solution A" and "Solution B"; the provider names are
- * added back here from the order the solvers ran in.
+ * judge only ever saw "Solution A", "Solution B", ...; the provider names
+ * are added back here from the order the solvers ran in.
  */
 function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
   if (judgeRun.status === "idle") return null;
@@ -329,12 +332,10 @@ function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
     );
   }
 
-  const { judgement, solvers } = judgeRun;
-  const [labelA, labelB] = solvers.map((provider) => PROVIDER_LABELS[provider]) as [string, string];
-  const correctA = judgement.verdict === "a" || judgement.verdict === "both";
-  const correctB = judgement.verdict === "b" || judgement.verdict === "both";
+  const { judgement, solvers, skipped } = judgeRun;
+  const labels = solvers.map((provider) => PROVIDER_LABELS[provider]);
   const headlineTone =
-    judgement.verdict === "neither"
+    judgement.correct.length === 0
       ? "text-[#c0392b] dark:text-[#f2b8b2]"
       : "text-[#2d8a4e] dark:text-[#3daf66]";
 
@@ -356,8 +357,14 @@ function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
       </div>
 
       <p className={`mt-2 text-base font-semibold ${headlineTone}`}>
-        {VERDICT_HEADLINE[judgement.verdict](labelA, labelB)}
+        {verdictHeadline(labels, judgement.correct)}
       </p>
+      {skipped.length ? (
+        <p className="mt-1 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+          Not graded: {skipped.map((provider) => PROVIDER_LABELS[provider]).join(", ")} returned
+          no solution.
+        </p>
+      ) : null}
 
       {judgement.final_answer ? (
         <div className="mt-3">
@@ -369,8 +376,15 @@ function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
       ) : null}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Assessment label={labelA} letter="A" text={judgement.assessment_a} correct={correctA} />
-        <Assessment label={labelB} letter="B" text={judgement.assessment_b} correct={correctB} />
+        {solvers.map((provider, index) => (
+          <Assessment
+            key={provider}
+            label={PROVIDER_LABELS[provider]}
+            letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
+            text={judgement.assessments[index] ?? ""}
+            correct={judgement.correct.includes(index)}
+          />
+        ))}
       </div>
 
       {judgement.comparison ? (

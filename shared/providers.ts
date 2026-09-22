@@ -63,30 +63,32 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
 ]);
 
 /**
- * Selected by default in the upload form. Only one provider runs per solve -
- * on the free plan each is a per-token stream that draws CPU for its whole
- * duration, so running several at once exhausts the CPU budget and the runtime
- * kills a stream. One at a time keeps every solve inside the budget.
+ * Ticked by default in the upload form. Several providers may be selected
+ * and they solve at the same time (the account is on Workers Paid; on the
+ * free plan concurrent streams got killed). Gemini Flash on Google was right
+ * on both fixtures and is the cheapest route of any; Muse Spark was 3/3 on
+ * the hard fixture where it finished, for free. Two solvers is also what the
+ * answer cross-check needs.
  */
-export const DEFAULT_PROVIDER: ProviderKey = "chatgpt";
+export const DEFAULT_SOLVERS: ProviderKey[] = ["gemini", "muse"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree; the judge is a third model.
+ * Gemini and Muse Spark read (same reasoning as the solvers above); ChatGPT
+ * (gpt-5.6-luna on OpenCode Go, the most reliable solver in the B.8 matrix)
+ * reconciles them.
  */
-export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["chatgpt", "gemini"];
-export const DEFAULT_VERIFIER: ProviderKey = "claude";
+export const DEFAULT_INTERPRETERS: [ProviderKey, ProviderKey] = ["gemini", "muse"];
+export const DEFAULT_VERIFIER: ProviderKey = "chatgpt";
 
 /**
- * Defaults for the optional answer cross-check: the picked provider solves,
- * a second solver solves independently, and a judge grades both against the
- * images. Muse Spark was 3/3 on the hard fixture where it finished, for free;
- * Gemini Flash on Google was right on both fixtures and is the cheapest route
- * of any. Neither default is a Poe or "More credit" provider, so switching the
- * check on costs little beyond the extra calls.
+ * Default judge for the optional answer cross-check: the selected solvers
+ * solve, ChatGPT grades every solution against the images. The judge should
+ * be the strongest model at hand rather than one of the solvers, and Luna at
+ * "high" was the most reliable cell in the B.8 matrix.
  */
-export const DEFAULT_SECOND_SOLVER: ProviderKey = "muse";
-export const DEFAULT_JUDGE: ProviderKey = "gemini";
+export const DEFAULT_JUDGE: ProviderKey = "chatgpt";
 
 export type ChannelKey = "poe" | "opencode" | "google";
 

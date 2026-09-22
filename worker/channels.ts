@@ -405,14 +405,15 @@ export function resolveRoute(
 
 // Reading the diagram is a comprehension task where a misread poisons the
 // solve, so the interpretation pass pins its providers to routes chosen for
-// it rather than the solve-time channel. They are also the cheap CPU routes:
-// Poe buffers upstream (median chunk 177 B), Google more so (435 B), against
-// OpenCode Go's per-token 54 B. Only providers listed here are pinned; any
-// other pick (DeepSeek, Grok, ...) keeps its normal route.
+// it rather than the solve-time channel. Only providers listed here are
+// pinned; any other pick (DeepSeek, Muse Spark, ...) keeps its normal route.
 //
-// gpt-5.4-pro reads correctly but the pro tier over-thinks a transcription
-// task (~95 s vs ~5 s for gemini); set INTERPRET_CHATGPT_MODEL=gpt-5.4 to
-// trade a little away for a much faster reader.
+// ChatGPT is pinned to gpt-5.6-luna on OpenCode Go - the default judge of
+// the pass since 22 September 2026, at the owner's request (no Poe). It
+// read on Poe's gpt-5.4-pro before that: correct, but the pro tier
+// over-thinks a transcription task (~95 s vs ~5 s for Gemini) and bills the
+// Poe account. To go back, set chatgpt to "poe" below and
+// INTERPRET_CHATGPT_MODEL to a Poe bot id.
 //
 // Gemini reads on Google, free-tier Flash, with a model chain: 3.8-flash
 // first, 3.5-flash when 3.8 is unavailable (it answered 503 "high demand" on
@@ -426,14 +427,14 @@ const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
 };
 
 const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
-  chatgpt: "gpt-5.4-pro",
+  chatgpt: "gpt-5.6-luna",
   gemini: "gemini-3.8-flash,gemini-3.5-flash",
   claude: "claude-opus-4.8",
 };
 
 /** Where each pinned reader runs. Gemini needs its key; see interpretOverride. */
 const INTERPRET_CHANNEL: Partial<Record<ProviderKey, ChannelKey>> = {
-  chatgpt: "poe",
+  chatgpt: "opencode",
   gemini: "google",
   claude: "poe",
 };

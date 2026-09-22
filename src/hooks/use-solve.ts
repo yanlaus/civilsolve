@@ -1,11 +1,11 @@
 // Per-provider solve state machine over the app-level SSE protocol.
-// Fires one streaming POST per selected provider; each tab progresses
-// independently (spinner -> live progress -> rendered solution). With the
-// optional answer cross-check, two solvers run together and a judge then
-// grades both solutions against the images.
+// Fires one streaming POST per selected provider, all at once; each tab
+// progresses independently (spinner -> live progress -> rendered solution).
+// With the optional answer cross-check, a judge then grades every finished
+// solution against the images.
 
 import { useCallback, useRef, useState } from "react";
-import type { JudgementResult } from "../../shared/judgement";
+import { MAX_JUDGED_SOLUTIONS, type JudgementResult } from "../../shared/judgement";
 import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
 import { artifactToText, type ProviderArtifact } from "../../shared/solution";
 import {
@@ -28,7 +28,8 @@ export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
 /**
  * The cross-check judge's progress. `solvers` records which provider was
- * Solution A and which Solution B, since the judge only ever sees letters.
+ * Solution A, B, C..., since the judge only ever sees letters; `skipped`
+ * names selected solvers that returned nothing and so were not graded.
  */
 export type JudgeRun =
   | { status: "idle" }
@@ -37,7 +38,8 @@ export type JudgeRun =
   | {
       status: "done";
       judge: ProviderKey;
-      solvers: [ProviderKey, ProviderKey];
+      solvers: ProviderKey[];
+      skipped: ProviderKey[];
       judgement: JudgementResult;
     }
   | { status: "error"; judge: ProviderKey; message: string };
@@ -47,13 +49,13 @@ const IDLE_RUNS = Object.fromEntries(
 ) as ProviderRuns;
 
 /**
- * How many solvers stream at once. Two, because the cross-check runs its two
- * solvers together and nothing runs more than two. This was 1 on the free
- * Workers plan, where concurrent per-token streams drained the CPU budget
- * and got a stream killed (see the CPU section of AGENTS.md); the account
- * moved to Workers Paid on 22 September 2026.
+ * How many solvers stream at once: every selected one, up to the number the
+ * cross-check can grade. This was 1 on the free Workers plan, where
+ * concurrent per-token streams drained the CPU budget and got a stream
+ * killed (see the CPU section of AGENTS.md); the account moved to Workers
+ * Paid on 22 September 2026.
  */
-const SOLVE_CONCURRENCY = 2;
+const SOLVE_CONCURRENCY = MAX_JUDGED_SOLUTIONS;
 
 export function isRunActive(run: ProviderRun) {
   return run.status === "waiting" || run.status === "streaming";
@@ -102,7 +104,7 @@ export function useSolve() {
       });
       setJudgeRun(
         judge
-          ? { status: "waiting", judge, message: "Waiting for both solutions..." }
+          ? { status: "waiting", judge, message: "Waiting for the solutions..." }
           : { status: "idle" },
       );
 
@@ -242,9 +244,11 @@ async function streamProvider(
 }
 
 /**
- * The cross-check's last step: both solutions, flattened to text, go to the
- * judge with the same images (and confirmed interpretation, if any). The
- * judge sees them as Solution A and B in picker order.
+ * The cross-check's last step: every finished solution, flattened to text,
+ * goes to the judge with the same images (and confirmed interpretation, if
+ * any). The judge sees them as Solution A, B, C... in picker order. A solver
+ * that returned nothing is left out and named in the result; fewer than two
+ * solutions is nothing to compare.
  */
 async function runJudge(
   judge: ProviderKey,
@@ -254,15 +258,13 @@ async function runJudge(
   signal: AbortSignal,
   setJudgeRun: (run: JudgeRun) => void,
 ) {
-  const [first, second] = providers;
-  const solutionA = first ? solutions.get(first) : undefined;
-  const solutionB = second ? solutions.get(second) : undefined;
-  if (!first || !second || !solutionA || !solutionB) {
-    const missing = providers.filter((provider) => !solutions.has(provider));
+  const solvers = providers.filter((provider) => solutions.has(provider)).slice(0, MAX_JUDGED_SOLUTIONS);
+  const skipped = providers.filter((provider) => !solutions.has(provider));
+  if (solvers.length < 2) {
     setJudgeRun({
       status: "error",
       judge,
-      message: `Cross-check skipped: ${missing.map((p) => PROVIDER_LABELS[p]).join(" and ") || "a solver"} did not return a solution to compare.`,
+      message: `Cross-check skipped: ${skipped.map((p) => PROVIDER_LABELS[p]).join(" and ") || "a solver"} did not return a solution, leaving fewer than two to compare.`,
     });
     return;
   }
@@ -271,21 +273,24 @@ async function runJudge(
     images: body.images,
     notes: body.notes,
     ...(body.interpretation ? { interpretation: body.interpretation } : {}),
-    solutions: [
-      artifactToText(solutionA, MAX_SOLUTION_TEXT),
-      artifactToText(solutionB, MAX_SOLUTION_TEXT),
-    ],
+    solutions: solvers.map((provider) =>
+      artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
+    ),
   };
   if (estimateBodyBytes(judgeBody) > MAX_BODY_BYTES) {
     setJudgeRun({
       status: "error",
       judge,
-      message: "Cross-check skipped: the images plus both solutions exceed the request size limit.",
+      message: "Cross-check skipped: the images plus the solutions exceed the request size limit.",
     });
     return;
   }
 
-  setJudgeRun({ status: "waiting", judge, message: "Submitting both solutions..." });
+  setJudgeRun({
+    status: "waiting",
+    judge,
+    message: `Submitting ${solvers.length} solutions...`,
+  });
   let charsReceived = 0;
 
   try {
@@ -315,7 +320,8 @@ async function runJudge(
         setJudgeRun({
           status: "done",
           judge,
-          solvers: [first, second],
+          solvers,
+          skipped,
           judgement: payload.judgement as JudgementResult,
         });
       } else if (event.name === "error" && typeof payload.message === "string") {

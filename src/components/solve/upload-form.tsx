@@ -23,13 +23,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
+import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   DEFAULT_INTERPRETERS,
   DEFAULT_JUDGE,
-  DEFAULT_PROVIDER,
-  DEFAULT_SECOND_SOLVER,
+  DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
   HIGHER_CREDIT_PROVIDERS,
   LOWER_CREDIT_PROVIDERS,
@@ -51,7 +51,7 @@ export type SolveSubmission = {
   files: File[];
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
-  /** One provider per solve, or two when the answer cross-check is on. */
+  /** The selected solvers, in picker order; they run together. */
   providers: ProviderKey[];
   notes: string;
   effort: EffortKey;
@@ -120,10 +120,9 @@ export function UploadForm({
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
   const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
-  const [secondSolver, setSecondSolver] = useState<ProviderKey>(DEFAULT_SECOND_SOLVER);
   const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
-  const [effort, setEffort] = useState<EffortKey>("low");
-  const [selectedProvider, setSelectedProvider] = useState<ProviderKey>(DEFAULT_PROVIDER);
+  const [effort, setEffort] = useState<EffortKey>("high");
+  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(DEFAULT_SOLVERS);
   const [providerStatus, setProviderStatus] =
     useState<Record<ProviderKey, ProviderStatus> | null>(null);
   const [fileError, setFileError] = useState("");
@@ -147,10 +146,11 @@ export function UploadForm({
       .then((payload) => {
         if (cancelled || !payload?.providers) return;
         setProviderStatus(payload.providers);
-        setSelectedProvider((current) => {
-          if (payload.providers[current]?.configured) return current;
+        setSelectedProviders((current) => {
+          const configured = current.filter((key) => payload.providers[key]?.configured);
+          if (configured.length) return configured;
           const firstConfigured = PROVIDER_KEYS.find((key) => payload.providers[key]?.configured);
-          return firstConfigured ?? current;
+          return firstConfigured ? [firstConfigured] : current;
         });
       })
       .catch(() => {
@@ -169,31 +169,39 @@ export function UploadForm({
     providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
   );
 
-  // Some routes pin the reasoning level (forceEffort) or put a floor under it
-  // (minEffort), and the Worker applies that regardless of what is sent. Show
-  // it here instead of letting the user pick a level that is silently raised:
-  // ChatGPT floors at "high".
-  const selectedStatus = providerStatus?.[selectedProvider];
-  const pinnedEffort = selectedStatus?.forcedEffort;
-  const effortFloor = pinnedEffort ?? selectedStatus?.minEffort;
-  const floorIndex = effortFloor ? EFFORT_KEYS.indexOf(effortFloor as EffortKey) : -1;
+  // Some routes put a floor under the reasoning level (minEffort; a pinned
+  // forceEffort counts as a floor too), and the Worker applies that
+  // regardless of what is sent. One level serves every selected solver, so
+  // the highest floor among them rules, and it is shown here instead of
+  // letting the user pick a level that is silently raised: ChatGPT floors at
+  // "high".
+  const providerFloor = (key: ProviderKey) => {
+    const status = providerStatus?.[key];
+    const floor = status?.forcedEffort ?? status?.minEffort;
+    return floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : -1;
+  };
+  const floorIndex = selectedProviders.reduce(
+    (highest, key) => Math.max(highest, providerFloor(key)),
+    -1,
+  );
+  const effortFloor = floorIndex > 0 ? EFFORT_KEYS[floorIndex] : undefined;
+  const floorLabels = selectedProviders
+    .filter((key) => providerFloor(key) === floorIndex)
+    .map((key) => PROVIDER_LABELS[key])
+    .join(" and ");
 
   const isEffortLocked = (key: EffortKey) =>
-    pinnedEffort ? key !== pinnedEffort : floorIndex > 0 && EFFORT_KEYS.indexOf(key) < floorIndex;
+    floorIndex > 0 && EFFORT_KEYS.indexOf(key) < floorIndex;
 
   // Snap the visible level up when the floor rules the current pick out. Only
-  // ever upwards: switching to an unfloored provider keeps the level the user
+  // ever upwards: deselecting a floored provider keeps the level the user
   // last chose rather than dropping it back.
   useEffect(() => {
     if (floorIndex < 0) return;
     setEffort((current) =>
-      pinnedEffort
-        ? (pinnedEffort as EffortKey)
-        : EFFORT_KEYS.indexOf(current) < floorIndex
-          ? EFFORT_KEYS[floorIndex]
-          : current,
+      EFFORT_KEYS.indexOf(current) < floorIndex ? EFFORT_KEYS[floorIndex] : current,
     );
-  }, [pinnedEffort, floorIndex]);
+  }, [floorIndex]);
 
   // Two readers that are the same model would just agree with themselves.
   const verifyConfigError =
@@ -201,19 +209,20 @@ export function UploadForm({
       ? "Pick two different models to read the question independently."
       : "";
 
-  // Likewise two solvers: the second must differ from the one picked above.
-  const crossCheckConfigError =
-    crossCheckEnabled && secondSolver === selectedProvider
-      ? `Pick a second solver other than ${PROVIDER_LABELS[selectedProvider]} for the cross-check.`
-      : crossCheckEnabled && !isAvailable(secondSolver)
-        ? `${PROVIDER_LABELS[secondSolver]} is not configured on the server.`
-        : "";
+  const solverConfigError =
+    selectedProviders.length === 0
+      ? "Pick at least one AI provider to solve with."
+      : crossCheckEnabled && selectedProviders.length < 2
+        ? "Pick at least two solvers for the cross-check to compare."
+        : crossCheckEnabled && selectedProviders.length > MAX_JUDGED_SOLUTIONS
+          ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
+          : "";
 
   const canSubmit =
     queuedFiles.length > 0 &&
-    isAvailable(selectedProvider) &&
+    selectedProviders.every(isAvailable) &&
     !verifyConfigError &&
-    !crossCheckConfigError &&
+    !solverConfigError &&
     !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
@@ -306,8 +315,13 @@ export function UploadForm({
     });
   }
 
-  function selectProvider(provider: ProviderKey) {
-    setSelectedProvider(provider);
+  // Keeps picker order, which is also the order the judge sees solutions in.
+  function toggleProvider(provider: ProviderKey) {
+    setSelectedProviders((current) =>
+      current.includes(provider)
+        ? current.filter((key) => key !== provider)
+        : PROVIDER_KEYS.filter((key) => key === provider || current.includes(key)),
+    );
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -316,7 +330,7 @@ export function UploadForm({
     onSolve({
       files: queuedFiles.map((item) => item.file),
       lectureFiles: lectureFiles.map((item) => item.file),
-      providers: crossCheckEnabled ? [selectedProvider, secondSolver] : [selectedProvider],
+      providers: selectedProviders,
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
@@ -324,7 +338,7 @@ export function UploadForm({
     });
   }
 
-  const bannerError = error || fileError || verifyConfigError || crossCheckConfigError;
+  const bannerError = error || fileError || verifyConfigError || solverConfigError;
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -498,16 +512,18 @@ export function UploadForm({
       <section>
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
-          AI Provider
+          AI Providers
           <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
-            {crossCheckEnabled ? "(first solver)" : "(one per solve)"}
+            {crossCheckEnabled
+              ? `(solvers - pick two to ${MAX_JUDGED_SOLUTIONS})`
+              : "(pick one or more - they solve together)"}
           </span>
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
-            const checked = selectedProvider === provider.key && available;
+            const checked = selectedProviders.includes(provider.key) && available;
             const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
@@ -531,11 +547,12 @@ export function UploadForm({
                 }`}
               >
                 <input
-                  type="radio"
-                  name="provider"
+                  type="checkbox"
+                  name="providers"
+                  value={provider.key}
                   checked={checked}
                   disabled={!available}
-                  onChange={() => selectProvider(provider.key)}
+                  onChange={() => toggleProvider(provider.key)}
                   className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
                 />
                 <span className="min-w-0 flex-1">
@@ -595,11 +612,7 @@ export function UploadForm({
                 type="button"
                 disabled={locked}
                 title={
-                  locked
-                    ? `${PROVIDER_LABELS[selectedProvider]} runs at ${effortFloor} thinking${
-                        pinnedEffort ? "" : " or above"
-                      } on this route.`
-                    : undefined
+                  locked ? `${floorLabels} runs at ${effortFloor} thinking or above on this route.` : undefined
                 }
                 onClick={() => setEffort(option.key)}
                 className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
@@ -617,12 +630,8 @@ export function UploadForm({
         </div>
         {effortFloor ? (
           <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
-            {PROVIDER_LABELS[selectedProvider]} runs at{" "}
-            <strong>
-              {effortFloor}
-              {pinnedEffort ? "" : " or above"}
-            </strong>{" "}
-            on this route, so lower levels are disabled.
+            {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
+            lower levels are disabled for every solver in this run.
           </p>
         ) : null}
         <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
@@ -718,41 +727,38 @@ export function UploadForm({
           />
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-              Have a second model solve it too, and a third judge both
+              Have a judge grade every solution
             </span>
             <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
-              Both solvers work at the same time, then the judge re-derives the numbers from
-              the images and says which solution is right — or corrects both. Catches a
-              plausible-looking wrong answer, at the cost of two extra model calls. Combine
-              with the interpretation check above for the most robust result.
+              The selected solvers work at the same time, then the judge re-derives the
+              numbers from the images and says which solutions are right — or corrects them
+              all. Catches a plausible-looking wrong answer, at the cost of one extra model
+              call. Needs two or more solvers ticked above. Combine with the interpretation
+              check for the most robust result.
             </span>
           </span>
         </label>
 
         {crossCheckEnabled ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {[
-              { label: "Second solver", value: secondSolver, set: setSecondSolver },
-              { label: "Judge", value: judge, set: setJudge },
-            ].map((field) => (
-              <label key={field.label} className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
-                {field.label}
-                <select
-                  value={field.value}
-                  onChange={(event) => field.set(event.target.value as ProviderKey)}
-                  className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
-                >
-                  {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
+            <label className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              Judge
+              <select
+                value={judge}
+                onChange={(event) => setJudge(event.target.value as ProviderKey)}
+                className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+              >
+                {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <p className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960] sm:col-span-2">
-              Both solvers use the thinking effort chosen above. The judge thinks at
-              <strong> high</strong> and never learns which model wrote which solution.
+              Solving: {selectedProviders.map((key) => PROVIDER_LABELS[key]).join(", ") || "nobody yet"}.
+              The judge thinks at <strong>high</strong> and never learns which model wrote
+              which solution.
             </p>
           </div>
         ) : null}

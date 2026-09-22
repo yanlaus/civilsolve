@@ -53,12 +53,14 @@
     // 3.8-flash reads best but answered 503 "high demand" on four of six
     // solves the day this was set; 3.5-flash was 3/3.
     "GOOGLE_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
-    // The optional interpretation pass pins its readers and judge here.
-    // ChatGPT and Claude read on Poe; gpt-5.4-pro reads well but is slow
-    // (~95s), gpt-5.4 is much faster. Gemini reads on Google (free-tier
-    // Flash, cheapest CPU of any route) with the same chain as above, and
-    // falls back to Poe's gemini-3.1-pro only if GOOGLE_API_KEY is unset.
-    "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",
+    // The optional interpretation pass pins these providers here (any other
+    // pick keeps its normal route). ChatGPT is gpt-5.6-luna on OpenCode Go -
+    // the pass's default judge; Poe's gpt-5.4-pro read well but slowly
+    // (~95 s) and billed Poe. Gemini reads on Google (free-tier Flash, the
+    // cheapest CPU of any route) with the same chain as above, and falls
+    // back to Poe's gemini-3.1-pro only if GOOGLE_API_KEY is unset. Claude
+    // is Opus on Poe.
+    "INTERPRET_CHATGPT_MODEL": "gpt-5.6-luna",
     "INTERPRET_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
     "INTERPRET_CLAUDE_MODEL": "claude-opus-4.8",
 

@@ -29,17 +29,17 @@ export type InterpretRequestBody = {
 };
 
 /**
- * Answer cross-check: two solvers' solutions for a third model to judge
- * against the same images. The solutions are anonymised as A and B server
- * side - the judge never learns which provider wrote which.
+ * Answer cross-check: the selected solvers' solutions for a judge to grade
+ * against the same images. The solutions are anonymised as A, B, C, D in
+ * order - the judge never learns which provider wrote which.
  */
 export type JudgeRequestBody = {
   images: string[];
   notes: string;
   /** Human-confirmed problem statement from the optional interpretation pass. */
   interpretation?: string;
-  /** The two candidate solutions, as text (see `artifactToText`). */
-  solutions: [string, string];
+  /** Two to MAX_JUDGED_SOLUTIONS candidate solutions, as text (see `artifactToText`). */
+  solutions: string[];
   /** Reasoning level. Defaults to "high" - the most reliable level measured. */
   effort?: EffortKey;
 };
@@ -91,7 +91,7 @@ export function estimateBodyBytes(body: {
   interpretation?: string;
   referenceText?: string;
   referenceImages?: string[];
-  solutions?: [string, string];
+  solutions?: string[];
 }) {
   let total = 128; // envelope and field names
   for (const image of [...body.images, ...(body.referenceImages || [])]) {
