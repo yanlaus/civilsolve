@@ -135,9 +135,15 @@ type RouteSpec = {
   /**
    * Ceiling on the reasoning level. For a model whose top levels think so
    * long that the request dies before an answer arrives, this keeps a level
-   * the route cannot finish out of reach.
+   * the route cannot finish out of reach. No route sets one today - MiniMax
+   * did until its timeout was raised instead.
    */
   maxEffort?: EffortKey;
+  /**
+   * How long this route may run before the task is abandoned, overriding
+   * SAFETY_TIMEOUT_MS in run.ts. For a model worth waiting longer for.
+   */
+  timeoutMs?: number;
   /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
@@ -280,7 +286,14 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // "MiniMax-M3[1m]" selects the 1M-token context window.
       defaultModel: "MiniMax-M3",
       effort: CLAMPED_EFFORT,
-      maxEffort: "low",
+      // M3 is worth waiting for and its thinking runs long: on the B.8
+      // fixture it wrote 93-104k characters and was still going at the
+      // default 280 s, three production runs out of three. `reasoning_effort`
+      // does not shorten it (measured at every level on both routes, no
+      // monotonic relationship), so time is the only lever. Cloudflare
+      // enforces no wall-clock limit while the client is connected and the
+      // 15 s heartbeats keep the stream alive.
+      timeoutMs: 1_200_000,
     },
     opencode: {
       ...OPENCODE_SPEC,
@@ -298,12 +311,11 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // stripThinkTags in shared/solution.ts removes them before parsing.
       defaultModel: "minimax-m3",
       effort: CLAMPED_EFFORT,
-      // Capped at "low", the only level that finishes reliably. Its thinking
-      // length is wildly variable: "medium" wrote 105-148k characters and hit
-      // the 280 s safety timeout on both production B.8 runs (it had answered
-      // in 23 s and 267 s locally), and "high" did the same at 95k. At "low"
-      // it was correct on B.8 (82 s) and the beam (14 s) on production.
-      maxEffort: "low",
+      // Same 20 minutes as the direct route: the gateway runs the same model
+      // and it ran past 280 s at "medium" (105-148k characters) and "high"
+      // (95k) on production. It was capped at "low" until 23 September 2026;
+      // the cap is gone because waiting longer beats refusing the level.
+      timeoutMs: 1_200_000,
     },
   },
   muse: {
@@ -367,6 +379,8 @@ export type Route = {
   minEffort?: EffortKey;
   /** Ceiling on the reasoning level. */
   maxEffort?: EffortKey;
+  /** Overrides the default safety timeout in run.ts. */
+  timeoutMs?: number;
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -457,6 +471,7 @@ export function resolveRoute(
     forceEffort: spec.forceEffort,
     minEffort: spec.minEffort,
     maxEffort: spec.maxEffort,
+    timeoutMs: spec.timeoutMs,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,

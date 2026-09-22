@@ -32,6 +32,18 @@ import {
 
 export type { WorkerEnv };
 
+/**
+ * How long one task may run before it is abandoned, unless the route sets
+ * its own `timeoutMs`. Covers every attempt, so a retry cannot extend it.
+ *
+ * 280 s came in with the original import and carried no recorded reason;
+ * 300 s is the Workers paid CPU ceiling, so it reads as "just under five
+ * minutes". That reasoning does not actually apply: Cloudflare enforces no
+ * wall-clock limit on an HTTP request while the client stays connected, and
+ * time spent waiting on `fetch()` is not billed as CPU at all (a 77 s solve
+ * costs ~3 s of CPU). What the number really encodes is how long a user
+ * should wait before being told nothing is coming.
+ */
 const SAFETY_TIMEOUT_MS = 280_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_TRANSIENT_RETRIES = 1;
@@ -268,14 +280,13 @@ export async function runTask(
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
   let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
+  const timeoutMs = route.timeoutMs ?? SAFETY_TIMEOUT_MS;
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {
-    abort.abort(
-      new Error(
-        `${route.label} timed out after ${Math.round(SAFETY_TIMEOUT_MS / 1000)} seconds.`,
-      ),
-    );
-  }, SAFETY_TIMEOUT_MS);
+    const seconds = Math.round(timeoutMs / 1000);
+    const spent = seconds >= 120 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`;
+    abort.abort(new Error(`${route.label} timed out after ${spent}.`));
+  }, timeoutMs);
 
   try {
     if (route.problem) {

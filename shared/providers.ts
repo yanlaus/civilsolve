@@ -51,13 +51,13 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 };
 
 /**
- * Models developed and served in mainland China, badged so the origin is
- * visible before a solve. DeepSeek runs on OpenCode Go's China deployment
- * (the workspace must enable it); MiMo is Xiaomi's; MiniMax is MiniMax's.
- * This is a provenance label, not a quality or cost one.
+ * Models badged as China models in the picker, at the owner's choice: MiMo
+ * is Xiaomi's and MiniMax is MiniMax's, both reached on their mainland
+ * deployments. DeepSeek is Chinese too and was badged for one day, but the
+ * owner asked for the label on these two only. This is a provenance label,
+ * not a quality or cost one.
  */
 export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
-  "deepseek",
   "mimo",
   "minimax",
 ]);
