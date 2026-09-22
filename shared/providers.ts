@@ -115,9 +115,9 @@ export const DEFAULT_VERIFIER: ProviderKey = "chatgpt";
  */
 export const DEFAULT_JUDGE: ProviderKey = "chatgpt";
 
-export type ChannelKey = "poe" | "opencode" | "google";
+export type ChannelKey = "poe" | "opencode" | "google" | "minimax";
 
-export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google"];
+export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "minimax"];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -128,6 +128,7 @@ export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   poe: "Poe",
   opencode: "OpenCode Go",
   google: "Google AI",
+  minimax: "MiniMax",
 };
 
 /** Per-provider status reported by GET /api/health (never includes key values). */

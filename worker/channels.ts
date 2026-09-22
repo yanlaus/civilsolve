@@ -25,6 +25,7 @@ export type Dialect = "responses" | "chat-completions" | "gemini";
 export type WorkerEnv = {
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
+  MINIMAX_API_KEY?: string;
   OPENCODE_API_KEY?: string;
   GOOGLE_API_KEY?: string;
 
@@ -47,6 +48,7 @@ export type WorkerEnv = {
   OPENCODE_GROK_MODEL?: string;
   OPENCODE_MIMO_MODEL?: string;
   OPENCODE_MINIMAX_MODEL?: string;
+  MINIMAX_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
@@ -56,6 +58,7 @@ export type WorkerEnv = {
   // --- Endpoint overrides (proxies) --------------------------------------
   POE_BASE_URL?: string;
   OPENCODE_BASE_URL?: string;
+  MINIMAX_BASE_URL?: string;
   GOOGLE_BASE_URL?: string;
 
   // --- Behaviour ---------------------------------------------------------
@@ -258,6 +261,26 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     },
   },
   minimax: {
+    // MiniMax's own API, on the owner's MINIMAX_API_KEY. Pay-per-token, so
+    // "opencode" (the monthly Go subscription) is the default; flip
+    // MINIMAX_CHANNEL to "minimax" to use the key instead. The endpoint is
+    // plain OpenAI chat-completions and reads images, so no separate dialect
+    // is needed - the anthropic-protocol route this provider used until 19
+    // September 2026 is not coming back. Same model either way, spelled
+    // "MiniMax-M3" here and "minimax-m3" on the gateway.
+    minimax: {
+      dialect: "chat-completions",
+      keyVar: "MINIMAX_API_KEY",
+      urlVar: "MINIMAX_BASE_URL",
+      defaultUrl: "https://api.minimaxi.com/v1",
+      pathSuffix: "/chat/completions",
+      modelVar: "MINIMAX_MODEL",
+      // Mainland host. International deployments use https://api.minimax.io.
+      // "MiniMax-M3[1m]" selects the 1M-token context window.
+      defaultModel: "MiniMax-M3",
+      effort: CLAMPED_EFFORT,
+      maxEffort: "low",
+    },
     opencode: {
       ...OPENCODE_SPEC,
       dialect: "chat-completions",

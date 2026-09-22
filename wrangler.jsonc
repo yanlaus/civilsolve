@@ -23,6 +23,8 @@
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
     "MIMO_CHANNEL": "opencode",
+    // "opencode" spends the monthly Go subscription; "minimax" spends the
+    // owner's own MiniMax key per token (see MINIMAX_API_KEY).
     "MINIMAX_CHANNEL": "opencode",
     "MUSE_CHANNEL": "opencode",
 
@@ -44,6 +46,9 @@
     // MiniMax has no free tier on either gateway, so this runs on the Go
     // subscription quota. "minimax-m2.7"/"minimax-m2.5" answer 503.
     "OPENCODE_MINIMAX_MODEL": "minimax-m3",
+    // Only used when MINIMAX_CHANNEL is "minimax": the same model on
+    // MiniMax's own API, which spells it with capitals.
+    "MINIMAX_MODEL": "MiniMax-M3",
     // Free "contributor" tier; the workspace must opt in to its data
     // collection or the gateway answers 403 DataPolicyError.
     "OPENCODE_MUSE_MODEL": "muse-spark-1.3-contributor",
