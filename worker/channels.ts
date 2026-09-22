@@ -35,6 +35,7 @@ export type WorkerEnv = {
   DEEPSEEK_CHANNEL?: string;
   GROK_CHANNEL?: string;
   MIMO_CHANNEL?: string;
+  MINIMAX_CHANNEL?: string;
   MUSE_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
@@ -45,6 +46,7 @@ export type WorkerEnv = {
   OPENCODE_DEEPSEEK_MODEL?: string;
   OPENCODE_GROK_MODEL?: string;
   OPENCODE_MIMO_MODEL?: string;
+  OPENCODE_MINIMAX_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
@@ -127,6 +129,12 @@ type RouteSpec = {
    * producing a confidently wrong answer.
    */
   minEffort?: EffortKey;
+  /**
+   * Ceiling on the reasoning level. For a model whose top levels think so
+   * long that the request dies before an answer arrives, this keeps a level
+   * the route cannot finish out of reach.
+   */
+  maxEffort?: EffortKey;
   /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
@@ -240,12 +248,36 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "chat-completions",
       pathSuffix: "/chat/completions",
       modelVar: "OPENCODE_MIMO_MODEL",
-      // OpenCode Zen's free MiMo tier. The docs call it "mimo-v2.5-free", but
-      // the Go gateway rejects that id and serves it as plain "mimo-v2.5"
-      // (the paid sibling is "mimo-v2.5-pro"). Verified to read the diagram:
-      // asked for the values shown in the B.8 image it returned all six.
-      defaultModel: "mimo-v2.5",
+      // OpenCode Zen's free MiMo tier: the Zen catalogue lists it as
+      // "mimo-v2.6-flash-free" and the Go gateway serves the same tier as
+      // "mimo-v2.6-flash" (the paid sibling is "mimo-v2.6-pro"). Verified to
+      // read the diagram: asked for the values shown in the B.8 image it
+      // returned all six. Was "mimo-v2.5" until 22 September 2026.
+      defaultModel: "mimo-v2.6-flash",
       effort: CLAMPED_EFFORT,
+    },
+  },
+  minimax: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_MINIMAX_MODEL",
+      // Back on 22 September 2026 after being dropped on 19 September (1/4 on
+      // the B.8 fixture on its own API, where it thought itself out of tokens
+      // at "high"). This is a different route: MiniMax's own channel is gone,
+      // it runs on the Go subscription now, and "minimax-m3" is a newer model
+      // than the "MiniMax-M2" that failed. Verified to read the diagram: all
+      // six values from the B.8 image. "minimax-m2.7" and "minimax-m2.5" are
+      // listed by the gateway but answer 503 "Endpoint is unavailable".
+      // It wraps its reasoning in <think> tags inside the message content;
+      // stripThinkTags in shared/solution.ts removes them before parsing.
+      defaultModel: "minimax-m3",
+      effort: CLAMPED_EFFORT,
+      // Capped at "medium": at "high" it wrote 95,000 characters of thinking
+      // and hit the 280 s safety timeout on both B.8 runs, where "low" and
+      // "medium" answered correctly in 23-127 s.
+      maxEffort: "medium",
     },
   },
   muse: {
@@ -272,6 +304,7 @@ const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   deepseek: "opencode",
   grok: "opencode",
   mimo: "opencode",
+  minimax: "opencode",
   muse: "opencode",
 };
 
@@ -282,6 +315,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   deepseek: "DEEPSEEK_CHANNEL",
   grok: "GROK_CHANNEL",
   mimo: "MIMO_CHANNEL",
+  minimax: "MINIMAX_CHANNEL",
   muse: "MUSE_CHANNEL",
 };
 
@@ -305,6 +339,8 @@ export type Route = {
   forceEffort?: EffortKey;
   /** Floor on the reasoning level. */
   minEffort?: EffortKey;
+  /** Ceiling on the reasoning level. */
+  maxEffort?: EffortKey;
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -394,6 +430,7 @@ export function resolveRoute(
     effort: spec.effort,
     forceEffort: spec.forceEffort,
     minEffort: spec.minEffort,
+    maxEffort: spec.maxEffort,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
@@ -464,6 +501,7 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     configured: route.configured && !route.problem,
     ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
     ...(route.minEffort ? { minEffort: route.minEffort } : {}),
+    ...(route.maxEffort ? { maxEffort: route.maxEffort } : {}),
     ...(route.fallbackModels.length ? { fallbackModels: route.fallbackModels } : {}),
   };
 }

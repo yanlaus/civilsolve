@@ -3,7 +3,12 @@
 // and the client (rendering the review step). No DOM, no Workers APIs.
 
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
-import { normalizeJsonCandidate, sanitizeText, type ParseOptions } from "./solution";
+import {
+  normalizeJsonCandidate,
+  sanitizeText,
+  stripThinkTags,
+  type ParseOptions,
+} from "./solution";
 
 export type InterpretationResult = {
   interpreted_problem: string;
@@ -66,7 +71,7 @@ export function parseInterpretation(
     // attempt is the text worth delivering as the reading. Measured on
     // gemini-3.8-flash: a 313-character JSON fragment landed here whole,
     // in interpreted_problem, with every other field empty.
-    const text = sanitizeText(rawText);
+    const text = stripThinkTags(sanitizeText(rawText));
     if (text.length < 20) {
       throw new Error(`${PROVIDER_LABELS[provider]} returned an empty interpretation.`);
     }

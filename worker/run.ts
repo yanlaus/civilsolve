@@ -68,9 +68,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function raiseToFloor(requested: EffortKey, floor: EffortKey | undefined): EffortKey {
-  if (!floor) return requested;
-  return EFFORT_KEYS.indexOf(requested) < EFFORT_KEYS.indexOf(floor) ? floor : requested;
+/** Clamps the requested level into the route's [minEffort, maxEffort] band. */
+function clampEffort(requested: EffortKey, route: Route): EffortKey {
+  let index = EFFORT_KEYS.indexOf(requested);
+  if (route.minEffort) index = Math.max(index, EFFORT_KEYS.indexOf(route.minEffort));
+  if (route.maxEffort) index = Math.min(index, EFFORT_KEYS.indexOf(route.maxEffort));
+  return EFFORT_KEYS[index];
 }
 
 /**
@@ -263,7 +266,7 @@ export async function runTask(
   // A route may pin its reasoning level (a deliberately "always max" model)
   // or set a floor under the user's choice. Not const: a model that spends its
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
-  let effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
+  let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {

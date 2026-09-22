@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
   Asterisk,
+  Atom,
   BookOpen,
   Brain,
   Calculator,
   Eye,
   Feather,
   FileImage,
+  Flag,
   FileText,
   Flame,
   Gem,
@@ -27,6 +29,7 @@ import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
+  CHINA_PROVIDERS,
   DEFAULT_INTERPRETERS,
   DEFAULT_JUDGE,
   DEFAULT_SOLVERS,
@@ -77,6 +80,7 @@ const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
   deepseek: Waves,
   grok: Zap,
   mimo: Orbit,
+  minimax: Atom,
   muse: Lightbulb,
   claude: Asterisk,
 };
@@ -180,28 +184,50 @@ export function UploadForm({
     const floor = status?.forcedEffort ?? status?.minEffort;
     return floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : -1;
   };
+  const providerCeiling = (key: ProviderKey) => {
+    const status = providerStatus?.[key];
+    const ceiling = status?.forcedEffort ?? status?.maxEffort;
+    return ceiling ? EFFORT_KEYS.indexOf(ceiling as EffortKey) : EFFORT_KEYS.length;
+  };
   const floorIndex = selectedProviders.reduce(
     (highest, key) => Math.max(highest, providerFloor(key)),
     -1,
   );
+  const ceilingIndex = selectedProviders.reduce(
+    (lowest, key) => Math.min(lowest, providerCeiling(key)),
+    EFFORT_KEYS.length,
+  );
   const effortFloor = floorIndex > 0 ? EFFORT_KEYS[floorIndex] : undefined;
-  const floorLabels = selectedProviders
-    .filter((key) => providerFloor(key) === floorIndex)
-    .map((key) => PROVIDER_LABELS[key])
-    .join(" and ");
+  const effortCeiling =
+    ceilingIndex < EFFORT_KEYS.length - 1 ? EFFORT_KEYS[ceilingIndex] : undefined;
+  const labelsFor = (matches: (key: ProviderKey) => boolean) =>
+    selectedProviders.filter(matches).map((key) => PROVIDER_LABELS[key]).join(" and ");
+  const floorLabels = labelsFor((key) => providerFloor(key) === floorIndex);
+  const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
 
-  const isEffortLocked = (key: EffortKey) =>
-    floorIndex > 0 && EFFORT_KEYS.indexOf(key) < floorIndex;
+  // A floor above a ceiling leaves no level that suits every solver. Nothing
+  // is clamped or disabled then - the run is blocked instead (below), so the
+  // two rules cannot fight over the same value.
+  const bandIsEmpty = floorIndex > ceilingIndex;
 
-  // Snap the visible level up when the floor rules the current pick out. Only
-  // ever upwards: deselecting a floored provider keeps the level the user
-  // last chose rather than dropping it back.
+  const isEffortLocked = (key: EffortKey) => {
+    if (bandIsEmpty) return false;
+    const index = EFFORT_KEYS.indexOf(key);
+    return (floorIndex > 0 && index < floorIndex) || index > ceilingIndex;
+  };
+
+  // Snap the visible level into the band when the current pick falls outside
+  // it. Deselecting the provider that set the bound keeps the level the user
+  // last chose rather than moving it back.
   useEffect(() => {
-    if (floorIndex < 0) return;
-    setEffort((current) =>
-      EFFORT_KEYS.indexOf(current) < floorIndex ? EFFORT_KEYS[floorIndex] : current,
-    );
-  }, [floorIndex]);
+    if (bandIsEmpty) return;
+    setEffort((current) => {
+      const index = EFFORT_KEYS.indexOf(current);
+      if (floorIndex > 0 && index < floorIndex) return EFFORT_KEYS[floorIndex];
+      if (index > ceilingIndex) return EFFORT_KEYS[ceilingIndex];
+      return current;
+    });
+  }, [bandIsEmpty, floorIndex, ceilingIndex]);
 
   // Two readers that are the same model would just agree with themselves.
   const verifyConfigError =
@@ -210,13 +236,15 @@ export function UploadForm({
       : "";
 
   const solverConfigError =
-    selectedProviders.length === 0
-      ? "Pick at least one AI provider to solve with."
-      : crossCheckEnabled && selectedProviders.length < 2
-        ? "Pick at least two solvers for the cross-check to compare."
-        : crossCheckEnabled && selectedProviders.length > MAX_JUDGED_SOLUTIONS
-          ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
-          : "";
+    bandIsEmpty
+      ? `${floorLabels} needs at least ${effortFloor} thinking and ${ceilingLabels} cannot go above ${effortCeiling} — pick one or the other.`
+      : selectedProviders.length === 0
+        ? "Pick at least one AI provider to solve with."
+        : crossCheckEnabled && selectedProviders.length < 2
+          ? "Pick at least two solvers for the cross-check to compare."
+          : crossCheckEnabled && selectedProviders.length > MAX_JUDGED_SOLUTIONS
+            ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
+            : "";
 
   const canSubmit =
     queuedFiles.length > 0 &&
@@ -527,6 +555,7 @@ export function UploadForm({
             const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
+            const china = CHINA_PROVIDERS.has(provider.key);
             // Brand, account, model - nothing else. Effort floors are shown
             // under Thinking Effort, and a model chain announces itself in the
             // status line when it actually switches.
@@ -580,6 +609,15 @@ export function UploadForm({
                         Less credit
                       </span>
                     ) : null}
+                    {china ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040] dark:border-[#4a2a2a] dark:bg-[#241616] dark:text-[#d99a9a]"
+                        title={`${provider.label} is developed and served in mainland China.`}
+                      >
+                        <Flag className="h-3 w-3" aria-hidden="true" />
+                        China model
+                      </span>
+                    ) : null}
                   </span>
                   <span className="mt-1 block break-words text-xs text-[#8a7f72] dark:text-[#a8a098]">
                     {note}
@@ -612,7 +650,11 @@ export function UploadForm({
                 type="button"
                 disabled={locked}
                 title={
-                  locked ? `${floorLabels} runs at ${effortFloor} thinking or above on this route.` : undefined
+                  !locked
+                    ? undefined
+                    : EFFORT_KEYS.indexOf(option.key) > ceilingIndex
+                      ? `${ceilingLabels} cannot finish above ${effortCeiling} thinking on this route.`
+                      : `${floorLabels} runs at ${effortFloor} thinking or above on this route.`
                 }
                 onClick={() => setEffort(option.key)}
                 className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
@@ -628,10 +670,16 @@ export function UploadForm({
             );
           })}
         </div>
-        {effortFloor ? (
+        {effortFloor && !bandIsEmpty ? (
           <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
             {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
             lower levels are disabled for every solver in this run.
+          </p>
+        ) : null}
+        {effortCeiling && !bandIsEmpty ? (
+          <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
+            {ceilingLabels} cannot finish above <strong>{effortCeiling}</strong> on this route
+            — it thinks past the time limit — so higher levels are disabled.
           </p>
         ) : null}
         <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">

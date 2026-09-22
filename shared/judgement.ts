@@ -4,7 +4,12 @@
 // client (rendering the verdict). No DOM, no Workers APIs.
 
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
-import { normalizeJsonCandidate, sanitizeText, type ParseOptions } from "./solution";
+import {
+  normalizeJsonCandidate,
+  sanitizeText,
+  stripThinkTags,
+  type ParseOptions,
+} from "./solution";
 
 /** The judge sees solutions as letters, in the order they were sent. */
 export const SOLUTION_LETTERS = ["A", "B", "C", "D"] as const;
@@ -133,7 +138,7 @@ export function parseJudgement(
     // ignored instruction, and a retry is the better outcome while one is
     // left. On the last attempt the text is delivered as an undecided
     // verdict rather than thrown away.
-    const text = sanitizeText(rawText);
+    const text = stripThinkTags(sanitizeText(rawText));
     if (text.length < 20) {
       throw new Error(`${PROVIDER_LABELS[provider]} returned an empty verdict.`);
     }

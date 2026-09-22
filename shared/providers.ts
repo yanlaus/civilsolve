@@ -5,12 +5,23 @@
 // Go, Google). One provider can be reachable over several channels; the
 // Worker resolves which one to use from env (see worker/channels.ts).
 //
-// Kimi, MiniMax and Qwen were removed in September 2026: across two full runs
-// of the B.8 fixture (Kimi 0/4, Qwen 0/8, MiniMax 1/4) they never gave a
-// reliable answer. Their routes, the Kimi Code / Moonshot / MiniMax channels,
-// and the Anthropic-protocol dialect they alone used are in git history.
+// Kimi, MiniMax and Qwen were removed on 19 September 2026: across two full
+// runs of the B.8 fixture (Kimi 0/4, Qwen 0/8, MiniMax 1/4) they never gave a
+// reliable answer. Kimi and Qwen are still out; their routes, the Kimi Code /
+// Moonshot / MiniMax channels and the Anthropic-protocol dialect they alone
+// used are in git history. MiniMax came back on 22 September on a different
+// route (OpenCode Go, minimax-m3) after re-testing correct on B.8 at low and
+// medium and on the beam - see AGENTS.md.
 
-export type ProviderKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "grok" | "mimo" | "muse";
+export type ProviderKey =
+  | "chatgpt"
+  | "claude"
+  | "gemini"
+  | "deepseek"
+  | "grok"
+  | "mimo"
+  | "minimax"
+  | "muse";
 
 /** Picker order. Claude sits last because it costs the most per solve (below). */
 export const PROVIDER_KEYS: ProviderKey[] = [
@@ -19,6 +30,7 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "deepseek",
   "grok",
   "mimo",
+  "minimax",
   "muse",
   "claude",
 ];
@@ -34,8 +46,21 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   deepseek: "DeepSeek",
   grok: "Grok",
   mimo: "MiMo",
+  minimax: "MiniMax",
   muse: "Muse Spark",
 };
+
+/**
+ * Models developed and served in mainland China, badged so the origin is
+ * visible before a solve. DeepSeek runs on OpenCode Go's China deployment
+ * (the workspace must enable it); MiMo is Xiaomi's; MiniMax is MiniMax's.
+ * This is a provenance label, not a quality or cost one.
+ */
+export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
+  "deepseek",
+  "mimo",
+  "minimax",
+]);
 
 /**
  * Providers whose upstream account bills noticeably more per solve than the
@@ -114,6 +139,8 @@ export type ProviderStatus = {
   forcedEffort?: string;
   /** Present when the route raises low choices to a floor. */
   minEffort?: string;
+  /** Present when the route refuses levels above this one. */
+  maxEffort?: string;
   /** Present when the route switches to these models, in order, if `model` fails. */
   fallbackModels?: string[];
 };

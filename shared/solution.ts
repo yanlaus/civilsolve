@@ -58,8 +58,22 @@ export function sanitizeText(value: string) {
 // Structured solution parsing (raw model text -> StructuredSolution)
 // ---------------------------------------------------------------------------
 
+/**
+ * Removes `<think>...</think>` reasoning that a model put in its *content*
+ * rather than in a reasoning field. MiniMax M3 on OpenCode Go does this, and
+ * its thinking is long (60-76k characters on the B.8 fixture) and full of
+ * braces, so leaving it in makes the first `{` of the candidate land inside
+ * the reasoning and everything after it parse as garbage. An unclosed
+ * `<think>` means the answer never arrived, so the rest is dropped too.
+ */
+export function stripThinkTags(value: string) {
+  const closed = value.replace(/<think>[\s\S]*?<\/think>/gi, " ");
+  const open = closed.search(/<think>/i);
+  return (open >= 0 ? closed.slice(0, open) : closed).trim();
+}
+
 export function normalizeJsonCandidate(rawText: string) {
-  const trimmed = sanitizeText(rawText);
+  const trimmed = stripThinkTags(sanitizeText(rawText));
   if (!trimmed) return trimmed;
 
   const withoutFence = trimmed
@@ -102,7 +116,7 @@ const CUT_OFF_BEFORE_ANSWER = "The response was cut off before reaching the fina
 function recoverTruncatedJson(
   rawText: string,
 ): { record: Record<string, unknown>; cutField: string | null } | null {
-  const text = sanitizeText(rawText).replace(/^```(?:json)?\s*/i, "");
+  const text = stripThinkTags(sanitizeText(rawText)).replace(/^```(?:json)?\s*/i, "");
   const start = text.indexOf("{");
   if (start < 0) return null;
   // To the END, not to the last "}": a LaTeX body is full of braces.
@@ -241,7 +255,7 @@ export function parseStructuredSolution(
 }
 
 function synthesizeStructuredSolutionFromText(rawText: string): StructuredSolution | null {
-  const text = sanitizeText(rawText);
+  const text = stripThinkTags(sanitizeText(rawText));
   if (text.length < 40) {
     return null;
   }
