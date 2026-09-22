@@ -274,10 +274,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // stripThinkTags in shared/solution.ts removes them before parsing.
       defaultModel: "minimax-m3",
       effort: CLAMPED_EFFORT,
-      // Capped at "medium": at "high" it wrote 95,000 characters of thinking
-      // and hit the 280 s safety timeout on both B.8 runs, where "low" and
-      // "medium" answered correctly in 23-127 s.
-      maxEffort: "medium",
+      // Capped at "low", the only level that finishes reliably. Its thinking
+      // length is wildly variable: "medium" wrote 105-148k characters and hit
+      // the 280 s safety timeout on both production B.8 runs (it had answered
+      // in 23 s and 267 s locally), and "high" did the same at 95k. At "low"
+      // it was correct on B.8 (82 s) and the beam (14 s) on production.
+      maxEffort: "low",
     },
   },
   muse: {

@@ -9,7 +9,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | badged **Less credit** |
 | Grok | OpenCode Go | `grok-4.6` | badged **More credit** |
 | MiMo | OpenCode Go | `mimo-v2.6-flash` | badged **China model** |
-| MiniMax | OpenCode Go | `minimax-m3`, at most medium thinking | badged **China model** |
+| MiniMax | OpenCode Go | `minimax-m3`, low thinking only | badged **China model** |
 | Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | **selected**; badged **Less credit**; needs a workspace opt-in |
 | Claude | Poe | `claude-opus-4.8` | listed last; badged **More credit** |
 
@@ -59,7 +59,7 @@ Channels speak three different API dialects, all handled in `worker/channels.ts`
 
 One key and one base URL (`https://opencode.ai/zen/go/v1`) front several protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`, or bound it with `minEffort` and `maxEffort`. Two routes use a bound. ChatGPT floors at `high`: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised. MiniMax is capped at `medium`: at `high` it wrote 95,000 characters of reasoning and hit the 280 s safety timeout on both attempts, where `low` and `medium` answered correctly in 23–127 s. `clampEffort` in `worker/run.ts` applies both; the upload form disables the levels outside the band and names the provider that set it. One level serves every selected solver, so a floor above a ceiling (ChatGPT with MiniMax) leaves no valid level — the form blocks that combination instead of picking a side.
+A route can pin its reasoning level with `forceEffort`, or bound it with `minEffort` and `maxEffort`. Two routes use a bound. ChatGPT floors at `high`: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised. MiniMax is capped at `low`, the only level that finishes reliably: its reasoning length is wildly variable, and at `medium` it wrote 105–148k characters and hit the 280 s safety timeout on both production runs (having answered in 23 s and 267 s locally), with `high` doing the same at 95k. At `low` it was correct on both fixtures in 14–82 s. `clampEffort` in `worker/run.ts` applies both; the upload form disables the levels outside the band and names the provider that set it. One level serves every selected solver, so a floor above a ceiling (ChatGPT with MiniMax) leaves no valid level — the form blocks that combination instead of picking a side.
 
 #### Getting structured output out of each dialect
 
