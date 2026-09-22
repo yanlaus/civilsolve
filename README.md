@@ -184,7 +184,18 @@ The judge runs on the provider's normal solve route at `high` by default (the mo
 
 #### How long a task may run
 
-`SAFETY_TIMEOUT_MS` in `worker/run.ts` abandons a task after **280 s** by default, counted across every attempt so a retry cannot extend it. A route can override it with `timeoutMs`, and MiniMax sets **20 minutes** on both of its routes: on the B.8 fixture it wrote 93–104k characters of reasoning and was still going at 280 s on three production runs out of three, and no effort level shortens that. Nothing in the platform forces the default — Cloudflare enforces no wall-clock limit on an HTTP request while the client stays connected, and time spent waiting on `fetch()` is not billed as CPU (a 77 s solve costs ~3 s of CPU). The number encodes how long a user should wait before being told nothing is coming; the 15 s heartbeats are what keep the stream itself alive. The 280 s value arrived with the original import and had no recorded reason until this was written.
+The timeout is a **floor per route plus an allowance per page**, counted across every attempt so a retry cannot extend it.
+
+| Upload | Most providers | MiniMax |
+|---|---|---|
+| 1 question | 4.7 min | 20 min |
+| 3 pages | 8.7 min | 24 min |
+| 8 pages | 18.7 min | 34.7 min |
+| 16 pages (the cap) | 34.7 min | 45 min (the ceiling) |
+
+`SAFETY_TIMEOUT_MS` in `worker/run.ts` is the 280 s floor; a route overrides it with `timeoutMs`, and MiniMax sets 20 minutes on both of its routes — on the B.8 fixture it wrote 93–104k characters of reasoning and was still going at 280 s on three production runs out of three, and no effort level shortens that. `taskTimeoutMs` in `shared/stream-protocol.ts` then adds `PER_EXTRA_PAGE_MS` (2 min) for each assignment page after the first, because a whole exam paper is a dozen questions in one request rather than one long question, and both the reading and the writing grow with it. Lecture-notes pages count half: they are read once as reference and never solved. `MAX_TIMEOUT_MS` (45 min) caps the result so a wedged upstream cannot hold a tab open all day — the heartbeats would otherwise keep it alive indefinitely.
+
+Nothing in the platform forces these numbers. Cloudflare enforces no wall-clock limit on an HTTP request while the client stays connected, and time spent waiting on `fetch()` is not billed as CPU (a 77 s solve costs ~3 s of CPU). They encode how long a user should wait before being told nothing is coming; the 15 s heartbeats are what keep the stream itself alive. The 280 s value arrived with the original import and had no recorded reason until this was written.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 

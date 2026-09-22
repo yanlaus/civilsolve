@@ -110,3 +110,34 @@ export function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** Added to the timeout for each assignment page after the first. */
+export const PER_EXTRA_PAGE_MS = 120_000;
+/**
+ * Ceiling on a scaled timeout, whatever the page count. Long enough for a
+ * full paper, short enough that a wedged upstream cannot hold a tab open
+ * all day - the heartbeats would keep it alive indefinitely otherwise.
+ */
+export const MAX_TIMEOUT_MS = 2_700_000;
+
+/**
+ * How long one task may run, given how much was uploaded.
+ *
+ * A single question is the case every measured timing came from (the hardest
+ * fixture answers in 14-259 s depending on model and level), so `baseMs` is
+ * the floor and applies to a one-page upload. A whole exam paper is not one
+ * long question but a dozen of them in one request, and both the reading and
+ * the writing grow with it, so each further page adds `PER_EXTRA_PAGE_MS`.
+ *
+ * Lecture-notes pages count half: they are read once as reference and never
+ * solved, so they add reading time but no answers.
+ */
+export function taskTimeoutMs(
+  baseMs: number,
+  imageCount: number,
+  referenceImageCount = 0,
+) {
+  const pages = imageCount + referenceImageCount / 2;
+  const scaled = baseMs + Math.max(0, pages - 1) * PER_EXTRA_PAGE_MS;
+  return Math.max(baseMs, Math.min(scaled, MAX_TIMEOUT_MS));
+}

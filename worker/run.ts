@@ -4,10 +4,11 @@
 // worker/channels.ts. This module only owns the parts that are the same for
 // every channel and every task: immediate SSE headers, heartbeats, the safety
 // timeout, the retry/downgrade policy, and translation into the app-level SSE
-// protocol. Both /api/solve and /api/interpret run through it.
+// protocol. /api/solve, /api/interpret and /api/judge all run through it.
 
 import { EFFORT_KEYS, type EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
+import { taskTimeoutMs } from "../shared/stream-protocol";
 import {
   buildRequest,
   extractCompleted,
@@ -280,7 +281,13 @@ export async function runTask(
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
   let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
-  const timeoutMs = route.timeoutMs ?? SAFETY_TIMEOUT_MS;
+  // Scales with the upload: a whole exam paper is a dozen questions in one
+  // request, not one long question (see taskTimeoutMs).
+  const timeoutMs = taskTimeoutMs(
+    route.timeoutMs ?? SAFETY_TIMEOUT_MS,
+    task.images.length,
+    task.referenceImages?.length ?? 0,
+  );
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {
     const seconds = Math.round(timeoutMs / 1000);
