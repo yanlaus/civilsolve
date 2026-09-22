@@ -261,13 +261,14 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     },
   },
   minimax: {
-    // MiniMax's own API, on the owner's MINIMAX_API_KEY. Pay-per-token, so
-    // "opencode" (the monthly Go subscription) is the default; flip
-    // MINIMAX_CHANNEL to "minimax" to use the key instead. The endpoint is
-    // plain OpenAI chat-completions and reads images, so no separate dialect
-    // is needed - the anthropic-protocol route this provider used until 19
-    // September 2026 is not coming back. Same model either way, spelled
-    // "MiniMax-M3" here and "minimax-m3" on the gateway.
+    // MiniMax's own API, on the owner's MINIMAX_API_KEY - the default since
+    // 23 September 2026. Their MiniMax account is a monthly token plan, not
+    // per-call billing, so this costs nothing extra per solve and leaves the
+    // OpenCode Go quota for the five providers that have nowhere else to go.
+    // The endpoint is plain OpenAI chat-completions and reads images, so no
+    // separate dialect is needed - the anthropic-protocol route this provider
+    // used until 19 September 2026 is not coming back. Same model either way,
+    // spelled "MiniMax-M3" here and "minimax-m3" on the gateway.
     minimax: {
       dialect: "chat-completions",
       keyVar: "MINIMAX_API_KEY",

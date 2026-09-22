@@ -23,9 +23,11 @@
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
     "MIMO_CHANNEL": "opencode",
-    // "opencode" spends the monthly Go subscription; "minimax" spends the
-    // owner's own MiniMax key per token (see MINIMAX_API_KEY).
-    "MINIMAX_CHANNEL": "opencode",
+    // Both are monthly subscriptions the owner already pays for, so this
+    // picks which quota to spend: "minimax" uses MINIMAX_API_KEY on their
+    // MiniMax token plan and leaves the Go quota for everything else;
+    // "opencode" puts MiniMax back on the shared Go subscription.
+    "MINIMAX_CHANNEL": "minimax",
     "MUSE_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the
@@ -46,8 +48,8 @@
     // MiniMax has no free tier on either gateway, so this runs on the Go
     // subscription quota. "minimax-m2.7"/"minimax-m2.5" answer 503.
     "OPENCODE_MINIMAX_MODEL": "minimax-m3",
-    // Only used when MINIMAX_CHANNEL is "minimax": the same model on
-    // MiniMax's own API, which spells it with capitals.
+    // The default MiniMax route: their own API spells the model with
+    // capitals, the Go gateway spells it lower-case.
     "MINIMAX_MODEL": "MiniMax-M3",
     // Free "contributor" tier; the workspace must opt in to its data
     // collection or the gateway answers 403 DataPolicyError.

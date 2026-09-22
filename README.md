@@ -9,7 +9,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | badged **Less credit** |
 | Grok | OpenCode Go | `grok-4.6` | badged **More credit** |
 | MiMo | OpenCode Go | `mimo-v2.6-flash` | badged **China model** |
-| MiniMax | OpenCode Go (switchable to its own API) | `minimax-m3`, low thinking only | badged **China model** |
+| MiniMax | MiniMax (switchable to OpenCode Go) | `MiniMax-M3`, low thinking only | badged **China model** |
 | Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | **selected**; badged **Less credit**; needs a workspace opt-in |
 | Claude | Poe | `claude-opus-4.8` | listed last; badged **More credit** |
 
@@ -44,7 +44,7 @@ gemini   ──> google | poe       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
 mimo     ──> opencode
-minimax  ──> opencode | minimax   (MINIMAX_CHANNEL)
+minimax  ──> minimax | opencode   (MINIMAX_CHANNEL)
 muse     ──> opencode
 ```
 
@@ -221,10 +221,10 @@ Set the `NO_STREAM` var (production: empty) to make those providers use a non-st
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark | <https://opencode.ai/go> |
+| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark; MiniMax when `MINIMAX_CHANNEL=opencode` | <https://opencode.ai/go> |
 | `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `GOOGLE_API_KEY` | Gemini, only when `GEMINI_CHANNEL=google` | <https://aistudio.google.com/apikey> |
-| `MINIMAX_API_KEY` | MiniMax, only when `MINIMAX_CHANNEL=minimax` | <https://platform.minimaxi.com> |
+| `MINIMAX_API_KEY` | MiniMax (the default channel for it) | <https://platform.minimaxi.com> |
 
 - Local: copy `.dev.vars.example` to `.dev.vars` and fill in the keys you have. `.dev.vars` is gitignored.
 - Production: `npx wrangler secret put POE_API_KEY` (repeat per key).
@@ -240,13 +240,14 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `google` | `google` or `poe` |
-| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MINIMAX_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `MINIMAX_CHANNEL` | `minimax` | `minimax` (the owner's token plan) or `opencode` (the shared Go subscription) |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4.1-flash` | Reads diagrams (undocumented) and beat `deepseek-v4-flash-vision-exp` on the fixture; the latter is the documented vision model and the fallback if this regresses |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
 | `OPENCODE_MIMO_MODEL` | `mimo-v2.6-flash` | OpenCode Zen's free tier; Zen lists it as `mimo-v2.6-flash-free`, which the Go gateway rejects |
-| `OPENCODE_MINIMAX_MODEL` | `minimax-m3` | The only MiniMax id the gateway serves — `minimax-m2.7` and `minimax-m2.5` answer 503. No free tier, so it draws the Go subscription |
-| `MINIMAX_MODEL` | `MiniMax-M3` | Only used when `MINIMAX_CHANNEL=minimax` |
+| `OPENCODE_MINIMAX_MODEL` | `minimax-m3` | Only used when `MINIMAX_CHANNEL=opencode`. The only MiniMax id the gateway serves — `minimax-m2.7` and `minimax-m2.5` answer 503 |
+| `MINIMAX_MODEL` | `MiniMax-M3` | Used by the default `minimax` channel |
 | `MINIMAX_BASE_URL` | `https://api.minimaxi.com/v1` | Endpoint override; the international deployment is `https://api.minimax.io` |
 | `OPENCODE_MUSE_MODEL` | `muse-spark-1.3-contributor` | Free "contributor" tier; the workspace must opt in or the gateway answers 403 `DataPolicyError` |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Endpoint override |
@@ -267,14 +268,18 @@ Poe bot handles change over time. List the ones your key can actually see with:
 curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
 ```
 
-### Switching MiniMax to your own key
+### Switching MiniMax between its own key and OpenCode Go
 
 ```
-MINIMAX_CHANNEL=minimax
+MINIMAX_CHANNEL=minimax     # default: the owner's MiniMax token plan
 MINIMAX_API_KEY=<your MiniMax key>
 ```
 
-Same model, same dialect, different bill. `opencode` (the default) spends the monthly OpenCode Go subscription; `minimax` spends the MiniMax account per token. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
+```
+MINIMAX_CHANNEL=opencode    # the shared OpenCode Go subscription instead
+```
+
+Same model, same dialect; the var picks which monthly quota to spend. `minimax` is the default because that account is a token plan rather than per-call billing, so it costs nothing extra per solve and leaves the Go quota for the five providers with nowhere else to go. `opencode` is the fallback if the MiniMax plan runs out or its key is lost. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
 
 ### Switching Gemini to a Google key
 
