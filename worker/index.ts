@@ -237,11 +237,13 @@ app.post("/api/interpret/:provider", async (c) => {
     env: c.env,
     // The interpretation pass pins some providers to routes chosen for it (see interpretOverride).
     routeOverride: interpretOverride(provider, c.env),
-    // Readers default to a modest budget - they transcribe, they do not
-    // derive - and the user can raise it. The judge defaults to the strongest
-    // level the route supports: it adjudicates two readings against the
-    // image, and a misread there poisons every solve that follows.
-    effort: requestedEffort ?? (mode === "verify" ? "max" : "low"),
+    // Readers default to "medium" - they transcribe rather than derive, but
+    // a whole exam paper is a lot of diagram to read carefully - and the user
+    // can change it. The judge defaults to the strongest level the route
+    // supports: it adjudicates two readings against the image, and a misread
+    // there poisons every solve that follows. The form sends the readers'
+    // level explicitly; this default is for callers that do not.
+    effort: requestedEffort ?? (mode === "verify" ? "max" : "medium"),
     task: {
       session: crypto.randomUUID(),
       prompt: buildPrompt,
