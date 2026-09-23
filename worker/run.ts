@@ -154,13 +154,15 @@ function errorBodyMessage(body: string): string {
 }
 
 /**
- * A 400/422 that carries no error message at all is not the upstream
- * validating our request - that always says what it rejected - but a
- * gateway fault. Measured on OpenCode Go's DeepSeek: one strict-schema
- * request in ten came back 400 with the body {"model":"deepseek-v4.1-flash"}
- * while the other nine, identical, streamed normally; the gateway spreads
- * requests over several backends and one of them answers like this. Retry
- * it like a 5xx rather than failing the solve.
+ * A 400/422 whose body carries no error message at all. Measured on OpenCode
+ * Go's DeepSeek (22 September 2026): the body is {"model":"deepseek-v4.1-flash"}
+ * and it is the strict JSON schema being refused without saying so - the
+ * same request with `json_object` or no response_format was 20/20 fine,
+ * while strict failed 1/10 one hour and 9/10 the next as the gateway's
+ * backend mix shifted (another backend refuses it *with* a message naming
+ * the schema). So paramRejection reads it as a schema rejection and steps
+ * down the ladder; only once there is no schema left to drop is it retried
+ * as transient.
  */
 function isSilentRejection(status: number, body: string) {
   return (status === 400 || status === 422) && !explicitErrorMessage(body);
@@ -203,6 +205,10 @@ const PARAM_WORDS = /param|参数|參數|field|unsupported|unrecognized|unknown|
  */
 function paramRejection(error: UpstreamError): DropTarget | null {
   if (error.status !== 400 && error.status !== 422) return null;
+  // Says nothing, but every observed case was the strict schema (see
+  // isSilentRejection). If the schema is already gone, canDrop fails and
+  // the error falls through to the transient retry it is marked for.
+  if (isSilentRejection(error.status, error.body ?? "")) return "schema";
   const body = error.body || error.message;
   // Checked before the reasoning words: a gateway that refuses forced tools
   // while thinking is on names both, and dropping the tool is the fix.
