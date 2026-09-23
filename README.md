@@ -24,14 +24,16 @@ A single **Cloudflare Worker** (free tier) serves everything:
 - **Static assets** — the Vite-built React SPA, served by Workers Static Assets with SPA fallback.
 - **API** — a [Hono](https://hono.dev) app (`worker/index.ts`) handles `/api/*` via `run_worker_first`.
 
-The solve flow is **stateless streaming** — no database, no object storage, no job queue:
+The solve flow is **streaming over Server-Sent Events**, with each task running in a short-lived **job**:
 
 1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js (max 8 pages).
-2. It fires one `POST /api/solve/:provider` request for the chosen provider (one per solve).
-3. Each Worker invocation resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back over Server-Sent Events.
+2. It fires one `POST /api/solve/:provider` request per ticked provider, all at once.
+3. The Worker validates the request, then hands it to a **`TaskJob` Durable Object** of its own (`worker/jobs.ts`). The job resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back; the stream's first event names the job.
 4. The provider's tab renders progressively — spinner, then live progress, then the finished solution.
 
-Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a zero-storage deployment). Losing the connection is different: on a phone, putting the browser in the background makes iOS cut the stream, and the client then waits for the page to be visible again and **restarts** that provider (`withResume` in `src/lib/sse.ts`, up to twice), so the result still arrives - after a fresh solve, since there is nothing server side to resume from. While work is running the page also holds a screen wake lock, so a phone left on the desk does not lock itself mid-solve.
+**Leaving the page does not lose the answer.** On a phone, putting the browser in the background makes iOS cut the stream. The job keeps running regardless (a Durable Object outlives its client; a plain Worker request would be cancelled ~30 s after it), stores its final answer, and the page **re-attaches** to it when it is visible again (`GET /api/jobs/:id`, via `withResume` in `src/lib/sse.ts`) - no second model call. If the tab was reloaded or discarded, the page recovers the last run from localStorage on load. **Stop** cancels the jobs on the server (`DELETE /api/jobs/:id`); closing the tab does not, so a run started and abandoned still finishes and waits for you. While work is running the page also holds a screen wake lock, so a phone left on the desk does not lock itself mid-solve.
+
+**What is stored:** each job's final event - the solution, reading or verdict as text, or its error - and its kind, provider and start time, for **24 hours** after it finishes, then deleted by an alarm. The uploaded images are never written to storage. The job id (a random UUID) is the only key; the browser keeps it in localStorage, and whoever has it can read that answer until it expires.
 
 ### Providers and channels
 
@@ -108,9 +110,11 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret, /api/judge
+│   ├── index.ts            # Hono app: validation, task endpoints, /api/jobs/:id
+│   ├── tasks.ts            # Request body -> task, for solve / interpret / judge
+│   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
-│   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE output
+│   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE events to a sink
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── providers.ts        # Provider + channel registry, health payload types
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
@@ -126,10 +130,12 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   │   ├── solution-panel.tsx          # Tabs, streaming states, verdict card, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
 │   ├── hooks/
-│   │   ├── use-solve.ts                # Per-provider SSE state machine, solvers -> judge
-│   │   └── use-interpret.ts            # interpret -> verify -> review
+│   │   ├── use-solve.ts                # Per-provider state machine, solvers -> judge, restore
+│   │   ├── use-interpret.ts            # interpret -> verify -> review
+│   │   └── use-wake-lock.ts            # Keep the screen on while a run is in flight
 │   └── lib/
-│       ├── sse.ts                      # Shared SSE reader over fetch
+│       ├── sse.ts                      # SSE reader, job handles, re-attach, resume on return
+│       ├── run-store.ts                # Last run's job ids in localStorage (24 h)
 │       ├── math-markdown.ts            # Math normalization, sanitize, render
 │       ├── attachments.ts              # File -> JPEG data URL conversion
 │       ├── lecture-notes.ts            # Reference payload from notes files
@@ -197,6 +203,19 @@ The timeout is a **floor per route plus an allowance per page**, counted across 
 
 Nothing in the platform forces these numbers. Cloudflare enforces no wall-clock limit on an HTTP request while the client stays connected, and time spent waiting on `fetch()` is not billed as CPU (a 77 s solve costs ~3 s of CPU). They encode how long a user should wait before being told nothing is coming; the 15 s heartbeats are what keep the stream itself alive. The 280 s value arrived with the original import and had no recorded reason until this was written.
 
+### Jobs: `GET /api/jobs/:id` and `DELETE /api/jobs/:id`
+
+Every `POST /api/solve`, `/api/interpret` and `/api/judge` runs in a job, and its SSE stream opens with:
+
+```
+event: job      data: {"id":"<uuid>"}
+```
+
+- `GET /api/jobs/:id` re-attaches: the same `job` event, then either the stored final event (`done` or `error`) and the end of the stream, or - for a run still in progress - its latest `status` followed by everything live. `404` with `{"error": ...}` when the job never existed, has expired (24 h after it finished), or was lost mid-run.
+- `DELETE /api/jobs/:id` cancels a running job; it ends with `error: Cancelled.`, which is what is then stored. `204` whether or not there was anything to cancel.
+
+Only well-formed UUIDs reach the Durable Object namespace. Without the `JOBS` binding the task endpoints run inline in the Worker, as before jobs existed, and a disconnect then ends the run.
+
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 
 Request JSON:
@@ -247,6 +266,12 @@ Set the `NO_STREAM` var (production: empty) to make those providers use a non-st
 A provider whose key is blank is shown as unavailable in the UI rather than failing mid-solve. You only need the keys for the providers you intend to use.
 
 > `.dev.vars` is read by the **Worker**, not by Vite. Never move these into `.env`, and never prefix them with `VITE_` — anything named `VITE_*` is inlined into the browser bundle.
+
+### Bindings (in `wrangler.jsonc`)
+
+| Binding | Class | Purpose |
+|---|---|---|
+| `JOBS` | `TaskJob` (`worker/jobs.ts`), SQLite-backed, migration `v1` | One Durable Object per task, so it finishes after the page leaves and keeps its answer 24 hours. Available on Workers Free and Paid; each job is billed for the time it is active (≈ 128 MB × run time), comfortably inside the Paid plan's 400,000 GB-s a month. Remove it and tasks run inline again |
 
 ### Vars (in `wrangler.jsonc`, non-secret)
 

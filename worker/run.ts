@@ -68,14 +68,22 @@ const DELTA_FLUSH_MS = 400;
 
 const encoder = new TextEncoder();
 
-function encodeEvent(event: TaskEvent) {
+export function encodeEvent(event: TaskEvent) {
   const { type, ...payload } = event;
   return encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-function encodeHeartbeat() {
+export function encodeHeartbeat() {
   return encoder.encode(`: heartbeat\n\n`);
 }
+
+/** Headers for every SSE response the Worker or a TaskJob returns. */
+export const SSE_HEADERS = {
+  "Content-Type": "text/event-stream",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+};
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -128,12 +136,6 @@ function isRetryableStatus(status: number) {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-/**
- * The human-readable part of an error body, when there is one. Gateways
- * answer `{"error":{"message":"Insufficient balance. Manage your billing
- * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
- * body stays on the error for paramRejection, which pattern-matches it.
- */
 /** The upstream's own error text, or "" when the body carries none. */
 function explicitErrorMessage(body: string): string {
   try {
@@ -149,21 +151,16 @@ function explicitErrorMessage(body: string): string {
   }
 }
 
+/**
+ * The human-readable part of an error body, when there is one. Gateways
+ * answer `{"error":{"message":"Insufficient balance. Manage your billing
+ * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
+ * body stays on the error for paramRejection, which pattern-matches it.
+ */
 function errorBodyMessage(body: string): string {
   return explicitErrorMessage(body) || body.trim().slice(0, 500) || "(empty response body)";
 }
 
-/**
- * A 400/422 whose body carries no error message at all. Measured on OpenCode
- * Go's DeepSeek (22 September 2026): the body is {"model":"deepseek-v4.1-flash"}
- * and it is the strict JSON schema being refused without saying so - the
- * same request with `json_object` or no response_format was 20/20 fine,
- * while strict failed 1/10 one hour and 9/10 the next as the gateway's
- * backend mix shifted (another backend refuses it *with* a message naming
- * the schema). So paramRejection reads it as a schema rejection and steps
- * down the ladder; only once there is no schema left to drop is it retried
- * as transient.
- */
 /**
  * Words an upstream uses when the *account* is the problem - a plan that
  * ended, a balance at zero, a revoked key - rather than the request. MiniMax
@@ -185,6 +182,17 @@ function isAccountRefusal(error: UpstreamError) {
   return ACCOUNT_WORDS.test(error.body || error.message);
 }
 
+/**
+ * A 400/422 whose body carries no error message at all. Measured on OpenCode
+ * Go's DeepSeek (22 September 2026): the body is {"model":"deepseek-v4.1-flash"}
+ * and it is the strict JSON schema being refused without saying so - the
+ * same request with `json_object` or no response_format was 20/20 fine,
+ * while strict failed 1/10 one hour and 9/10 the next as the gateway's
+ * backend mix shifted (another backend refuses it *with* a message naming
+ * the schema). So paramRejection reads it as a schema rejection and steps
+ * down the ladder; only once there is no schema left to drop is it retried
+ * as transient.
+ */
 function isSilentRejection(status: number, body: string) {
   return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
@@ -300,27 +308,61 @@ export type RunTaskParams = {
    * would rather see retried while it still can be.
    */
   finalize: (rawText: string, context: { lastAttempt: boolean }) => Record<string, unknown>;
+  /**
+   * Cancels the task from outside. A TaskJob outlives the page that started
+   * it, so the page's Stop button reaches it through DELETE /api/jobs/:id
+   * rather than by disconnecting - otherwise Stop would leave the model call
+   * running on the user's quota.
+   */
+  signal?: AbortSignal;
 };
 
-type TaskEvent = { type: string } & Record<string, unknown>;
+export type TaskEvent = { type: string } & Record<string, unknown>;
 
 /**
- * Runs one provider task, writing app-level SSE events to `writer`.
- * Closes the writer when finished (success or error).
+ * Where a task's events go. The inline path hands runTask the client's own
+ * response stream (streamSink): when that client goes away `event` rejects
+ * and the task stops, as it always has. A TaskJob (Durable Object) hands it
+ * a sink that never rejects, so the task outlives the client that asked.
+ */
+export type TaskSink = {
+  event(event: TaskEvent): Promise<void>;
+  heartbeat(): void;
+  close(): Promise<void>;
+};
+
+/** A sink writing straight to one client's SSE response. */
+export function streamSink(writer: WritableStreamDefaultWriter<Uint8Array>): TaskSink {
+  let open = true;
+  return {
+    event: (event) => writer.write(encodeEvent(event)),
+    heartbeat: () => {
+      if (!open) return;
+      writer.write(encodeHeartbeat()).catch(() => {
+        open = false;
+      });
+    },
+    close: async () => {
+      try {
+        await writer.close();
+      } catch {
+        // already closed/errored
+      }
+    },
+  };
+}
+
+/**
+ * Runs one provider task, sending app-level events to `sink`, and closes
+ * the sink when finished (success or error).
  */
 export async function runTask(
-  writer: WritableStreamDefaultWriter<Uint8Array>,
-  { provider, env, effort: requestedEffort, routeOverride, task, finalize }: RunTaskParams,
+  sink: TaskSink,
+  { provider, env, effort: requestedEffort, routeOverride, task, finalize, signal }: RunTaskParams,
 ) {
-  const write = async (event: TaskEvent) => {
-    await writer.write(encodeEvent(event));
-  };
+  const write = (event: TaskEvent) => sink.event(event);
 
-  const heartbeat = setInterval(() => {
-    writer.write(encodeHeartbeat()).catch(() => {
-      clearInterval(heartbeat);
-    });
-  }, HEARTBEAT_INTERVAL_MS);
+  const heartbeat = setInterval(() => sink.heartbeat(), HEARTBEAT_INTERVAL_MS);
 
   // Not const: a model chain ("a,b") swaps `model` in on a retryable failure.
   let route = resolveRoute(provider, env, routeOverride);
@@ -337,6 +379,7 @@ export async function runTask(
     task.referenceImages?.length ?? 0,
   );
   const abort = new AbortController();
+  signal?.addEventListener("abort", () => abort.abort(new Error("Cancelled.")), { once: true });
   const safetyTimer = setTimeout(() => {
     const seconds = Math.round(timeoutMs / 1000);
     const spent = seconds >= 120 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`;
@@ -608,11 +651,7 @@ export async function runTask(
   } finally {
     clearTimeout(safetyTimer);
     clearInterval(heartbeat);
-    try {
-      await writer.close();
-    } catch {
-      // already closed/errored
-    }
+    await sink.close();
   }
 }
 

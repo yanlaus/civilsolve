@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
-import { Calculator, Loader2 } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Calculator, History, Loader2, X } from "lucide-react";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { useInterpret } from "@/hooks/use-interpret";
@@ -27,7 +27,17 @@ type PendingSolve = {
 };
 
 export default function CivilAnswerAppPage() {
-  const { runs, judgeRun, start, cancel } = useSolve();
+  const { runs, judgeRun, start, cancel, restore, dismiss } = useSolve();
+  // Set when the page came back with the last run's results - the jobs kept
+  // running on the server while the page was closed or reloaded.
+  const [recovered, setRecovered] = useState(false);
+  const restoreAttempted = useRef(false);
+
+  useEffect(() => {
+    if (restoreAttempted.current) return;
+    restoreAttempted.current = true;
+    if (restore()) setRecovered(true);
+  }, [restore]);
   const { pipeline, start: startInterpret, reset: resetInterpret } = useInterpret();
   const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
@@ -69,7 +79,13 @@ export default function CivilAnswerAppPage() {
   const statusMessage = prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
   const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
 
+  function clearRecovered() {
+    dismiss();
+    setRecovered(false);
+  }
+
   function cancelAll() {
+    setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
     cancel();
@@ -85,6 +101,7 @@ export default function CivilAnswerAppPage() {
     judge,
   }: SolveSubmission) {
     setError("");
+    setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
     setPrepStatus("Preparing images...");
@@ -197,6 +214,22 @@ export default function CivilAnswerAppPage() {
             </div>
           }
         >
+          {recovered ? (
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] print:hidden dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
+              <span className="flex items-center gap-2">
+                <History className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+                Your last run, recovered from this browser. Results are kept for 24 hours.
+              </span>
+              <button
+                type="button"
+                onClick={clearRecovered}
+                className="inline-flex items-center gap-1 rounded-[8px] border border-[#d4cdc3] px-3 py-1 text-xs font-semibold transition hover:border-[#b35c1e] hover:text-[#b35c1e] dark:border-[#2a3650] dark:hover:border-[#e8903a] dark:hover:text-[#e8903a]"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Clear
+              </button>
+            </div>
+          ) : null}
           <SolutionPanel runs={runs} judgeRun={judgeRun} />
         </Suspense>
       </div>

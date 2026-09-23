@@ -3,6 +3,12 @@
 // progresses independently (spinner -> live progress -> rendered solution).
 // With the optional answer cross-check, a judge then grades every finished
 // solution against the images.
+//
+// Every request runs server side in a job that outlives this page
+// (worker/jobs.ts). Its id arrives as the stream's first event, is kept in
+// a JobHandle and in localStorage (lib/run-store.ts), and is what lets a
+// dropped connection re-attach to the same run, a reloaded page recover the
+// last run, and Stop cancel the model call on the server.
 
 import { useCallback, useRef, useState } from "react";
 import { MAX_JUDGED_SOLUTIONS, type JudgementResult } from "../../shared/judgement";
@@ -15,12 +21,16 @@ import {
   type JudgeRequestBody,
   type SolveRequestBody,
 } from "../../shared/stream-protocol";
+import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
-  fetchSseStream,
+  cancelJob,
   isConnectionLost,
+  openTaskStream,
   readSseEvents,
   StreamInterruptedError,
+  takeJobEvent,
   withResume,
+  type JobHandle,
 } from "@/lib/sse";
 
 export type ProviderRun =
@@ -71,14 +81,30 @@ export function isJudgeActive(run: JudgeRun) {
   return run.status === "waiting" || run.status === "streaming";
 }
 
+function waitingRuns(providers: ProviderKey[], message: string): ProviderRuns {
+  const next: ProviderRuns = { ...IDLE_RUNS };
+  for (const provider of providers) next[provider] = { status: "waiting", message };
+  return next;
+}
+
 export function useSolve() {
   const [runs, setRuns] = useState<ProviderRuns>(IDLE_RUNS);
   const [judgeRun, setJudgeRun] = useState<JudgeRun>({ status: "idle" });
   const abortRef = useRef<AbortController | null>(null);
+  /** Every job of the current run, so Stop can cancel them on the server. */
+  const handlesRef = useRef<JobHandle[]>([]);
 
-  const cancel = useCallback(() => {
+  /** Ends this page's part of the current run and stops its jobs server side. */
+  const stopCurrent = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    for (const handle of handlesRef.current) cancelJob(handle);
+    handlesRef.current = [];
+  }, []);
+
+  const cancel = useCallback(() => {
+    stopCurrent();
+    clearRun();
     setRuns((current) => {
       const next = { ...current };
       for (const key of Object.keys(next) as ProviderKey[]) {
@@ -93,43 +119,59 @@ export function useSolve() {
         ? { status: "error", judge: current.judge, message: "Cancelled." }
         : current,
     );
-  }, []);
+  }, [stopCurrent]);
 
-  const start = useCallback(
-    (providers: ProviderKey[], body: SolveRequestBody, judge: ProviderKey | null = null) => {
-      abortRef.current?.abort();
+  /** Clears the page and forgets the saved run (after a recovery, say). */
+  const dismiss = useCallback(() => {
+    stopCurrent();
+    clearRun();
+    setRuns(IDLE_RUNS);
+    setJudgeRun({ status: "idle" });
+  }, [stopCurrent]);
+
+  /**
+   * Runs (or re-attaches to) every solver of `run`, then its judge. `body`
+   * is null for a run restored after a reload: the images are gone, so jobs
+   * can only be re-attached to, never started.
+   */
+  const execute = useCallback(
+    (run: SavedRun, body: SolveRequestBody | null) => {
+      stopCurrent();
       const abort = new AbortController();
       abortRef.current = abort;
-
-      setRuns(() => {
-        const next: ProviderRuns = { ...IDLE_RUNS };
-        for (const provider of providers) {
-          next[provider] = { status: "waiting", message: "Submitting..." };
-        }
-        return next;
-      });
-      setJudgeRun(
-        judge
-          ? { status: "waiting", judge, message: "Waiting for the solutions..." }
-          : { status: "idle" },
-      );
+      saveRun(run);
+      const persist = () => saveRun(run);
 
       // Finished solutions, kept here as well as in state so the judge step
       // can read them without waiting on a render.
       const solutions = new Map<ProviderKey, ProviderArtifact>();
-      const update = (provider: ProviderKey, run: ProviderRun) => {
-        if (run.status === "done") solutions.set(provider, run.solution);
-        setRuns((current) => ({ ...current, [provider]: run }));
+      const update = (provider: ProviderKey, next: ProviderRun) => {
+        if (next.status === "done") solutions.set(provider, next.solution);
+        setRuns((current) => ({ ...current, [provider]: next }));
       };
 
       void (async () => {
-        await runPool(providers, SOLVE_CONCURRENCY, async (provider) => {
+        await runPool(run.providers, SOLVE_CONCURRENCY, async (provider) => {
+          const known = run.solveJobs[provider];
+          if (body === null && !known) {
+            update(provider, {
+              status: "error",
+              message: "This solve had not reached the server when the page closed. Start it again.",
+            });
+            return;
+          }
+          const handle: JobHandle = { id: known ?? null };
+          handlesRef.current.push(handle);
+          const onJob = (id: string) => {
+            run.solveJobs[provider] = id;
+            persist();
+          };
           try {
             // A dropped connection - on a phone, usually the browser being
-            // put in the background - restarts this provider once the page is
-            // visible again, independently of the others (see withResume).
+            // put in the background - re-attaches to this provider's job once
+            // the page is visible again (see withResume).
             await withResume(
-              () => streamProvider(provider, body, abort.signal, update),
+              () => streamProvider(provider, body, abort.signal, update, handle, onJob),
               abort.signal,
               (message) => update(provider, { status: "waiting", message }),
             );
@@ -146,14 +188,47 @@ export function useSolve() {
           }
         });
 
-        if (!judge || abort.signal.aborted) return;
-        await runJudge(judge, providers, solutions, body, abort.signal, setJudgeRun);
+        if (!run.judge || abort.signal.aborted) return;
+        await runJudge(run, body, solutions, abort.signal, setJudgeRun, handlesRef.current, persist);
       })();
     },
-    [],
+    [stopCurrent],
   );
 
-  return { runs, judgeRun, start, cancel };
+  const start = useCallback(
+    (providers: ProviderKey[], body: SolveRequestBody, judge: ProviderKey | null = null) => {
+      setRuns(waitingRuns(providers, "Submitting..."));
+      setJudgeRun(
+        judge
+          ? { status: "waiting", judge, message: "Waiting for the solutions..." }
+          : { status: "idle" },
+      );
+      execute(
+        { savedAt: Date.now(), providers, solveJobs: {}, judge: judge ? { provider: judge } : null },
+        body,
+      );
+    },
+    [execute],
+  );
+
+  /**
+   * Picks the last run back up after the page was reloaded - its jobs kept
+   * running on the server. Returns whether there was one to restore.
+   */
+  const restore = useCallback((): boolean => {
+    const run = loadRun();
+    if (!run || !run.providers.length) return false;
+    setRuns(waitingRuns(run.providers, "Reconnecting to your last run..."));
+    setJudgeRun(
+      run.judge
+        ? { status: "waiting", judge: run.judge.provider, message: "Reconnecting..." }
+        : { status: "idle" },
+    );
+    execute(run, null);
+    return true;
+  }, [execute]);
+
+  return { runs, judgeRun, start, cancel, restore, dismiss };
 }
 
 /**
@@ -178,22 +253,26 @@ async function runPool<T>(
 }
 
 /**
- * One attempt at one provider. Resolves once the server sent a terminal
- * event - `done` or `error`, both already reflected through `update`.
- * Throws when the connection is lost (a network error, or a stream that
- * closed without a terminal event), which is the caller's cue to resume.
+ * One attempt at one provider: re-attaches to its job if the handle has one,
+ * otherwise starts it. Resolves once the server sent a terminal event -
+ * `done` or `error`, both already reflected through `update`. Throws when
+ * the connection is lost (a network error, or a stream that closed without
+ * a terminal event), which is the caller's cue to resume.
  */
 async function streamProvider(
   provider: ProviderKey,
-  body: SolveRequestBody,
+  body: SolveRequestBody | null,
   signal: AbortSignal,
   update: (provider: ProviderKey, run: ProviderRun) => void,
+  handle: JobHandle,
+  onJob: (id: string) => void,
 ): Promise<"done" | "error"> {
   let charsReceived = 0;
-  const stream = await fetchSseStream(`/api/solve/${provider}`, body, signal);
+  const stream = await openTaskStream(handle, `/api/solve/${provider}`, body, signal);
   let outcome: "done" | "error" | null = null;
 
   for await (const event of readSseEvents(stream)) {
+    if (takeJobEvent(handle, event, onJob)) continue;
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(event.data) as Record<string, unknown>;
@@ -202,9 +281,10 @@ async function streamProvider(
     }
 
     if (event.name === "status" && typeof payload.message === "string") {
-      // Every status precedes a fresh attempt. After partial output that
-      // means the Worker discarded a useless fragment and is retrying, so
-      // the count starts over rather than continuing from the discarded text.
+      // Every status precedes a fresh attempt (or a re-attach). After partial
+      // output that means the Worker discarded a useless fragment and is
+      // retrying, so the count starts over rather than continuing from the
+      // discarded text.
       charsReceived = 0;
       update(provider, { status: "waiting", message: payload.message });
     } else if (event.name === "delta" && typeof payload.text === "string") {
@@ -242,54 +322,88 @@ async function streamProvider(
  * any). The judge sees them as Solution A, B, C... in picker order. A solver
  * that returned nothing is left out and named in the result; fewer than two
  * solutions is nothing to compare.
+ *
+ * A judge that was already sent before the page reloaded is re-attached to,
+ * with the solver order recorded when it was sent. One that was not cannot
+ * be sent after a reload: it needs the images, and they are not kept.
  */
 async function runJudge(
-  judge: ProviderKey,
-  providers: ProviderKey[],
+  run: SavedRun,
+  body: SolveRequestBody | null,
   solutions: Map<ProviderKey, ProviderArtifact>,
-  body: SolveRequestBody,
   signal: AbortSignal,
   setJudgeRun: (run: JudgeRun) => void,
+  handles: JobHandle[],
+  persist: () => void,
 ) {
-  const solvers = providers.filter((provider) => solutions.has(provider)).slice(0, MAX_JUDGED_SOLUTIONS);
-  const skipped = providers.filter((provider) => !solutions.has(provider));
-  if (solvers.length < 2) {
-    setJudgeRun({
-      status: "error",
-      judge,
-      message: `Cross-check skipped: ${skipped.map((p) => PROVIDER_LABELS[p]).join(" and ") || "a solver"} did not return a solution, leaving fewer than two to compare.`,
-    });
-    return;
+  const saved = run.judge;
+  if (!saved) return;
+  const judge = saved.provider;
+  const handle: JobHandle = { id: saved.jobId ?? null };
+
+  let solvers: ProviderKey[];
+  let skipped: ProviderKey[];
+  let judgeBody: JudgeRequestBody | null = null;
+
+  if (handle.id) {
+    solvers = saved.solvers ?? [];
+    skipped = saved.skipped ?? [];
+  } else {
+    if (body === null) {
+      setJudgeRun({
+        status: "error",
+        judge,
+        message:
+          "The cross-check had not started when the page closed, and it needs the uploaded images, which are not kept. Upload again to cross-check.",
+      });
+      return;
+    }
+    solvers = run.providers.filter((provider) => solutions.has(provider)).slice(0, MAX_JUDGED_SOLUTIONS);
+    skipped = run.providers.filter((provider) => !solutions.has(provider));
+    if (solvers.length < 2) {
+      setJudgeRun({
+        status: "error",
+        judge,
+        message: `Cross-check skipped: ${skipped.map((p) => PROVIDER_LABELS[p]).join(" and ") || "a solver"} did not return a solution, leaving fewer than two to compare.`,
+      });
+      return;
+    }
+
+    judgeBody = {
+      images: body.images,
+      notes: body.notes,
+      ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+      solutions: solvers.map((provider) =>
+        artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
+      ),
+    };
+    if (estimateBodyBytes(judgeBody) > MAX_BODY_BYTES) {
+      setJudgeRun({
+        status: "error",
+        judge,
+        message: "Cross-check skipped: the images plus the solutions exceed the request size limit.",
+      });
+      return;
+    }
+    saved.solvers = solvers;
+    saved.skipped = skipped;
+    persist();
+    setJudgeRun({ status: "waiting", judge, message: `Submitting ${solvers.length} solutions...` });
   }
 
-  const judgeBody: JudgeRequestBody = {
-    images: body.images,
-    notes: body.notes,
-    ...(body.interpretation ? { interpretation: body.interpretation } : {}),
-    solutions: solvers.map((provider) =>
-      artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
-    ),
+  handles.push(handle);
+  const onJob = (id: string) => {
+    saved.jobId = id;
+    persist();
   };
-  if (estimateBodyBytes(judgeBody) > MAX_BODY_BYTES) {
-    setJudgeRun({
-      status: "error",
-      judge,
-      message: "Cross-check skipped: the images plus the solutions exceed the request size limit.",
-    });
-    return;
-  }
 
-  setJudgeRun({
-    status: "waiting",
-    judge,
-    message: `Submitting ${solvers.length} solutions...`,
-  });
   const attempt = async () => {
     let charsReceived = 0;
-    const stream = await fetchSseStream(`/api/judge/${judge}`, judgeBody, signal);
+    const stream = await openTaskStream(handle, `/api/judge/${judge}`, judgeBody, signal);
     let terminal = false;
 
     for await (const event of readSseEvents(stream)) {
+      if (takeJobEvent(handle, event, onJob)) continue;
       let payload: Record<string, unknown>;
       try {
         payload = JSON.parse(event.data) as Record<string, unknown>;
