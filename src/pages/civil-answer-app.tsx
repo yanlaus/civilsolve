@@ -4,6 +4,7 @@ import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import type { ProviderKey } from "../../shared/providers";
@@ -61,6 +62,9 @@ export default function CivilAnswerAppPage() {
   const isSolving = Object.values(runs).some(isRunActive) || isJudgeActive(judgeRun);
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
+
+  // A long solve on a phone: keep the screen from locking while it runs.
+  useWakeLock(isSolving || isInterpreting);
 
   const statusMessage = prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
   const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");

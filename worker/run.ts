@@ -134,15 +134,36 @@ function isRetryableStatus(status: number) {
  * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
  * body stays on the error for paramRejection, which pattern-matches it.
  */
-function errorBodyMessage(body: string): string {
+/** The upstream's own error text, or "" when the body carries none. */
+function explicitErrorMessage(body: string): string {
   try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-    const message = parsed?.error?.message ?? parsed?.message;
-    if (typeof message === "string" && message.trim()) return message.trim();
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+    const error = parsed?.error;
+    const message =
+      (error && typeof error === "object" ? (error as { message?: unknown }).message : error) ??
+      parsed?.message;
+    return typeof message === "string" ? message.trim() : "";
   } catch {
-    // Not JSON - the raw body is the message.
+    // Not JSON - the raw body is the message, if there is one.
+    return body.trim().slice(0, 500);
   }
-  return body.slice(0, 500);
+}
+
+function errorBodyMessage(body: string): string {
+  return explicitErrorMessage(body) || body.trim().slice(0, 500) || "(empty response body)";
+}
+
+/**
+ * A 400/422 that carries no error message at all is not the upstream
+ * validating our request - that always says what it rejected - but a
+ * gateway fault. Measured on OpenCode Go's DeepSeek: one strict-schema
+ * request in ten came back 400 with the body {"model":"deepseek-v4.1-flash"}
+ * while the other nine, identical, streamed normally; the gateway spreads
+ * requests over several backends and one of them answers like this. Retry
+ * it like a 5xx rather than failing the solve.
+ */
+function isSilentRejection(status: number, body: string) {
+  return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
 
 function upstreamError(label: string, status: number, body: string): UpstreamError {
@@ -151,7 +172,7 @@ function upstreamError(label: string, status: number, body: string): UpstreamErr
   ) as UpstreamError;
   error.status = status;
   error.body = body;
-  error.retryable = isRetryableStatus(status);
+  error.retryable = isRetryableStatus(status) || isSilentRejection(status, body);
   return error;
 }
 

@@ -15,7 +15,13 @@ import {
   type JudgeRequestBody,
   type SolveRequestBody,
 } from "../../shared/stream-protocol";
-import { fetchSseStream, readSseEvents } from "@/lib/sse";
+import {
+  fetchSseStream,
+  isConnectionLost,
+  readSseEvents,
+  StreamInterruptedError,
+  withResume,
+} from "@/lib/sse";
 
 export type ProviderRun =
   | { status: "idle" }
@@ -117,36 +123,25 @@ export function useSolve() {
       };
 
       void (async () => {
-        const interrupted: ProviderKey[] = [];
         await runPool(providers, SOLVE_CONCURRENCY, async (provider) => {
-          const outcome = await streamProvider(provider, body, abort.signal, update);
-          if (outcome === "interrupted" && !abort.signal.aborted) {
-            // A stream that closed with no `done` and no `error` was almost
-            // certainly killed server side (the isolate is gone, so the
-            // Worker cannot send an error). Leave an honest waiting state
-            // and retry later.
-            update(provider, {
-              status: "waiting",
-              message: "Interrupted by server load — will retry shortly.",
-            });
-            interrupted.push(provider);
-          }
-        });
-
-        // Retries run one at a time, after the wave, so they never stack on
-        // top of whatever overloaded the server the first time.
-        await runPool(interrupted, 1, async (provider) => {
-          if (abort.signal.aborted) return;
-          update(provider, {
-            status: "waiting",
-            message: "Interrupted by server load — retrying...",
-          });
-          const retry = await streamProvider(provider, body, abort.signal, update);
-          if (retry === "interrupted" && !abort.signal.aborted) {
+          try {
+            // A dropped connection - on a phone, usually the browser being
+            // put in the background - restarts this provider once the page is
+            // visible again, independently of the others (see withResume).
+            await withResume(
+              () => streamProvider(provider, body, abort.signal, update),
+              abort.signal,
+              (message) => update(provider, { status: "waiting", message }),
+            );
+          } catch (error) {
+            if (abort.signal.aborted) return;
             update(provider, {
               status: "error",
-              message:
-                "The server ran out of capacity for this provider. Try again, or run fewer at once.",
+              message: isConnectionLost(error)
+                ? "The connection kept dropping before the solution arrived. Keep this page open and try again."
+                : error instanceof Error
+                  ? error.message
+                  : "The solve request failed.",
             });
           }
         });
@@ -182,65 +177,63 @@ async function runPool<T>(
   await Promise.all(runners);
 }
 
-/** How one attempt ended, so the caller can decide whether to retry. */
-type StreamOutcome = "done" | "error" | "interrupted" | "aborted";
-
+/**
+ * One attempt at one provider. Resolves once the server sent a terminal
+ * event - `done` or `error`, both already reflected through `update`.
+ * Throws when the connection is lost (a network error, or a stream that
+ * closed without a terminal event), which is the caller's cue to resume.
+ */
 async function streamProvider(
   provider: ProviderKey,
   body: SolveRequestBody,
   signal: AbortSignal,
   update: (provider: ProviderKey, run: ProviderRun) => void,
-): Promise<StreamOutcome> {
+): Promise<"done" | "error"> {
   let charsReceived = 0;
+  const stream = await fetchSseStream(`/api/solve/${provider}`, body, signal);
+  let outcome: "done" | "error" | null = null;
 
-  try {
-    const stream = await fetchSseStream(`/api/solve/${provider}`, body, signal);
-    let outcome: StreamOutcome | null = null;
-
-    for await (const event of readSseEvents(stream)) {
-      let payload: Record<string, unknown>;
-      try {
-        payload = JSON.parse(event.data) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-
-      if (event.name === "status" && typeof payload.message === "string") {
-        // Every status precedes a fresh attempt. After partial output that
-        // means the Worker discarded a useless fragment and is retrying, so
-        // the count starts over rather than continuing from the discarded text.
-        charsReceived = 0;
-        update(provider, { status: "waiting", message: payload.message });
-      } else if (event.name === "delta" && typeof payload.text === "string") {
-        charsReceived += payload.text.length;
-        update(provider, { status: "streaming", charsReceived });
-      } else if (
-        event.name === "done" &&
-        payload.solution &&
-        typeof payload.solution === "object"
-      ) {
-        outcome = "done";
-        update(provider, {
-          status: "done",
-          solution: payload.solution as ProviderArtifact,
-        });
-      } else if (event.name === "error" && typeof payload.message === "string") {
-        outcome = "error";
-        update(provider, { status: "error", message: payload.message });
-      }
+  for await (const event of readSseEvents(stream)) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(event.data) as Record<string, unknown>;
+    } catch {
+      continue;
     }
 
-    // No terminal event: the stream closed mid-flight. The caller may retry;
-    // it owns the final state so a retry is not preceded by a flash of error.
-    return outcome ?? "interrupted";
-  } catch (error) {
-    if (signal.aborted) return "aborted";
-    update(provider, {
-      status: "error",
-      message: error instanceof Error ? error.message : "The solve request failed.",
-    });
-    return "error";
+    if (event.name === "status" && typeof payload.message === "string") {
+      // Every status precedes a fresh attempt. After partial output that
+      // means the Worker discarded a useless fragment and is retrying, so
+      // the count starts over rather than continuing from the discarded text.
+      charsReceived = 0;
+      update(provider, { status: "waiting", message: payload.message });
+    } else if (event.name === "delta" && typeof payload.text === "string") {
+      charsReceived += payload.text.length;
+      update(provider, { status: "streaming", charsReceived });
+    } else if (
+      event.name === "done" &&
+      payload.solution &&
+      typeof payload.solution === "object"
+    ) {
+      outcome = "done";
+      update(provider, {
+        status: "done",
+        solution: payload.solution as ProviderArtifact,
+      });
+    } else if (event.name === "error" && typeof payload.message === "string") {
+      outcome = "error";
+      update(provider, { status: "error", message: payload.message });
+    }
   }
+
+  // No terminal event: the stream closed mid-flight. The caller owns the
+  // final state, so a restart is not preceded by a flash of error.
+  if (!outcome) {
+    throw new StreamInterruptedError(
+      `${PROVIDER_LABELS[provider]}: the stream ended before the solution arrived.`,
+    );
+  }
+  return outcome;
 }
 
 /**
@@ -291,9 +284,8 @@ async function runJudge(
     judge,
     message: `Submitting ${solvers.length} solutions...`,
   });
-  let charsReceived = 0;
-
-  try {
+  const attempt = async () => {
+    let charsReceived = 0;
     const stream = await fetchSseStream(`/api/judge/${judge}`, judgeBody, signal);
     let terminal = false;
 
@@ -331,18 +323,24 @@ async function runJudge(
     }
 
     if (!terminal) {
-      setJudgeRun({
-        status: "error",
-        judge,
-        message: "The cross-check stream ended unexpectedly. Try again.",
-      });
+      throw new StreamInterruptedError("The cross-check stream ended before the verdict arrived.");
     }
+  };
+
+  try {
+    await withResume(attempt, signal, (message) =>
+      setJudgeRun({ status: "waiting", judge, message }),
+    );
   } catch (error) {
     if (signal.aborted) return;
     setJudgeRun({
       status: "error",
       judge,
-      message: error instanceof Error ? error.message : "The cross-check request failed.",
+      message: isConnectionLost(error)
+        ? "The connection kept dropping before the verdict arrived. Keep this page open and try again."
+        : error instanceof Error
+          ? error.message
+          : "The cross-check request failed.",
     });
   }
 }

@@ -31,7 +31,7 @@ The solve flow is **stateless streaming** — no database, no object storage, no
 3. Each Worker invocation resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back over Server-Sent Events.
 4. The provider's tab renders progressively — spinner, then live progress, then the finished solution.
 
-Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a fully free, zero-storage deployment).
+Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a zero-storage deployment). Losing the connection is different: on a phone, putting the browser in the background makes iOS cut the stream, and the client then waits for the page to be visible again and **restarts** that provider (`withResume` in `src/lib/sse.ts`, up to twice), so the result still arrives - after a fresh solve, since there is nothing server side to resume from. While work is running the page also holds a screen wake lock, so a phone left on the desk does not lock itself mid-solve.
 
 ### Providers and channels
 
@@ -355,7 +355,7 @@ Accepted: JPEG, PNG, WebP, GIF, PDF. HEIC/HEIF/TIFF are no longer accepted (the 
 
 ## Provider output safety
 
-Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, and LaTeX-body-preferred display repair. A provider failure only fails that provider's tab.
+Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes (every problem kept under its own heading, with steps, givens and formulas accepted as lists or objects - a whole exam paper comes back this way from models that ignore the schema), `<think>` reasoning left in the content, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, and LaTeX-body-preferred display repair. A provider failure only fails that provider's tab.
 
 Model output is also **untrusted input** — the uploaded images are user-supplied, so anything in them can steer what a model writes. Rendered markdown is sanitized with DOMPurify before it reaches the DOM (`src/lib/math-markdown.ts`); KaTeX output is spliced in afterwards from placeholders so the sanitizer never mangles generated math.
 

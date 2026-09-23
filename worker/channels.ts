@@ -286,6 +286,11 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // "MiniMax-M3[1m]" selects the 1M-token context window.
       defaultModel: "MiniMax-M3",
       effort: CLAMPED_EFFORT,
+      // Accepts response_format but does not enforce it: on a two-problem
+      // upload it answered {"problems": [...]} with step_by_step as an
+      // array. Flagged unstructured so the prompt spells out the six-field
+      // contract, including "cover every problem inside these same fields".
+      structured: false,
       // M3 is worth waiting for and its thinking runs long: on the B.8
       // fixture it wrote 93-104k characters and was still going at the
       // default 280 s, three production runs out of three. `reasoning_effort`
@@ -311,6 +316,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // stripThinkTags in shared/solution.ts removes them before parsing.
       defaultModel: "minimax-m3",
       effort: CLAMPED_EFFORT,
+      structured: false,
       // Same 20 minutes as the direct route: the gateway runs the same model
       // and it ran past 280 s at "medium" (105-148k characters) and "high"
       // (95k) on production. It was capped at "low" until 23 September 2026;
