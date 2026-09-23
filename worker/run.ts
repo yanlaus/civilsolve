@@ -164,6 +164,27 @@ function errorBodyMessage(body: string): string {
  * down the ladder; only once there is no schema left to drop is it retried
  * as transient.
  */
+/**
+ * Words an upstream uses when the *account* is the problem - a plan that
+ * ended, a balance at zero, a revoked key - rather than the request. MiniMax
+ * tags its own errors with a code: 1004 authentication, 1008 insufficient
+ * balance, 2049 invalid key.
+ */
+const ACCOUNT_WORDS =
+  /insufficient[_ ]?balance|balance (is )?(not enough|insufficient)|quota|credit|billing|payment required|subscription|plan (has )?(expired|ended)|expired|authori[sz](ed|ation)_error|login fail|invalid api key|\((1004|1008|2049)\)/i;
+
+/**
+ * The upstream turned the account away. A different channel is a different
+ * account, so this is the one failure worth moving down a channel chain for
+ * instead of failing: when the owner's MiniMax token plan ends, MiniMax
+ * answers 401 {"error":{"type":"authorized_error",...}} and the solve
+ * should carry on over OpenCode Go.
+ */
+function isAccountRefusal(error: UpstreamError) {
+  if (error.status === 401 || error.status === 402 || error.status === 403) return true;
+  return ACCOUNT_WORDS.test(error.body || error.message);
+}
+
 function isSilentRejection(status: number, body: string) {
   return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
@@ -330,20 +351,22 @@ export async function runTask(
 
     await write({ type: "status", message: `Asking ${route.label}...` });
 
-    const streamUpstream = wantsUpstreamStream(route, env);
+    let streamUpstream = wantsUpstreamStream(route, env);
+    const channelChain = route.fallbackChannels;
+    const stepsPerRoute = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES + MAX_EFFORT_STEPDOWNS;
     const maxSteps =
-      1 +
-      MAX_DOWNGRADES +
-      MAX_TRANSIENT_RETRIES +
-      MAX_EFFORT_STEPDOWNS +
+      stepsPerRoute +
       // Each fallback model gets its own attempt plus its own transient retry.
-      route.fallbackModels.length * (1 + MAX_TRANSIENT_RETRIES);
+      route.fallbackModels.length * (1 + MAX_TRANSIENT_RETRIES) +
+      // Each fallback channel is a fresh route with its own ladder.
+      channelChain.length * stepsPerRoute;
 
     let caps = startingCapabilities(route, effort);
     let transientRetries = 0;
     let effortStepDowns = 0;
     let blindDowngrades = 0;
     let modelFallbacks = 0;
+    let channelFallbacks = 0;
     let lastError: UpstreamError | null = null;
     let rawText = "";
 
@@ -371,6 +394,30 @@ export async function runTask(
       await sleep(RETRY_DELAY_MS);
       return true;
     };
+    /**
+     * Moves the provider to the next channel in its chain, if any, and says
+     * why. A channel is a different account and endpoint - the owner's
+     * MiniMax token plan, then the OpenCode Go subscription - so everything
+     * negotiated against the old one starts over: capabilities, effort band,
+     * model chain, retry budgets. The safety timeout does not; it bounds the
+     * whole task.
+     */
+    const switchChannel = async (why: string): Promise<boolean> => {
+      const next = channelChain[channelFallbacks];
+      if (!next) return false;
+      channelFallbacks += 1;
+      const previous = route.label;
+      route = resolveRoute(provider, env, { channel: next });
+      effort = route.forceEffort ?? clampEffort(requestedEffort, route);
+      caps = startingCapabilities(route, effort);
+      streamUpstream = wantsUpstreamStream(route, env);
+      transientRetries = 0;
+      blindDowngrades = 0;
+      modelFallbacks = 0;
+      await write({ type: "status", message: `${previous} ${why}. Trying ${route.label}...` });
+      return true;
+    };
+
     // Set when a cut-off response was accepted by `finalize` inside the loop,
     // so it is not parsed a second time under stricter terms at the end.
     let donePayload: Record<string, unknown> | null = null;
@@ -475,6 +522,23 @@ export async function runTask(
         // excepted).
         if (deltaEmitted) break;
 
+        // The account behind this channel was turned away - a plan that ended,
+        // a revoked key. Nothing about the request will fix that; another
+        // channel in the chain might. With no chain left this falls through
+        // to the usual handling, so a provider without one behaves exactly as
+        // before (a 429 that mentions "quota" still gets its transient retry).
+        if (isAccountRefusal(lastError) && channelFallbacks < channelChain.length) {
+          // A refusal inside an HTTP 200 body has no status or body of its
+          // own; its text is the error message, after the route label.
+          const detail = (
+            explicitErrorMessage(lastError.body ?? "") ||
+            lastError.message.replace(`${route.label}: `, "")
+          ).slice(0, 140);
+          const code = lastError.status ? `HTTP ${lastError.status}: ` : "";
+          const why = `refused the account (${code}${detail}) - the plan may have ended`;
+          if (await switchChannel(why)) continue;
+        }
+
         const drop = paramRejection(lastError);
         if (
           drop &&
@@ -513,7 +577,12 @@ export async function runTask(
 
         if (!isRetryable(lastError)) break;
         if (await switchModel()) continue;
-        if (transientRetries >= MAX_TRANSIENT_RETRIES) break;
+        if (transientRetries >= MAX_TRANSIENT_RETRIES) {
+          // This channel has had its retry. The next one in the chain gets a
+          // fresh attempt before the solve is given up on.
+          if (await switchChannel("is not answering")) continue;
+          break;
+        }
         transientRetries += 1;
         await write({
           type: "status",

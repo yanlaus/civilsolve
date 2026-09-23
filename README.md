@@ -9,7 +9,7 @@ CivilSolve solves civil engineering assignments. Users upload question images or
 | DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | badged **Less credit** |
 | Grok | OpenCode Go | `grok-4.6` | badged **More credit** |
 | MiMo | OpenCode Go | `mimo-v2.6-flash` | badged **China model** |
-| MiniMax | MiniMax (switchable to OpenCode Go) | `MiniMax-M3`, 20-minute timeout | badged **China model** |
+| MiniMax | MiniMax, then OpenCode Go (a channel chain) | `MiniMax-M3`, 20-minute timeout | badged **China model** |
 | Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | **selected**; badged **Less credit**; needs a workspace opt-in |
 | Claude | Poe | `claude-opus-4.8` | listed last; badged **More credit** |
 
@@ -44,7 +44,7 @@ gemini   ──> google | poe       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
 mimo     ──> opencode
-minimax  ──> minimax | opencode   (MINIMAX_CHANNEL)
+minimax  ──> minimax → opencode   (MINIMAX_CHANNEL, a chain: see below)
 muse     ──> opencode
 ```
 
@@ -239,7 +239,7 @@ Set the `NO_STREAM` var (production: empty) to make those providers use a non-st
 | `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark; MiniMax when `MINIMAX_CHANNEL=opencode` | <https://opencode.ai/go> |
 | `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `GOOGLE_API_KEY` | Gemini, only when `GEMINI_CHANNEL=google` | <https://aistudio.google.com/apikey> |
-| `MINIMAX_API_KEY` | MiniMax (the default channel for it) | <https://platform.minimaxi.com> |
+| `MINIMAX_API_KEY` | MiniMax, first in its chain; delete it and MiniMax runs on OpenCode Go | <https://platform.minimaxi.com> |
 
 - Local: copy `.dev.vars.example` to `.dev.vars` and fill in the keys you have. `.dev.vars` is gitignored.
 - Production: `npx wrangler secret put POE_API_KEY` (repeat per key).
@@ -256,7 +256,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `google` | `google` or `poe` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
-| `MINIMAX_CHANNEL` | `minimax` | `minimax` (the owner's token plan) or `opencode` (the shared Go subscription) |
+| `MINIMAX_CHANNEL` | `minimax,opencode` | A chain, first usable channel first: the owner's token plan, then the shared Go subscription. `minimax` or `opencode` pins one |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4.1-flash` | Reads diagrams (undocumented) and beat `deepseek-v4-flash-vision-exp` on the fixture; the latter is the documented vision model and the fallback if this regresses |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
@@ -285,16 +285,23 @@ curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
 
 ### Switching MiniMax between its own key and OpenCode Go
 
-```
-MINIMAX_CHANNEL=minimax     # default: the owner's MiniMax token plan
-MINIMAX_API_KEY=<your MiniMax key>
-```
+MiniMax runs on a **channel chain**: the owner's MiniMax token plan first, OpenCode Go second.
 
 ```
-MINIMAX_CHANNEL=opencode    # the shared OpenCode Go subscription instead
+MINIMAX_CHANNEL=minimax,opencode   # default: plan first, Go when the plan refuses
+MINIMAX_CHANNEL=minimax            # the plan only - fail if it refuses
+MINIMAX_CHANNEL=opencode           # Go only - the plan is never touched
 ```
 
-Same model, same dialect; the var picks which monthly quota to spend. `minimax` is the default because that account is a token plan rather than per-call billing, so it costs nothing extra per solve and leaves the Go quota for the five providers with nowhere else to go. `opencode` is the fallback if the MiniMax plan runs out or its key is lost. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
+With the default, nothing has to change when the plan ends. The Worker moves a solve down the chain when MiniMax **refuses the account** — HTTP 401/402/403, or a message about balance, quota, credit, billing, an expired plan or an invalid key, including MiniMax's own codes 1004 / 1008 / 2049 and its HTTP-200 `base_resp` envelope — or when it **stops answering** after its transient retry. The tab says which, e.g. "MiniMax (via MiniMax) refused the account (HTTP 401: login fail…) — the plan may have ended. Trying MiniMax (via OpenCode Go)…". The move costs about a second per solve. To stop paying that second once the plan is gone, delete the key — the chain then skips straight to OpenCode Go without a redeploy:
+
+```bash
+npx wrangler secret delete MINIMAX_API_KEY
+```
+
+A channel is a different account and endpoint, so a move starts the new route fresh: capabilities, effort band and retry budgets are renegotiated, and only the safety timeout keeps running. An explicit single channel is respected — `minimax` alone fails with MiniMax's message rather than quietly spending the Go subscription. Any provider's channel var may be a chain; only MiniMax uses one today. Verified against the real APIs on 23 September 2026: a rejected key moved the solve to OpenCode Go 1 s in and it finished correctly; a removed key skipped MiniMax entirely; a `base_resp` 1008 "insufficient balance" reply (from a stand-in server) moved it as well; `minimax` alone failed with the 401; `opencode` alone never called MiniMax.
+
+Both channels bill as monthly subscriptions the owner already pays for, so the chain is about which quota is spent, not about per-call cost. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
 
 ### Switching Gemini to a Google key
 

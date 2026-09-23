@@ -23,11 +23,13 @@
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
     "MIMO_CHANNEL": "opencode",
-    // Both are monthly subscriptions the owner already pays for, so this
-    // picks which quota to spend: "minimax" uses MINIMAX_API_KEY on their
-    // MiniMax token plan and leaves the Go quota for everything else;
-    // "opencode" puts MiniMax back on the shared Go subscription.
-    "MINIMAX_CHANNEL": "minimax",
+    // An ordered chain: MiniMax's own API on the owner's token plan first
+    // (MINIMAX_API_KEY), OpenCode Go second. When MiniMax refuses the
+    // account - the plan ended, the key was revoked - or stops answering,
+    // the Worker moves that solve to OpenCode Go by itself and says so.
+    // Removing the MINIMAX_API_KEY secret skips straight to OpenCode Go.
+    // To pin one: "minimax" (plan only) or "opencode" (Go only).
+    "MINIMAX_CHANNEL": "minimax,opencode",
     "MUSE_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the

@@ -144,6 +144,8 @@ export type ProviderStatus = {
   maxEffort?: string;
   /** Present when the route switches to these models, in order, if `model` fails. */
   fallbackModels?: string[];
+  /** Present when the provider moves to these channels, in order, if `channel` refuses or fails. */
+  fallbackChannels?: ChannelKey[];
 };
 
 export type HealthResponse = {

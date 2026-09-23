@@ -267,10 +267,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     },
   },
   minimax: {
-    // MiniMax's own API, on the owner's MINIMAX_API_KEY - the default since
-    // 23 September 2026. Their MiniMax account is a monthly token plan, not
-    // per-call billing, so this costs nothing extra per solve and leaves the
-    // OpenCode Go quota for the five providers that have nowhere else to go.
+    // MiniMax's own API, on the owner's MINIMAX_API_KEY - first in the chain
+    // since 23 September 2026. Their MiniMax account is a monthly token plan,
+    // not per-call billing, so this costs nothing extra per solve and leaves
+    // the OpenCode Go quota for the five providers that have nowhere else to
+    // go. The plan ends in October 2026: MINIMAX_CHANNEL is the chain
+    // "minimax,opencode", so when MiniMax refuses the account the Worker
+    // moves the solve to OpenCode Go by itself.
     // The endpoint is plain OpenAI chat-completions and reads images, so no
     // separate dialect is needed - the anthropic-protocol route this provider
     // used until 19 September 2026 is not coming back. Same model either way,
@@ -387,6 +390,12 @@ export type Route = {
   maxEffort?: EffortKey;
   /** Overrides the default safety timeout in run.ts. */
   timeoutMs?: number;
+  /**
+   * Further usable channels for this provider, in order, from a chained
+   * channel var ("minimax,opencode"). Empty for a single channel and for a
+   * pinned route (the interpretation pass).
+   */
+  fallbackChannels: ChannelKey[];
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -403,18 +412,34 @@ function readVar(env: WorkerEnv, name: keyof WorkerEnv) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function channelFor(provider: ProviderKey, env: WorkerEnv) {
-  const requested = readVar(env, CHANNEL_VAR[provider]).toLowerCase();
-  if (!requested) {
-    return { channel: DEFAULT_CHANNEL[provider], problem: "" };
+/**
+ * The channels a provider may use, in order. A channel var may be a chain -
+ * "minimax,opencode" - and the Worker moves down it when a channel refuses
+ * the account or stops answering (see switchChannel in run.ts).
+ */
+function channelsFor(provider: ProviderKey, env: WorkerEnv) {
+  const requested = readVar(env, CHANNEL_VAR[provider])
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!requested.length) {
+    return { channels: [DEFAULT_CHANNEL[provider]], problem: "" };
   }
-  if (!isChannelKey(requested)) {
+  const unknown = requested.find((entry) => !isChannelKey(entry));
+  if (unknown) {
     return {
-      channel: DEFAULT_CHANNEL[provider],
-      problem: `${CHANNEL_VAR[provider]} is set to "${requested}", which is not a known channel.`,
+      channels: [DEFAULT_CHANNEL[provider]],
+      problem: `${CHANNEL_VAR[provider]} names "${unknown}", which is not a known channel.`,
     };
   }
-  return { channel: requested, problem: "" };
+  return { channels: [...new Set(requested)] as ChannelKey[], problem: "" };
+}
+
+/** Whether a channel can serve the provider right now: a route exists and its key is set. */
+function channelUsable(provider: ProviderKey, channel: ChannelKey, env: WorkerEnv) {
+  const spec = ROUTES[provider][channel];
+  return Boolean(spec && readVar(env, spec.keyVar));
 }
 
 /**
@@ -428,9 +453,15 @@ export function resolveRoute(
   env: WorkerEnv,
   override?: RouteOverride,
 ): Route {
-  const { channel, problem: channelProblem } = override?.channel
-    ? { channel: override.channel, problem: "" }
-    : channelFor(provider, env);
+  const { channels, problem: channelProblem } = override?.channel
+    ? { channels: [override.channel], problem: "" }
+    : channelsFor(provider, env);
+  // The first channel that can actually serve comes first, so removing a
+  // key (a plan that ended) moves the provider down its chain without a
+  // redeploy. With none usable, the first one is kept for its error message.
+  const usable = channels.filter((candidate) => channelUsable(provider, candidate, env));
+  const channel = usable[0] ?? channels[0];
+  const fallbackChannels = usable.slice(1);
   const spec = ROUTES[provider][channel];
 
   if (!spec) {
@@ -441,6 +472,7 @@ export function resolveRoute(
       dialect: "responses",
       model: "",
       fallbackModels: [],
+      fallbackChannels: [],
       endpoint: "",
       apiKey: "",
       effort: { kind: "none" },
@@ -470,6 +502,7 @@ export function resolveRoute(
     dialect: spec.dialect,
     model,
     fallbackModels,
+    fallbackChannels,
     endpoint:
       (readVar(env, spec.urlVar) || spec.defaultUrl).replace(/\/$/, "") + (spec.pathSuffix || ""),
     apiKey,
@@ -550,6 +583,7 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     ...(route.minEffort ? { minEffort: route.minEffort } : {}),
     ...(route.maxEffort ? { maxEffort: route.maxEffort } : {}),
     ...(route.fallbackModels.length ? { fallbackModels: route.fallbackModels } : {}),
+    ...(route.fallbackChannels.length ? { fallbackChannels: route.fallbackChannels } : {}),
   };
 }
 
@@ -1039,6 +1073,16 @@ export function extractPayloadError(dialect: Dialect, payload: Record<string, un
   if (error) {
     const message = readString(error, "message");
     if (message) return message;
+  }
+
+  // MiniMax's own envelope: HTTP 200 with {"base_resp": {"status_code": N,
+  // "status_msg": "..."}} and no choices when the call was refused. The code
+  // is kept in the text, "(1008)", so an ended plan reads as an account
+  // refusal (ACCOUNT_WORDS in run.ts) and moves down the channel chain.
+  const baseResp = asRecord(payload.base_resp);
+  const baseCode = baseResp?.status_code;
+  if (typeof baseCode === "number" && baseCode !== 0) {
+    return `${readString(baseResp, "status_msg") || "The provider refused the request"} (${baseCode})`;
   }
 
   if (dialect === "responses") {
