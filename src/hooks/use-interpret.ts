@@ -11,11 +11,14 @@ import {
 import { PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
 import type { InterpretRequestBody } from "../../shared/stream-protocol";
 import {
-  fetchSseStream,
+  cancelJob,
   isConnectionLost,
+  openTaskStream,
   readSseEvents,
   StreamInterruptedError,
+  takeJobEvent,
   withResume,
+  type JobHandle,
 } from "@/lib/sse";
 
 export type InterpretPipeline =
@@ -35,16 +38,21 @@ export type InterpretConfig = {
 export function useInterpret() {
   const [pipeline, setPipeline] = useState<InterpretPipeline>({ status: "idle" });
   const abortRef = useRef<AbortController | null>(null);
+  /** The step running now, so Cancel can stop its model call on the server. */
+  const jobRef = useRef<JobHandle | null>(null);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    if (jobRef.current) cancelJob(jobRef.current);
+    jobRef.current = null;
     setPipeline({ status: "idle" });
   }, []);
 
   const start = useCallback(
     async (config: InterpretConfig, images: string[], notes: string) => {
       abortRef.current?.abort();
+      if (jobRef.current) cancelJob(jobRef.current);
       const abort = new AbortController();
       abortRef.current = abort;
 
@@ -52,17 +60,22 @@ export function useInterpret() {
       const labelB = PROVIDER_LABELS[config.interpreterB];
       const labelV = PROVIDER_LABELS[config.verifier];
 
-      // Each step restarts on its own if its connection drops (a phone
-      // backgrounding the browser, usually), so a reading that already
-      // arrived is never thrown away with it.
+      // Each step runs in a server-side job of its own. If its connection
+      // drops (a phone backgrounding the browser, usually) it re-attaches to
+      // that job when the page is visible again, so neither the step in
+      // progress nor a reading that already arrived is thrown away. The pass
+      // is not recovered after a full page reload - it pauses for review,
+      // which only makes sense in the page that ran it.
       const step = (
         stage: string,
         provider: ProviderKey,
         body: InterpretRequestBody,
       ) => {
         setPipeline({ status: "running", stage });
+        const handle: JobHandle = { id: null };
+        jobRef.current = handle;
         return withResume(
-          () => runInterpretRequest(provider, body, abort.signal),
+          () => runInterpretRequest(provider, body, abort.signal, handle),
           abort.signal,
           (message) => setPipeline({ status: "running", stage: `${stage} ${message}` }),
         );
@@ -124,10 +137,12 @@ async function runInterpretRequest(
   provider: ProviderKey,
   body: InterpretRequestBody,
   signal: AbortSignal,
+  handle: JobHandle,
 ): Promise<InterpretationResult> {
-  const stream = await fetchSseStream(`/api/interpret/${provider}`, body, signal);
+  const stream = await openTaskStream(handle, `/api/interpret/${provider}`, body, signal);
 
   for await (const event of readSseEvents(stream)) {
+    if (takeJobEvent(handle, event)) continue;
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(event.data) as Record<string, unknown>;

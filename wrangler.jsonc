@@ -91,6 +91,15 @@
     // idle cut. Set it back to "deepseek" if the account ever drops to free.
     "NO_STREAM": ""
   },
+  // Every solve, interpretation step and cross-check runs in a TaskJob of
+  // its own (worker/jobs.ts), so it finishes and keeps its answer for 24
+  // hours even when the page that asked has gone away (a phone putting the
+  // browser in the background). SQLite-backed: the class stores only the
+  // task's final event, never the uploaded images.
+  "durable_objects": {
+    "bindings": [{ "name": "JOBS", "class_name": "TaskJob" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskJob"] }],
   "observability": {
     "enabled": true
   }

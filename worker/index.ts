@@ -1,42 +1,15 @@
-import { Hono } from "hono";
-import {
-  interpretationSchema,
-  parseInterpretation,
-} from "../shared/interpretation";
-import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
-import {
-  buildInterpretPrompt,
-  buildJudgePrompt,
-  buildTutorPrompt,
-  buildVerifyPrompt,
-  INTERPRET_INSTRUCTIONS,
-  isEffortKey,
-  JUDGE_INSTRUCTIONS,
-  SOLVE_INSTRUCTIONS,
-  type EffortKey,
-} from "../shared/prompt";
-import {
-  isProviderKey,
-  PROVIDER_KEYS,
-  type HealthResponse,
-  type ProviderKey,
-  type ProviderStatus,
-} from "../shared/providers";
-import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
-import {
-  DATA_URL_PATTERN,
-  MAX_BODY_BYTES,
-  MAX_IMAGES,
-  MAX_INTERPRETATION_LENGTH,
-  MAX_NOTES_LENGTH,
-  MAX_REFERENCE_IMAGES,
-  MAX_REFERENCE_TEXT,
-  MAX_SOLUTION_TEXT,
-} from "../shared/stream-protocol";
-import { interpretOverride, routeStatus, type WorkerEnv } from "./channels";
-import { runTask, type RunTaskParams } from "./run";
+import { Hono, type Context } from "hono";
+import { PROVIDER_KEYS, type HealthResponse, type ProviderKey, type ProviderStatus } from "../shared/providers";
+import { MAX_BODY_BYTES } from "../shared/stream-protocol";
+import { routeStatus, type WorkerEnv } from "./channels";
+import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
+import { buildTask, type TaskKind } from "./tasks";
+
+export { TaskJob } from "./jobs";
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
+
+type AppContext = Context<{ Bindings: WorkerEnv }>;
 
 /**
  * Reads a request body as text, stopping as soon as it exceeds `limit`.
@@ -65,24 +38,14 @@ async function readBoundedBody(request: Request, limit: number): Promise<string 
   return text + decoder.decode();
 }
 
-type BodyResult = { body: Record<string, unknown> } | { response: Response };
+type BodyResult = { body: Record<string, unknown>; raw: string } | { response: Response };
 
-/** Shared preamble for both POST endpoints: provider, size cap, JSON parse. */
-async function readRequest(
-  c: {
-    req: { param: (name: string) => string; header: (name: string) => string | undefined; raw: Request };
-    json: (payload: unknown, status?: 400 | 404 | 413) => Response;
-  },
-): Promise<{ provider: ProviderKey } & BodyResult> {
-  const provider = c.req.param("provider");
-  if (!isProviderKey(provider)) {
-    return { provider: "chatgpt", response: c.json({ error: "Unknown provider." }, 404) };
-  }
-
+/** Shared preamble for every POST task endpoint: size cap and JSON parse. */
+async function readRequest(c: AppContext): Promise<BodyResult> {
   // Cheap early reject when the client declares an oversized body...
   const contentLength = Number(c.req.header("content-length") || 0);
   if (contentLength > MAX_BODY_BYTES) {
-    return { provider, response: c.json({ error: "Request body is too large." }, 413) };
+    return { response: c.json({ error: "Request body is too large." }, 413) };
   }
 
   // ...and a real one for when it does not. A chunked request carries no
@@ -90,56 +53,51 @@ async function readRequest(
   // through to the JSON parser.
   const raw = await readBoundedBody(c.req.raw, MAX_BODY_BYTES);
   if (raw === null) {
-    return { provider, response: c.json({ error: "Request body is too large." }, 413) };
+    return { response: c.json({ error: "Request body is too large." }, 413) };
   }
 
   try {
-    return { provider, body: JSON.parse(raw) as Record<string, unknown> };
+    return { body: JSON.parse(raw) as Record<string, unknown>, raw };
   } catch {
-    return { provider, response: c.json({ error: "Request body must be JSON." }, 400) };
+    return { response: c.json({ error: "Request body must be JSON." }, 400) };
   }
 }
 
-type ImagesResult = { images: string[] } | { error: string };
-
-function readImages(value: unknown, max: number, label: string): ImagesResult {
-  const images = Array.isArray(value) ? value : [];
-  if (images.length > max) {
-    return { error: `Provide at most ${max} ${label}.` };
-  }
-  for (const image of images) {
-    if (typeof image !== "string" || !DATA_URL_PATTERN.test(image)) {
-      return { error: `${label} must be JPEG/PNG/WebP/GIF data URLs.` };
-    }
-  }
-  return { images: images as string[] };
-}
-
-function readText(value: unknown, limit: number) {
-  return typeof value === "string" ? value.slice(0, limit).trim() : "";
-}
-
-function startSse(
-  c: { executionCtx: { waitUntil: (promise: Promise<unknown>) => void } },
-  params: RunTaskParams,
-) {
+/** Runs a task inside this Worker invocation; it dies with the client. */
+function startInlineSse(c: AppContext, params: RunTaskParams) {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-
   // Runs beyond this handler's return; the response stream stays open while
   // the provider call is in flight.
-  c.executionCtx.waitUntil(runTask(writer, params));
-
-  return new Response(readable, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  c.executionCtx.waitUntil(runTask(streamSink(writable.getWriter()), params));
+  return new Response(readable, { status: 200, headers: SSE_HEADERS });
 }
+
+/**
+ * The one handler behind /api/solve, /api/interpret and /api/judge. The task
+ * is built here first so a bad request gets its 400 at once. Then it runs in
+ * a TaskJob Durable Object of its own, which carries on when the page goes
+ * away and keeps the answer for GET /api/jobs/:id; the job's first event
+ * tells the page its id. Without the JOBS binding it runs inline, as it did
+ * before jobs existed.
+ */
+async function handleTask(c: AppContext, kind: TaskKind) {
+  const provider = c.req.param("provider") ?? "";
+  const parsed = await readRequest(c);
+  if ("response" in parsed) return parsed.response;
+
+  const built = buildTask(kind, provider, parsed.body, c.env);
+  if ("error" in built) return c.json({ error: built.error }, built.status);
+
+  const jobs = c.env.JOBS;
+  if (!jobs) return startInlineSse(c, built.params);
+
+  const jobId = crypto.randomUUID();
+  const job = jobs.get(jobs.idFromName(jobId));
+  const query = new URLSearchParams({ jobId, kind, provider });
+  return job.fetch(`https://job/run?${query}`, { method: "POST", body: parsed.raw });
+}
+
+const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 app.get("/api/health", (c) => {
   const providers = {} as Record<ProviderKey, ProviderStatus>;
@@ -149,170 +107,28 @@ app.get("/api/health", (c) => {
   return c.json<HealthResponse>({ providers });
 });
 
-app.post("/api/solve/:provider", async (c) => {
-  const parsed = await readRequest(c);
-  if ("response" in parsed) return parsed.response;
-  const { provider, body } = parsed;
+app.post("/api/solve/:provider", (c) => handleTask(c, "solve"));
+app.post("/api/interpret/:provider", (c) => handleTask(c, "interpret"));
+app.post("/api/judge/:provider", (c) => handleTask(c, "judge"));
 
-  const assignment = readImages(body.images, MAX_IMAGES, "Images");
-  if ("error" in assignment) return c.json({ error: assignment.error }, 400);
-  if (assignment.images.length < 1) {
-    return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
+// Re-attach to a job after the connection dropped: the stored result, or
+// the rest of a run still in progress. Only well-formed ids reach the
+// namespace, so a probe with a made-up id costs nothing.
+app.get("/api/jobs/:id", (c) => {
+  const id = c.req.param("id");
+  const jobs = c.env.JOBS;
+  if (!jobs || !JOB_ID_PATTERN.test(id)) {
+    return c.json({ error: "This result is no longer available." }, 404);
   }
-
-  const reference = readImages(
-    body.referenceImages,
-    MAX_REFERENCE_IMAGES,
-    "Lecture-notes images",
-  );
-  if ("error" in reference) return c.json({ error: reference.error }, 400);
-
-  const notes = readText(body.notes, MAX_NOTES_LENGTH);
-  const effort: EffortKey =
-    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
-  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
-  const referenceText = readText(body.referenceText, MAX_REFERENCE_TEXT);
-
-  return startSse(c, {
-    provider,
-    env: c.env,
-    effort,
-    task: {
-      session: crypto.randomUUID(),
-      prompt: ({ enforceShape, effort: effective }) =>
-        buildTutorPrompt(notes, effective, {
-          enforceShape,
-          interpretation: interpretation || undefined,
-          referenceText: referenceText || undefined,
-          hasReferenceImages: reference.images.length > 0,
-        }),
-      instructions: SOLVE_INSTRUCTIONS,
-      schemaName: "civil_solution",
-      schema: solutionSchema as unknown as Record<string, unknown>,
-      images: assignment.images,
-      referenceImages: reference.images,
-    },
-    finalize: (rawText, { lastAttempt }) => ({
-      solution: finalizeProviderArtifact(provider, rawText, { allowIncomplete: lastAttempt }),
-    }),
-  });
+  return jobs.get(jobs.idFromName(id)).fetch("https://job/attach");
 });
 
-app.post("/api/interpret/:provider", async (c) => {
-  const parsed = await readRequest(c);
-  if ("response" in parsed) return parsed.response;
-  const { provider, body } = parsed;
-
-  const assignment = readImages(body.images, MAX_IMAGES, "Images");
-  if ("error" in assignment) return c.json({ error: assignment.error }, 400);
-  if (assignment.images.length < 1) {
-    return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
-  }
-
-  const notes = readText(body.notes, MAX_NOTES_LENGTH);
-  const mode = body.mode === "verify" ? "verify" : "interpret";
-  const requestedEffort: EffortKey | null =
-    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : null;
-
-  let buildPrompt: (options: { enforceShape: boolean }) => string;
-  if (mode === "verify") {
-    const interpretations = Array.isArray(body.interpretations) ? body.interpretations : [];
-    const [a, b] = interpretations;
-    if (typeof a !== "string" || typeof b !== "string" || !a.trim() || !b.trim()) {
-      return c.json({ error: "Verify mode needs two interpretations." }, 400);
-    }
-    buildPrompt = (options) =>
-      buildVerifyPrompt(
-        notes,
-        a.slice(0, MAX_INTERPRETATION_LENGTH),
-        b.slice(0, MAX_INTERPRETATION_LENGTH),
-        options,
-      );
-  } else {
-    buildPrompt = (options) => buildInterpretPrompt(notes, options);
-  }
-
-  return startSse(c, {
-    provider,
-    env: c.env,
-    // The interpretation pass pins some providers to routes chosen for it (see interpretOverride).
-    routeOverride: interpretOverride(provider, c.env),
-    // Readers default to "medium" - they transcribe rather than derive, but
-    // a whole exam paper is a lot of diagram to read carefully - and the user
-    // can change it. The judge defaults to the strongest level the route
-    // supports: it adjudicates two readings against the image, and a misread
-    // there poisons every solve that follows. The form sends the readers'
-    // level explicitly; this default is for callers that do not.
-    effort: requestedEffort ?? (mode === "verify" ? "max" : "medium"),
-    task: {
-      session: crypto.randomUUID(),
-      prompt: buildPrompt,
-      instructions: INTERPRET_INSTRUCTIONS,
-      schemaName: "civil_interpretation",
-      schema: interpretationSchema as unknown as Record<string, unknown>,
-      images: assignment.images,
-    },
-    finalize: (rawText, { lastAttempt }) => ({
-      interpretation: parseInterpretation(rawText, provider, { allowIncomplete: lastAttempt }),
-    }),
-  });
-});
-
-// The answer cross-check: grades the selected solvers' solutions against the
-// images. Runs on the provider's normal solve route - no override - so the
-// judge is whatever the user picked, at the effort the most reliable solves
-// used.
-app.post("/api/judge/:provider", async (c) => {
-  const parsed = await readRequest(c);
-  if ("response" in parsed) return parsed.response;
-  const { provider, body } = parsed;
-
-  const assignment = readImages(body.images, MAX_IMAGES, "Images");
-  if ("error" in assignment) return c.json({ error: assignment.error }, 400);
-  if (assignment.images.length < 1) {
-    return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
-  }
-
-  const candidates = Array.isArray(body.solutions) ? body.solutions : [];
-  if (
-    candidates.length < 2 ||
-    candidates.length > MAX_JUDGED_SOLUTIONS ||
-    candidates.some((entry) => typeof entry !== "string" || !entry.trim())
-  ) {
-    return c.json(
-      { error: `The cross-check needs between 2 and ${MAX_JUDGED_SOLUTIONS} solutions.` },
-      400,
-    );
-  }
-  const solutions = (candidates as string[]).map((entry) => entry.slice(0, MAX_SOLUTION_TEXT));
-
-  const notes = readText(body.notes, MAX_NOTES_LENGTH);
-  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
-  const effort: EffortKey =
-    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "high";
-
-  return startSse(c, {
-    provider,
-    env: c.env,
-    effort,
-    task: {
-      session: crypto.randomUUID(),
-      prompt: ({ enforceShape }) =>
-        buildJudgePrompt(notes, solutions, {
-          enforceShape,
-          interpretation: interpretation || undefined,
-        }),
-      instructions: JUDGE_INSTRUCTIONS,
-      schemaName: "civil_judgement",
-      schema: judgementSchema as unknown as Record<string, unknown>,
-      images: assignment.images,
-    },
-    finalize: (rawText, { lastAttempt }) => ({
-      judgement: parseJudgement(rawText, provider, solutions.length, {
-        allowIncomplete: lastAttempt,
-      }),
-    }),
-  });
+// Stop pressed: end the job's model call instead of leaving it running.
+app.delete("/api/jobs/:id", (c) => {
+  const id = c.req.param("id");
+  const jobs = c.env.JOBS;
+  if (!jobs || !JOB_ID_PATTERN.test(id)) return c.body(null, 204);
+  return jobs.get(jobs.idFromName(id)).fetch("https://job/cancel", { method: "DELETE" });
 });
 
 export default app;

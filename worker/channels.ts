@@ -23,6 +23,14 @@ import {
 export type Dialect = "responses" | "chat-completions" | "gemini";
 
 export type WorkerEnv = {
+  // --- Bindings -----------------------------------------------------------
+  /**
+   * TaskJob Durable Objects (worker/jobs.ts): each task runs in one, so it
+   * outlives a page that went away and its answer can be fetched again.
+   * Optional - without it tasks run inline, as they did before.
+   */
+  JOBS?: DurableObjectNamespace;
+
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
   MINIMAX_API_KEY?: string;
