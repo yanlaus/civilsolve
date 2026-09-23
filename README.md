@@ -1,18 +1,19 @@
 # CivilSolve
 
-CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one AI provider, and receive a worked solution. Seven providers are available; **one runs per solve** (see the CPU note below for why):
+CivilSolve solves civil engineering assignments. Users upload question images or PDFs, optionally add instructions, choose a thinking-effort level and one or more AI providers, and receive a worked solution per provider. Eight providers are available; the selected ones **solve at the same time**:
 
 | Provider | Default channel | Default model | Default choice |
 |---|---|---|---|
-| ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | **selected** |
-| Gemini | Poe (switchable to Google) | `gemini-3.1-pro` | |
-| DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | |
-| Grok | OpenCode Go | `grok-4.6` | |
-| MiMo | OpenCode Go | `mimo-v2.5` | badged **Free** |
-| Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | badged **Free**; needs a workspace opt-in |
-| Claude | Poe | `claude-opus-4.8` | listed last; badged **Uses more credit** |
+| ChatGPT | OpenCode Go | `gpt-5.6-luna`, high or max thinking | default judge for both optional passes |
+| Gemini | Google (switchable to Poe) | `gemini-3.8-flash`, falling back to `gemini-3.5-flash` | **selected**; free-tier key |
+| DeepSeek | OpenCode Go | `deepseek-v4.1-flash` | badged **Less credit** |
+| Grok | OpenCode Go | `grok-4.6` | badged **More credit** |
+| MiMo | OpenCode Go | `mimo-v2.6-flash` | badged **China model** |
+| MiniMax | MiniMax, then OpenCode Go (a channel chain) | `MiniMax-M3`, 20-minute timeout | badged **China model** |
+| Muse Spark | OpenCode Go | `muse-spark-1.3-contributor` | **selected**; badged **Less credit**; needs a workspace opt-in |
+| Claude | Poe | `claude-opus-4.8` | listed last; badged **More credit** |
 
-The picker shows this order with an icon per provider and a cost badge where it matters. MiMo and Muse Spark are OpenCode Zen's free tiers (`FREE_PROVIDERS` in `shared/providers.ts`) — free because they collect what is sent to them, assignment images included, for training; Muse Spark's "contributor" tier will not answer at all until the OpenCode workspace has opted in to that. Claude runs as Opus on Poe, the priciest bot there by a wide margin, so its card says "Uses more credit" (`HIGHER_CREDIT_PROVIDERS`) and sits at the end. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The provider picker is a single choice — one model per solve — because on the free plan each is a per-token stream that draws CPU for its whole duration, and running several at once exhausts the budget and gets a stream killed. The optional interpretation pass is the one exception: it fires two readers (ChatGPT and Gemini) then a judge (Claude Opus) — three calls in sequence — so it is heavier and off by default.
+Each card shows three things — brand, the account it runs on, and the model id — plus a cost badge where it matters. Grok and Claude are badged "More credit" (`HIGHER_CREDIT_PROVIDERS` in `shared/providers.ts`): Claude runs as Opus on Poe, the priciest bot there by a wide margin, and Grok is the heaviest draw on the OpenCode Go plan, so Claude sits at the end. DeepSeek and Muse Spark are badged "Less credit" (`LOWER_CREDIT_PROVIDERS`): DeepSeek Flash is the lightest draw on that plan, and Muse Spark is one of OpenCode Zen's free tiers — free because it collects what is sent to it, assignment images included, for training, and its "contributor" tier will not answer at all until the OpenCode workspace has opted in to that. MiMo is the other free tier and carries no cost badge. MiMo and MiniMax are badged "China model" (`CHINA_PROVIDERS`) as a provenance label, not a quality or cost one. Effort floors and model chains are not on the card: the floor is shown under Thinking Effort, and a chain announces itself in the status line only when it actually switches. Every one of these reads images; that is a hard requirement and was verified per model, not taken from a spec sheet. Kimi, MiniMax and Qwen were offered until September 2026 and removed after two full runs of a past-paper momentum fixture: Kimi 0/4, Qwen 0/8, MiniMax 1/4 correct (see `AGENTS.md`). Their routes and the Anthropic-protocol dialect they used are in git history. The picker is multi-select; every ticked provider solves at once and gets its own tab (Gemini and Muse Spark by default; the picker was single-choice on the free Workers plan, where concurrent per-token streams got killed). One thinking level serves them all, `high` by default, and the highest floor among the ticked providers rules (tick ChatGPT and everything below `high` is disabled). Two optional passes sit on top, both off by default: the interpretation pass fires two readers (Gemini and Muse Spark) then a reconciler (ChatGPT) — three calls in sequence before the first solve; the answer cross-check sends every finished solution to a judge (ChatGPT) that grades them against the images (see `POST /api/judge`).
 
 Each result includes an interpreted problem statement, assumptions, a step-by-step solution, and a final answer, with in-browser KaTeX math rendering. Solutions can be exported as PDF (browser print), LaTeX source (`.tex`), or opened directly in Overleaf.
 
@@ -30,7 +31,7 @@ The solve flow is **stateless streaming** — no database, no object storage, no
 3. Each Worker invocation resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back over Server-Sent Events.
 4. The provider's tab renders progressively — spinner, then live progress, then the finished solution.
 
-Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a fully free, zero-storage deployment).
+Nothing is stored server-side. Closing the tab abandons an in-flight solve (accepted trade-off for a zero-storage deployment). Losing the connection is different: on a phone, putting the browser in the background makes iOS cut the stream, and the client then waits for the page to be visible again and **restarts** that provider (`withResume` in `src/lib/sse.ts`, up to twice), so the result still arrives - after a fresh solve, since there is nothing server side to resume from. While work is running the page also holds a screen wake lock, so a phone left on the desk does not lock itself mid-solve.
 
 ### Providers and channels
 
@@ -39,10 +40,11 @@ A **provider** is what the user picks in the UI. A **channel** is the upstream a
 ```
 chatgpt  ──> opencode | poe     (CHATGPT_CHANNEL)
 claude   ──> poe
-gemini   ──> poe | google       (GEMINI_CHANNEL)
+gemini   ──> google | poe       (GEMINI_CHANNEL)
 deepseek ──> opencode
 grok     ──> opencode
 mimo     ──> opencode
+minimax  ──> minimax → opencode   (MINIMAX_CHANNEL, a chain: see below)
 muse     ──> opencode
 ```
 
@@ -51,14 +53,14 @@ Channels speak three different API dialects, all handled in `worker/channels.ts`
 | Dialect | Used by | Endpoint shape | Reasoning parameter |
 |---|---|---|---|
 | `responses` | Poe; OpenCode Go (GPT Luna, Grok, Muse Spark) | `POST /v1/responses` | `reasoning: { effort }` (enum) |
-| `chat-completions` | OpenCode Go (DeepSeek, MiMo) | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
+| `chat-completions` | OpenCode Go (DeepSeek, MiMo, MiniMax); MiniMax's own API | OpenAI-compatible chat completions | `reasoning_effort` (enum) |
 | `gemini` | Google | `:streamGenerateContent?alt=sse` | `generationConfig.thinkingConfig.thinkingBudget` (tokens) |
 
 #### OpenCode Go
 
 One key and one base URL (`https://opencode.ai/zen/go/v1`) front several protocols, and the gateway fixes which protocol each model speaks. Every request must carry an `x-opencode-session` header (a stable id per conversation; the Worker sends a fresh UUID per solve) or the gateway refuses it with `MissingSessionID`. Two model families need a one-time opt-in in the OpenCode workspace before the key can use them: models hosted only in China (`deepseek-v4-pro`) and the data-collecting `muse-spark-*` contributor models.
 
-A route can pin its reasoning level with `forceEffort`, or put a floor under it with `minEffort`. One route uses a floor. ChatGPT: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised to `high`. The upload form disables the levels below a floor and labels the provider.
+A route can pin its reasoning level with `forceEffort`, or bound it with `minEffort` and `maxEffort`. Two routes use a bound. ChatGPT floors at `high`: `gpt-5.6-luna` is offered at `high` or `max` only — those two picks are sent as-is (`max` maps to `reasoning.effort: "xhigh"`, which the gateway accepts) and anything lower is raised. No route sets a ceiling today: MiniMax had one at `low` for a day, and it was replaced by a longer timeout (below) because `reasoning_effort` does not actually shorten that model's thinking — measured at every level on both of its routes, with no monotonic relationship. `clampEffort` in `worker/run.ts` applies whichever bounds exist; the upload form disables the levels outside the band and names the provider that set it. One level serves every selected solver, so a floor above a ceiling would leave no valid level — the form blocks such a combination instead of picking a side.
 
 #### Getting structured output out of each dialect
 
@@ -106,24 +108,25 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret
+│   ├── index.ts            # Hono app: /api/health, /api/solve, /api/interpret, /api/judge
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
 │   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE output
 ├── shared/                 # Pure logic shared by worker and client
 │   ├── providers.ts        # Provider + channel registry, health payload types
 │   ├── solution.ts         # Schema, parsing, repair pipeline, LaTeX helpers
 │   ├── interpretation.ts   # Interpret/verify schema and parsing
-│   ├── prompt.ts           # Solve + interpret/verify prompts, shape contract
+│   ├── judgement.ts        # Answer cross-check (judge) schema and parsing
+│   ├── prompt.ts           # Solve, interpret/verify and judge prompts, shape contract
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
 │   ├── pages/civil-answer-app.tsx      # Page composition
 │   ├── components/solve/
-│   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort
+│   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort, both optional passes
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
-│   │   ├── solution-panel.tsx          # Tabs, streaming states, exports (lazy)
+│   │   ├── solution-panel.tsx          # Tabs, streaming states, verdict card, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
 │   ├── hooks/
-│   │   ├── use-solve.ts                # Per-provider SSE state machine
+│   │   ├── use-solve.ts                # Per-provider SSE state machine, solvers -> judge
 │   │   └── use-interpret.ts            # interpret -> verify -> review
 │   └── lib/
 │       ├── sse.ts                      # Shared SSE reader over fetch
@@ -148,7 +151,7 @@ Reports which providers are usable, without exposing any secret value:
   "providers": {
     "chatgpt":  { "channel": "opencode", "model": "gpt-5.6-luna",                 "configured": true, "minEffort": "high" },
     "claude":   { "channel": "poe",      "model": "claude-opus-4.8",              "configured": true },
-    "gemini":   { "channel": "poe",      "model": "gemini-3.1-pro",               "configured": true },
+    "gemini":   { "channel": "google",   "model": "gemini-3.8-flash",             "configured": true, "fallbackModels": ["gemini-3.5-flash"] },
     "deepseek": { "channel": "opencode", "model": "deepseek-v4.1-flash",          "configured": true },
     "grok":     { "channel": "opencode", "model": "grok-4.6",                     "configured": true },
     "mimo":     { "channel": "opencode", "model": "mimo-v2.5",                    "configured": true },
@@ -165,7 +168,34 @@ Optional pre-pass that reads the question without solving it. Body: `{ mode: "in
 
 The browser drives it as: two providers run `interpret` in parallel, a third runs `verify` over both readings, and the result pauses for the user to edit before any solving starts. The confirmed text is then sent to `/api/solve` as `interpretation`, where the prompt marks it authoritative over the raw images.
 
-Off by default — it costs three model calls and delays the first solution. It runs **sequentially** (two concurrent streams is exactly the load the free plan cannot take): reader one, then reader two, then the judge. The default trio is pinned to **top-tier Poe models** — ChatGPT (`gpt-5.4-pro`) and Gemini (`gemini-3.1-pro`) as readers, **Claude Opus** (`claude-opus-4.8`) as judge — which are the cheap CPU routes and independent of the solve-time channel. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. Note `gpt-5.4-pro` reads correctly but the pro tier over-thinks a transcription task (~95 s vs ~5 s for Gemini); set `INTERPRET_CHATGPT_MODEL=gpt-5.4` for a much faster reader. A provider with no Poe route (DeepSeek, Grok) keeps its normal route if picked.
+Off by default — it costs three model calls and delays the first solution. It runs **sequentially**: reader one, then reader two, then the judge (written for the free plan, where two concurrent streams was exactly the load that tripped the CPU limit; the account is on Workers Paid since 22 September 2026, so the readers could now run together — see "Deployment"). The default trio is **Gemini** (Google, free-tier Flash) and **Muse Spark** (OpenCode Go) as readers, **ChatGPT** (`gpt-5.6-luna` on OpenCode Go) as judge. Readers run at a user-chosen effort (default `low`); the judge runs at `max`. ChatGPT, Gemini and Claude are pinned to routes chosen for the pass, independent of the solve-time channel (`interpretOverride`): ChatGPT to Luna — it read on Poe's `gpt-5.4-pro` until 22 September 2026, correct but slow (~95 s vs ~5 s for Gemini) and billed to Poe — and Claude to Opus on Poe. Measured with the new defaults: Gemini 39 s and Muse Spark 12 s to read, Luna 31 s to reconcile, with a 1,271-character discrepancies field. The Gemini reader uses a **model chain**, `gemini-3.8-flash,gemini-3.5-flash`: 3.8 first, 3.5 when 3.8 does not answer (see "Model chains" below). If `GOOGLE_API_KEY` is not configured it reads on Poe's `gemini-3.1-pro` instead, so the pass keeps working. A provider not pinned here (DeepSeek, Grok, MiMo, Muse Spark) keeps its normal route if picked.
+
+#### Model chains
+
+Any model var may hold a comma-separated chain, primary first. When an attempt fails in a way worth retrying — 503, 429, a dropped stream, a fragment the parser cannot use — the Worker moves to the next model in the chain instead of repeating the same one, after the same 3 s pause as a transient retry, and reports it as a `status` event ("gemini-3.8-flash did not answer. Trying gemini-3.5-flash..."). The fallback starts with a fresh transient budget. `/api/health` reports the chain as `fallbackModels`, and the picker shows it on the card. Measured on Google the day this was added: `gemini-3.8-flash` closed the socket on a 190 KB request four times out of six and once answered with empty fields; `gemini-3.5-flash` behind it was 4/4.
+
+### `POST /api/judge/:provider`
+
+Optional post-pass, the **answer cross-check**. Body: `{ images, notes, interpretation?, solutions: [text, text, ...], effort? }` with two to four solutions. Returns the same SSE shape with `done → { judgement }`: `{ correct: number[], final_answer, assessments: string[], comparison, confidence: "high" | "medium" | "low" }` — `correct` holds the zero-based indices of the solutions the judge found right (empty for none), `assessments` has one entry per solution in order. On the wire the judge answers with letters (`correct_solutions: ["A", "C"]`); the parser maps them to indices and, on schema-less rungs, reads prose ("A and C", "both", "none").
+
+The browser drives it as: every ticked provider runs `/api/solve` **at the same time**, then the judge gets every finished solution (flattened by `artifactToText`, capped at 24,000 characters each, working cut before the answer) with the same images and the confirmed interpretation if there was one. A solver that returned nothing is left out and named on the verdict card; fewer than two finished solutions and the check is skipped. The solutions are anonymised as Solution A, B, C, D in picker order — the judge never learns which provider wrote which, so it grades the work, not the brand — and the browser maps the letters back to provider names. The prompt tells the judge to re-derive the numbers from the images rather than read the solutions for consistency: every wrong answer seen on the fixtures was internally consistent (a jet velocity assumed instead of derived, a pressure force counted twice), and a consistency check would pass them all.
+
+The judge runs on the provider's normal solve route at `high` by default (the most reliable level in the B.8 matrix; `effort` in the body overrides). The default judge is ChatGPT (Luna); the user can pick any configured provider. Measured on the B.8 fixture with the first version (two solvers, Gemini judging): Muse ‖ DeepSeek at `low` finished together in 85 s (the slower of the two), Gemini judged in 43 s, verdict **A, high confidence**, with the correct −143 N / −178 N as the verified answer and B's error named to the term (a pressure force of 565.5 N where 282.7 N was right). The three-solver path (Muse, DeepSeek, Grok → Luna) was verified against a scripted upstream: `correct_solutions: ["A", "C"]` came back mapped to Muse and Grok with three assessments. Combining it with the interpretation pass gives the most robust run: a reviewed reading feeds every solver and the judge.
+
+#### How long a task may run
+
+The timeout is a **floor per route plus an allowance per page**, counted across every attempt so a retry cannot extend it.
+
+| Upload | Most providers | MiniMax |
+|---|---|---|
+| 1 question | 4.7 min | 20 min |
+| 3 pages | 8.7 min | 24 min |
+| 8 pages | 18.7 min | 34.7 min |
+| 16 pages (the cap) | 34.7 min | 45 min (the ceiling) |
+
+`SAFETY_TIMEOUT_MS` in `worker/run.ts` is the 280 s floor; a route overrides it with `timeoutMs`, and MiniMax sets 20 minutes on both of its routes — on the B.8 fixture it wrote 93–104k characters of reasoning and was still going at 280 s on three production runs out of three, and no effort level shortens that. `taskTimeoutMs` in `shared/stream-protocol.ts` then adds `PER_EXTRA_PAGE_MS` (2 min) for each assignment page after the first, because a whole exam paper is a dozen questions in one request rather than one long question, and both the reading and the writing grow with it. Lecture-notes pages count half: they are read once as reference and never solved. `MAX_TIMEOUT_MS` (45 min) caps the result so a wedged upstream cannot hold a tab open all day — the heartbeats would otherwise keep it alive indefinitely.
+
+Nothing in the platform forces these numbers. Cloudflare enforces no wall-clock limit on an HTTP request while the client stays connected, and time spent waiting on `fetch()` is not billed as CPU (a 77 s solve costs ~3 s of CPU). They encode how long a user should wait before being told nothing is coming; the 15 s heartbeats are what keep the stream itself alive. The 280 s value arrived with the original import and had no recorded reason until this was written.
 
 ### `POST /api/solve/:provider` (`chatgpt` | `claude` | `gemini` | `deepseek` | `grok` | `mimo` | `muse`)
 
@@ -198,7 +228,7 @@ event: error    data: {"message":"..."}
 
 Only **visible output** is forwarded as `delta`. Reasoning summaries, tool-call arguments, and Gemini "thought" parts are filtered out per dialect — concatenating them would corrupt the JSON the parser expects, and they get more frequent at higher effort levels.
 
-Set the `NO_STREAM` var (e.g. `"deepseek"`) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic.
+Set the `NO_STREAM` var (production: empty) to make those providers use a non-streamed upstream fetch, still delivered over the same SSE response with heartbeats. The client is agnostic. This is what kept DeepSeek alive on the **free** Workers plan: its `chat-completions` route streams every reasoning token as its own chunk, and the runtime bills each one — a streamed B.8 solve was killed at 2,010 ms of CPU with no answer written, where the same solve non-streamed costs 13 ms. It only suits a model that finishes inside OpenCode's ~100–120 s idle cut. Since the move to Workers Paid (22 September 2026, 30 s of CPU per invocation) it is cleared: the same streamed solve completed for 3,201 ms of CPU, shows progress, and is not exposed to the idle cut. Set it back to `deepseek` if the account ever returns to the free plan.
 
 ## Configuration
 
@@ -206,9 +236,10 @@ Set the `NO_STREAM` var (e.g. `"deepseek"`) to make those providers use a non-st
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark | <https://opencode.ai/go> |
+| `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Grok, MiMo, Muse Spark; MiniMax when `MINIMAX_CHANNEL=opencode` | <https://opencode.ai/go> |
 | `POE_API_KEY` | Claude, Gemini; ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `GOOGLE_API_KEY` | Gemini, only when `GEMINI_CHANNEL=google` | <https://aistudio.google.com/apikey> |
+| `MINIMAX_API_KEY` | MiniMax, first in its chain; delete it and MiniMax runs on OpenCode Go | <https://platform.minimaxi.com> |
 
 - Local: copy `.dev.vars.example` to `.dev.vars` and fill in the keys you have. `.dev.vars` is gitignored.
 - Production: `npx wrangler secret put POE_API_KEY` (repeat per key).
@@ -223,22 +254,26 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 |---|---|---|
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
-| `GEMINI_CHANNEL` | `poe` | `poe` or `google` |
+| `GEMINI_CHANNEL` | `google` | `google` or `poe` |
 | `DEEPSEEK_CHANNEL` / `GROK_CHANNEL` / `MIMO_CHANNEL` / `MUSE_CHANNEL` | `opencode` | Only OpenCode Go serves these |
+| `MINIMAX_CHANNEL` | `minimax,opencode` | A chain, first usable channel first: the owner's token plan, then the shared Go subscription. `minimax` or `opencode` pins one |
 | `OPENCODE_CHATGPT_MODEL` | `gpt-5.6-luna` | Floored at high effort; max is honoured |
 | `OPENCODE_DEEPSEEK_MODEL` | `deepseek-v4.1-flash` | Reads diagrams (undocumented) and beat `deepseek-v4-flash-vision-exp` on the fixture; the latter is the documented vision model and the fallback if this regresses |
 | `OPENCODE_GROK_MODEL` | `grok-4.6` | |
-| `OPENCODE_MIMO_MODEL` | `mimo-v2.5` | OpenCode Zen's free tier; the docs' `mimo-v2.5-free` id is rejected on the Go gateway |
+| `OPENCODE_MIMO_MODEL` | `mimo-v2.6-flash` | OpenCode Zen's free tier; Zen lists it as `mimo-v2.6-flash-free`, which the Go gateway rejects |
+| `OPENCODE_MINIMAX_MODEL` | `minimax-m3` | Only used when `MINIMAX_CHANNEL=opencode`. The only MiniMax id the gateway serves — `minimax-m2.7` and `minimax-m2.5` answer 503 |
+| `MINIMAX_MODEL` | `MiniMax-M3` | Used by the default `minimax` channel |
+| `MINIMAX_BASE_URL` | `https://api.minimaxi.com/v1` | Endpoint override; the international deployment is `https://api.minimax.io` |
 | `OPENCODE_MUSE_MODEL` | `muse-spark-1.3-contributor` | Free "contributor" tier; the workspace must opt in or the gateway answers 403 `DataPolicyError` |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Endpoint override |
 | `POE_CHATGPT_MODEL` | `gpt-5.4` | Poe bot handle |
 | `POE_CLAUDE_MODEL` | `claude-opus-4.8` | Poe bot handle |
 | `POE_GEMINI_MODEL` | `gemini-3.1-pro` | Poe bot handle |
-| `GOOGLE_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Google model id (Pro tier is preview-suffixed on Google) |
-| `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.4-pro` / `gemini-3.1-pro` / `claude-opus-4.8` | Poe bots for the interpretation pass |
+| `GOOGLE_GEMINI_MODEL` | `gemini-3.8-flash,gemini-3.5-flash` | Google model chain for `GEMINI_CHANNEL=google`. The owner's key is free-tier: Flash works, `gemini-3.1-pro-preview` answers 429 |
+| `INTERPRET_CHATGPT_MODEL` / `INTERPRET_GEMINI_MODEL` / `INTERPRET_CLAUDE_MODEL` | `gpt-5.6-luna` / `gemini-3.8-flash,gemini-3.5-flash` / `claude-opus-4.8` | Pinned routes for the interpretation pass; ChatGPT is an OpenCode Go id, Gemini a Google chain, Claude a Poe bot |
 | `POE_BASE_URL` | `https://api.poe.com/v1/responses` | Endpoint override |
 | `GOOGLE_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Endpoint override |
-| `NO_STREAM` | *(empty)* | Providers that skip upstream streaming |
+| `NO_STREAM` | *(empty)* | Providers that skip upstream streaming. Was `deepseek` on the free plan: DeepSeek streams its reasoning token by token, which that plan billed as CPU and killed mid-solve (2,010 ms → `exceededCpu`); non-streamed the same solve costs 13 ms. Only for models that finish inside OpenCode's ~100–120 s idle cut. Cleared on Workers Paid |
 
 The assignment is always sent as images, so **every model here must be vision-capable**. A text-only model does not necessarily fail: some answer "I cannot view the image" and then invent a plausible solution, which is worse. Verify vision before changing a model id.
 
@@ -247,6 +282,26 @@ Poe bot handles change over time. List the ones your key can actually see with:
 ```bash
 curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
 ```
+
+### Switching MiniMax between its own key and OpenCode Go
+
+MiniMax runs on a **channel chain**: the owner's MiniMax token plan first, OpenCode Go second.
+
+```
+MINIMAX_CHANNEL=minimax,opencode   # default: plan first, Go when the plan refuses
+MINIMAX_CHANNEL=minimax            # the plan only - fail if it refuses
+MINIMAX_CHANNEL=opencode           # Go only - the plan is never touched
+```
+
+With the default, nothing has to change when the plan ends. The Worker moves a solve down the chain when MiniMax **refuses the account** — HTTP 401/402/403, or a message about balance, quota, credit, billing, an expired plan or an invalid key, including MiniMax's own codes 1004 / 1008 / 2049 and its HTTP-200 `base_resp` envelope — or when it **stops answering** after its transient retry. The tab says which, e.g. "MiniMax (via MiniMax) refused the account (HTTP 401: login fail…) — the plan may have ended. Trying MiniMax (via OpenCode Go)…". The move costs about a second per solve. To stop paying that second once the plan is gone, delete the key — the chain then skips straight to OpenCode Go without a redeploy:
+
+```bash
+npx wrangler secret delete MINIMAX_API_KEY
+```
+
+A channel is a different account and endpoint, so a move starts the new route fresh: capabilities, effort band and retry budgets are renegotiated, and only the safety timeout keeps running. An explicit single channel is respected — `minimax` alone fails with MiniMax's message rather than quietly spending the Go subscription. Any provider's channel var may be a chain; only MiniMax uses one today. Verified against the real APIs on 23 September 2026: a rejected key moved the solve to OpenCode Go 1 s in and it finished correctly; a removed key skipped MiniMax entirely; a `base_resp` 1008 "insufficient balance" reply (from a stand-in server) moved it as well; `minimax` alone failed with the 401; `opencode` alone never called MiniMax.
+
+Both channels bill as monthly subscriptions the owner already pays for, so the chain is about which quota is spent, not about per-call cost. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
 
 ### Switching Gemini to a Google key
 
@@ -291,13 +346,13 @@ npm run deploy     # vite build && wrangler deploy
 
 The app deploys to `https://civilsolve.<account>.workers.dev`.
 
-Free-tier fit: a solve is at most 5 requests (100k/day limit), static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive.
+The account is on **Workers Paid** ($5/month) since 22 September 2026, which raises CPU per invocation from 10 ms to 30 s (the default; `limits.cpu_ms` in `wrangler.jsonc` goes to 5 min). Measured on production the same day: MiMo streamed B.8 1,424 ms `ok`; DeepSeek streamed B.8 3,201 ms `ok` in 77 s (the free plan killed it at 63 s); DeepSeek as interpretation judge 1,906 ms `ok`. Nothing else in the plan matters here: a solve is at most 5 requests, static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive. Everything below this line was written against the free plan and is kept because it explains why the code is shaped the way it is — the single-choice picker, the sequential interpretation pass, `NO_STREAM` — and what to re-enable if the account ever drops back.
 
 **Piping the provider stream is I/O-wait, but the upload is not.** Each selected provider gets its own copy of the images, and each Worker invocation parses that JSON body and re-serializes it into the upstream request — two full passes over several megabytes, all of it counted as CPU. That is why the body cap is enforced early and why the browser blocks oversized batches before sending. If you raise `MAX_IMAGES` or `MAX_BODY_BYTES` in `shared/stream-protocol.ts`, measure CPU time per invocation before assuming it still fits.
 
 Deduplicating the N uploads would need either server-side storage or a single fan-out request, and both are ruled out by design (see `AGENTS.md`) — so the lever available is payload size, not request count.
 
-**Only one provider runs per solve.** The picker is single-choice. On the free plan each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time keeps every solve inside the budget. A stream that is still killed retries once automatically. To compare providers, solve the same upload with each in turn.
+**Every ticked provider runs at once** (`SOLVE_CONCURRENCY` in `use-solve.ts`, 4 — the most the cross-check can grade). The picker was single-choice on the free plan: there each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time kept every solve inside the budget. A stream that is still killed retries once automatically.
 
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
 
@@ -307,7 +362,7 @@ Accepted: JPEG, PNG, WebP, GIF, PDF. HEIC/HEIF/TIFF are no longer accepted (the 
 
 ## Provider output safety
 
-Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, and LaTeX-body-preferred display repair. A provider failure only fails that provider's tab.
+Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes (every problem kept under its own heading, with steps, givens and formulas accepted as lists or objects - a whole exam paper comes back this way from models that ignore the schema), `<think>` reasoning left in the content, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, and LaTeX-body-preferred display repair. A provider failure only fails that provider's tab.
 
 Model output is also **untrusted input** — the uploaded images are user-supplied, so anything in them can steer what a model writes. Rendered markdown is sanitized with DOMPurify before it reaches the DOM (`src/lib/math-markdown.ts`); KaTeX output is spliced in afterwards from placeholders so the sanitizer never mangles generated math.
 

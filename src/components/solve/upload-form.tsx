@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
 import {
   Asterisk,
+  Atom,
   BookOpen,
   Brain,
   Calculator,
   Eye,
+  Feather,
   FileImage,
+  Flag,
   FileText,
   Flame,
   Gem,
-  Gift,
   Lightbulb,
   Loader2,
   Orbit,
   PenSquare,
+  Scale,
   Sparkles,
   Upload,
   Waves,
@@ -22,14 +25,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
+import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
+  CHINA_PROVIDERS,
   DEFAULT_INTERPRETERS,
-  DEFAULT_PROVIDER,
+  DEFAULT_JUDGE,
+  DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
-  FREE_PROVIDERS,
   HIGHER_CREDIT_PROVIDERS,
+  LOWER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type HealthResponse,
@@ -48,12 +54,14 @@ export type SolveSubmission = {
   files: File[];
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
-  /** Exactly one provider runs per solve. */
+  /** The selected solvers, in picker order; they run together. */
   providers: ProviderKey[];
   notes: string;
   effort: EffortKey;
   /** Null when the user leaves the interpretation pass switched off. */
   verify: InterpretConfig | null;
+  /** The judge for the answer cross-check; null when it is switched off. */
+  judge: ProviderKey | null;
 };
 
 const MAX_FILES = 10;
@@ -72,6 +80,7 @@ const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
   deepseek: Waves,
   grok: Zap,
   mimo: Orbit,
+  minimax: Atom,
   muse: Lightbulb,
   claude: Asterisk,
 };
@@ -114,8 +123,10 @@ export function UploadForm({
   const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
-  const [effort, setEffort] = useState<EffortKey>("low");
-  const [selectedProvider, setSelectedProvider] = useState<ProviderKey>(DEFAULT_PROVIDER);
+  const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
+  const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
+  const [effort, setEffort] = useState<EffortKey>("high");
+  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(DEFAULT_SOLVERS);
   const [providerStatus, setProviderStatus] =
     useState<Record<ProviderKey, ProviderStatus> | null>(null);
   const [fileError, setFileError] = useState("");
@@ -139,10 +150,11 @@ export function UploadForm({
       .then((payload) => {
         if (cancelled || !payload?.providers) return;
         setProviderStatus(payload.providers);
-        setSelectedProvider((current) => {
-          if (payload.providers[current]?.configured) return current;
+        setSelectedProviders((current) => {
+          const configured = current.filter((key) => payload.providers[key]?.configured);
+          if (configured.length) return configured;
           const firstConfigured = PROVIDER_KEYS.find((key) => payload.providers[key]?.configured);
-          return firstConfigured ?? current;
+          return firstConfigured ? [firstConfigured] : current;
         });
       })
       .catch(() => {
@@ -161,31 +173,61 @@ export function UploadForm({
     providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
   );
 
-  // Some routes pin the reasoning level (forceEffort) or put a floor under it
-  // (minEffort), and the Worker applies that regardless of what is sent. Show
-  // it here instead of letting the user pick a level that is silently raised:
-  // ChatGPT floors at "high".
-  const selectedStatus = providerStatus?.[selectedProvider];
-  const pinnedEffort = selectedStatus?.forcedEffort;
-  const effortFloor = pinnedEffort ?? selectedStatus?.minEffort;
-  const floorIndex = effortFloor ? EFFORT_KEYS.indexOf(effortFloor as EffortKey) : -1;
+  // Some routes put a floor under the reasoning level (minEffort; a pinned
+  // forceEffort counts as a floor too), and the Worker applies that
+  // regardless of what is sent. One level serves every selected solver, so
+  // the highest floor among them rules, and it is shown here instead of
+  // letting the user pick a level that is silently raised: ChatGPT floors at
+  // "high".
+  const providerFloor = (key: ProviderKey) => {
+    const status = providerStatus?.[key];
+    const floor = status?.forcedEffort ?? status?.minEffort;
+    return floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : -1;
+  };
+  const providerCeiling = (key: ProviderKey) => {
+    const status = providerStatus?.[key];
+    const ceiling = status?.forcedEffort ?? status?.maxEffort;
+    return ceiling ? EFFORT_KEYS.indexOf(ceiling as EffortKey) : EFFORT_KEYS.length;
+  };
+  const floorIndex = selectedProviders.reduce(
+    (highest, key) => Math.max(highest, providerFloor(key)),
+    -1,
+  );
+  const ceilingIndex = selectedProviders.reduce(
+    (lowest, key) => Math.min(lowest, providerCeiling(key)),
+    EFFORT_KEYS.length,
+  );
+  const effortFloor = floorIndex > 0 ? EFFORT_KEYS[floorIndex] : undefined;
+  const effortCeiling =
+    ceilingIndex < EFFORT_KEYS.length - 1 ? EFFORT_KEYS[ceilingIndex] : undefined;
+  const labelsFor = (matches: (key: ProviderKey) => boolean) =>
+    selectedProviders.filter(matches).map((key) => PROVIDER_LABELS[key]).join(" and ");
+  const floorLabels = labelsFor((key) => providerFloor(key) === floorIndex);
+  const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
 
-  const isEffortLocked = (key: EffortKey) =>
-    pinnedEffort ? key !== pinnedEffort : floorIndex > 0 && EFFORT_KEYS.indexOf(key) < floorIndex;
+  // A floor above a ceiling leaves no level that suits every solver. Nothing
+  // is clamped or disabled then - the run is blocked instead (below), so the
+  // two rules cannot fight over the same value.
+  const bandIsEmpty = floorIndex > ceilingIndex;
 
-  // Snap the visible level up when the floor rules the current pick out. Only
-  // ever upwards: switching to an unfloored provider keeps the level the user
-  // last chose rather than dropping it back.
+  const isEffortLocked = (key: EffortKey) => {
+    if (bandIsEmpty) return false;
+    const index = EFFORT_KEYS.indexOf(key);
+    return (floorIndex > 0 && index < floorIndex) || index > ceilingIndex;
+  };
+
+  // Snap the visible level into the band when the current pick falls outside
+  // it. Deselecting the provider that set the bound keeps the level the user
+  // last chose rather than moving it back.
   useEffect(() => {
-    if (floorIndex < 0) return;
-    setEffort((current) =>
-      pinnedEffort
-        ? (pinnedEffort as EffortKey)
-        : EFFORT_KEYS.indexOf(current) < floorIndex
-          ? EFFORT_KEYS[floorIndex]
-          : current,
-    );
-  }, [pinnedEffort, floorIndex]);
+    if (bandIsEmpty) return;
+    setEffort((current) => {
+      const index = EFFORT_KEYS.indexOf(current);
+      if (floorIndex > 0 && index < floorIndex) return EFFORT_KEYS[floorIndex];
+      if (index > ceilingIndex) return EFFORT_KEYS[ceilingIndex];
+      return current;
+    });
+  }, [bandIsEmpty, floorIndex, ceilingIndex]);
 
   // Two readers that are the same model would just agree with themselves.
   const verifyConfigError =
@@ -193,8 +235,23 @@ export function UploadForm({
       ? "Pick two different models to read the question independently."
       : "";
 
+  const solverConfigError =
+    bandIsEmpty
+      ? `${floorLabels} needs at least ${effortFloor} thinking and ${ceilingLabels} cannot go above ${effortCeiling} — pick one or the other.`
+      : selectedProviders.length === 0
+        ? "Pick at least one AI provider to solve with."
+        : crossCheckEnabled && selectedProviders.length < 2
+          ? "Pick at least two solvers for the cross-check to compare."
+          : crossCheckEnabled && selectedProviders.length > MAX_JUDGED_SOLUTIONS
+            ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
+            : "";
+
   const canSubmit =
-    queuedFiles.length > 0 && isAvailable(selectedProvider) && !verifyConfigError && !busy;
+    queuedFiles.length > 0 &&
+    selectedProviders.every(isAvailable) &&
+    !verifyConfigError &&
+    !solverConfigError &&
+    !busy;
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -286,8 +343,13 @@ export function UploadForm({
     });
   }
 
-  function selectProvider(provider: ProviderKey) {
-    setSelectedProvider(provider);
+  // Keeps picker order, which is also the order the judge sees solutions in.
+  function toggleProvider(provider: ProviderKey) {
+    setSelectedProviders((current) =>
+      current.includes(provider)
+        ? current.filter((key) => key !== provider)
+        : PROVIDER_KEYS.filter((key) => key === provider || current.includes(key)),
+    );
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -296,14 +358,15 @@ export function UploadForm({
     onSolve({
       files: queuedFiles.map((item) => item.file),
       lectureFiles: lectureFiles.map((item) => item.file),
-      providers: [selectedProvider],
+      providers: selectedProviders,
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
+      judge: crossCheckEnabled ? judge : null,
     });
   }
 
-  const bannerError = error || fileError || verifyConfigError;
+  const bannerError = error || fileError || verifyConfigError || solverConfigError;
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -477,26 +540,28 @@ export function UploadForm({
       <section>
         <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
           <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
-          AI Provider
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(one per solve)</span>
+          AI Providers
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
+            {crossCheckEnabled
+              ? `(solvers - pick two to ${MAX_JUDGED_SOLUTIONS})`
+              : "(pick one or more - they solve together)"}
+          </span>
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PROVIDER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
-            const checked = selectedProvider === provider.key && available;
+            const checked = selectedProviders.includes(provider.key) && available;
             const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
-            const free = FREE_PROVIDERS.has(provider.key);
+            const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
+            const china = CHINA_PROVIDERS.has(provider.key);
+            // Brand, account, model - nothing else. Effort floors are shown
+            // under Thinking Effort, and a model chain announces itself in the
+            // status line when it actually switches.
             const note = status
               ? status.configured
-                ? `via ${CHANNEL_LABELS[status.channel]} - ${status.model}${
-                    status.forcedEffort
-                      ? ` - always ${status.forcedEffort} thinking`
-                      : status.minEffort
-                        ? ` - at least ${status.minEffort} thinking`
-                        : ""
-                  }`
+                ? `${CHANNEL_LABELS[status.channel]} · ${status.model}`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
             return (
@@ -511,11 +576,12 @@ export function UploadForm({
                 }`}
               >
                 <input
-                  type="radio"
-                  name="provider"
+                  type="checkbox"
+                  name="providers"
+                  value={provider.key}
                   checked={checked}
                   disabled={!available}
-                  onChange={() => selectProvider(provider.key)}
+                  onChange={() => toggleProvider(provider.key)}
                   className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
                 />
                 <span className="min-w-0 flex-1">
@@ -528,19 +594,28 @@ export function UploadForm({
                     {higherCredit ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e] dark:border-[#4a2f18] dark:bg-[#2b1d10] dark:text-[#e8903a]"
-                        title={`${provider.label} bills more per solve than the other providers.`}
+                        title={`${provider.label} draws more credit per solve than the other providers.`}
                       >
                         <Flame className="h-3 w-3" aria-hidden="true" />
-                        Uses more credit
+                        More credit
                       </span>
                     ) : null}
-                    {free ? (
+                    {lowerCredit ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]"
-                        title={`${provider.label} costs nothing on its upstream account.`}
+                        title={`${provider.label} draws less credit per solve than the other providers.`}
                       >
-                        <Gift className="h-3 w-3" aria-hidden="true" />
-                        Free
+                        <Feather className="h-3 w-3" aria-hidden="true" />
+                        Less credit
+                      </span>
+                    ) : null}
+                    {china ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040] dark:border-[#4a2a2a] dark:bg-[#241616] dark:text-[#d99a9a]"
+                        title={`${provider.label} is developed and served in mainland China.`}
+                      >
+                        <Flag className="h-3 w-3" aria-hidden="true" />
+                        China model
                       </span>
                     ) : null}
                   </span>
@@ -575,11 +650,11 @@ export function UploadForm({
                 type="button"
                 disabled={locked}
                 title={
-                  locked
-                    ? `${PROVIDER_LABELS[selectedProvider]} runs at ${effortFloor} thinking${
-                        pinnedEffort ? "" : " or above"
-                      } on this route.`
-                    : undefined
+                  !locked
+                    ? undefined
+                    : EFFORT_KEYS.indexOf(option.key) > ceilingIndex
+                      ? `${ceilingLabels} cannot finish above ${effortCeiling} thinking on this route.`
+                      : `${floorLabels} runs at ${effortFloor} thinking or above on this route.`
                 }
                 onClick={() => setEffort(option.key)}
                 className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
@@ -595,14 +670,16 @@ export function UploadForm({
             );
           })}
         </div>
-        {effortFloor ? (
+        {effortFloor && !bandIsEmpty ? (
           <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
-            {PROVIDER_LABELS[selectedProvider]} runs at{" "}
-            <strong>
-              {effortFloor}
-              {pinnedEffort ? "" : " or above"}
-            </strong>{" "}
-            on this route, so lower levels are disabled.
+            {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
+            lower levels are disabled for every solver in this run.
+          </p>
+        ) : null}
+        {effortCeiling && !bandIsEmpty ? (
+          <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
+            {ceilingLabels} cannot finish above <strong>{effortCeiling}</strong> on this route
+            — it thinks past the time limit — so higher levels are disabled.
           </p>
         ) : null}
         <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
@@ -678,6 +755,59 @@ export function UploadForm({
                 The reconciler always thinks at its maximum.
               </span>
             </label>
+          </div>
+        ) : null}
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+          Answer Cross-check
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+        </p>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border-2 border-[#d4cdc3] bg-white p-4 transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:hover:border-[#e8903a]">
+          <input
+            type="checkbox"
+            checked={crossCheckEnabled}
+            onChange={(event) => setCrossCheckEnabled(event.target.checked)}
+            className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+              Have a judge grade every solution
+            </span>
+            <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              The selected solvers work at the same time, then the judge re-derives the
+              numbers from the images and says which solutions are right — or corrects them
+              all. Catches a plausible-looking wrong answer, at the cost of one extra model
+              call. Needs two or more solvers ticked above. Combine with the interpretation
+              check for the most robust result.
+            </span>
+          </span>
+        </label>
+
+        {crossCheckEnabled ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              Judge
+              <select
+                value={judge}
+                onChange={(event) => setJudge(event.target.value as ProviderKey)}
+                className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+              >
+                {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960] sm:col-span-2">
+              Solving: {selectedProviders.map((key) => PROVIDER_LABELS[key]).join(", ") || "nobody yet"}.
+              The judge thinks at <strong>high</strong> and never learns which model wrote
+              which solution.
+            </p>
           </div>
         ) : null}
       </section>

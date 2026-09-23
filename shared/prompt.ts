@@ -1,8 +1,9 @@
 // Prompts shared by the Worker. The assignment arrives as attached images
 // (native vision input), so there are no OCR text sections.
 //
-// Two tasks live here: solving, and the optional interpret/verify pass that
-// reads the diagram first and pauses for the user to confirm.
+// Three tasks live here: solving; the optional interpret/verify pass that
+// reads the diagram first and pauses for the user to confirm; and the
+// optional answer cross-check, where a judge grades two solvers' work.
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
 
@@ -17,6 +18,9 @@ export const SOLVE_INSTRUCTIONS =
 
 export const INTERPRET_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English.";
+
+export const JUDGE_INSTRUCTIONS =
+  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading two candidate solutions against the attached assignment; verify, do not trust. Use English.";
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -184,6 +188,76 @@ export function buildVerifyPrompt(
 
   if (options?.enforceShape) {
     sections.push(...shapeContract(INTERPRETATION_FIELDS));
+  }
+
+  return sections.join("\n");
+}
+
+export type JudgePromptExtras = {
+  /** Human-confirmed problem statement from the interpretation pass. */
+  interpretation?: string;
+  enforceShape?: boolean;
+};
+
+/**
+ * The answer cross-check. The solutions are anonymised as A, B, C... so the
+ * judge grades the work, not the brand. It is told to re-derive the numbers
+ * itself: every wrong answer seen on the fixtures came from a plausible
+ * looking solution (a jet velocity assumed instead of derived, a pressure
+ * force counted twice), and a judge that only reads for consistency would
+ * pass them all.
+ */
+export function buildJudgePrompt(
+  userNotes: string,
+  solutions: string[],
+  extras: JudgePromptExtras = {},
+) {
+  const count = solutions.length;
+  const letters = solutions.map((_, index) => String.fromCharCode(65 + index));
+  const letterList = letters.join(", ");
+  const sections = [
+    `${count} solvers independently answered the attached civil engineering assignment images. Your job is to decide which of the ${count} solutions are correct - if any - and to state the correct final answer.`,
+    "Verify, do not trust. Re-derive every numerical result yourself from the images before grading, in enough depth to confirm or refute each solution's numbers. Check in particular:",
+    "- Whether each solution read the diagram and the givens correctly (geometry, supports, loads, directions, units), and whether a quantity was assumed that should have been derived.",
+    "- Continuity, equilibrium and compatibility conditions; sign conventions; unit conversions.",
+    "- Double counting or omission of a term (a pressure force counted in both a momentum flux and separately, a weight left out, a reaction on the wrong body).",
+    "- The arithmetic of the final substitution.",
+    "Then fill the fields:",
+    `- \`correct_solutions\`: the letters of the solutions that reach the correct final answers (presentation and rounding differences do not matter), from ${letterList}. An empty list means none is correct or none could be verified.`,
+    "- `final_answer`: the correct final answer(s) with units, as you verified them. If no solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
+    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}): what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.`,
+    "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
+    '- `confidence`: "high", "medium" or "low" in the verdict.',
+    "Format formulas in `final_answer`, `assessments` and `comparison` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
+    "Return JSON matching the required schema exactly.",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  ];
+
+  if (extras.interpretation) {
+    sections.push(
+      "",
+      "Confirmed problem interpretation (cross-checked by two readers and reviewed by the user):",
+      extras.interpretation,
+      "Treat this interpretation as the authoritative reading of the problem. A solution that contradicts it has misread the question.",
+    );
+  }
+
+  solutions.forEach((solution, index) => {
+    sections.push("", `Solution ${letters[index]}:`, solution);
+  });
+
+  if (extras.enforceShape) {
+    // Bespoke contract: two of the fields are arrays, which the generic
+    // all-strings skeleton cannot express.
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high"}`;
+    sections.push(
+      "",
+      "Return exactly one JSON object with these 5 fields:",
+      skeleton,
+      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` has exactly ${count} strings, in order; \`confidence\` is one of "high", "medium", "low".`,
+      "Do not add other fields. Do not nest this object inside another object or array.",
+    );
   }
 
   return sections.join("\n");

@@ -27,6 +27,11 @@ POE_API_KEY=
 # GEMINI_CHANNEL is set to "google".
 GOOGLE_API_KEY=
 
+# MiniMax (https://platform.minimaxi.com) - the default channel for MiniMax.
+# Set MINIMAX_CHANNEL=opencode to run it on the OpenCode Go subscription
+# instead, and this key is then unused.
+MINIMAX_API_KEY=
+
 # --- Optional local overrides ----------------------------------------------
 # Anything in wrangler.jsonc "vars" can be overridden here for local runs,
 # for example:
@@ -34,8 +39,8 @@ GOOGLE_API_KEY=
 #   CHATGPT_CHANNEL=poe
 #   POE_CHATGPT_MODEL=gpt-5.4-pro
 #   OPENCODE_GROK_MODEL=grok-4.5
-#   NO_STREAM=deepseek
-#   INTERPRET_CHATGPT_MODEL=gpt-5.4   # faster interpretation reader than gpt-5.4-pro
+#   NO_STREAM=deepseek                # only needed on the free Workers plan (10 ms CPU)
+#   MINIMAX_CHANNEL=opencode          # MiniMax on the Go plan instead of your own key
 #
 # Check a key without spending tokens:
 #   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models

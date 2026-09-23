@@ -1,8 +1,9 @@
-// App-level SSE protocol for POST /api/solve/:provider.
+// App-level SSE protocol for POST /api/solve, /api/interpret and /api/judge.
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
 import type { InterpretationResult } from "./interpretation";
+import type { JudgementResult } from "./judgement";
 import type { EffortKey } from "./prompt";
 import type { ProviderArtifact } from "./solution";
 
@@ -27,6 +28,22 @@ export type InterpretRequestBody = {
   effort?: EffortKey;
 };
 
+/**
+ * Answer cross-check: the selected solvers' solutions for a judge to grade
+ * against the same images. The solutions are anonymised as A, B, C, D in
+ * order - the judge never learns which provider wrote which.
+ */
+export type JudgeRequestBody = {
+  images: string[];
+  notes: string;
+  /** Human-confirmed problem statement from the optional interpretation pass. */
+  interpretation?: string;
+  /** Two to MAX_JUDGED_SOLUTIONS candidate solutions, as text (see `artifactToText`). */
+  solutions: string[];
+  /** Reasoning level. Defaults to "high" - the most reliable level measured. */
+  effort?: EffortKey;
+};
+
 export type SolveEvent =
   | { type: "status"; message: string }
   | { type: "delta"; text: string }
@@ -39,6 +56,12 @@ export type InterpretEvent =
   | { type: "done"; interpretation: InterpretationResult }
   | { type: "error"; message: string };
 
+export type JudgeEvent =
+  | { type: "status"; message: string }
+  | { type: "delta"; text: string }
+  | { type: "done"; judgement: JudgementResult }
+  | { type: "error"; message: string };
+
 export const MAX_IMAGES = 16;
 export const MAX_NOTES_LENGTH = 4000;
 export const MAX_BODY_BYTES = 20 * 1024 * 1024;
@@ -46,6 +69,8 @@ export const MAX_BODY_BYTES = 20 * 1024 * 1024;
 export const MAX_REFERENCE_IMAGES = 8;
 export const MAX_REFERENCE_TEXT = 20_000;
 export const MAX_INTERPRETATION_LENGTH = 8_000;
+/** Per candidate solution sent to the judge; longer ones are cut, working first. */
+export const MAX_SOLUTION_TEXT = 24_000;
 
 export const DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 
@@ -66,12 +91,17 @@ export function estimateBodyBytes(body: {
   interpretation?: string;
   referenceText?: string;
   referenceImages?: string[];
+  solutions?: string[];
 }) {
   let total = 128; // envelope and field names
   for (const image of [...body.images, ...(body.referenceImages || [])]) {
     total += image.length + 3; // quotes + separator
   }
-  const text = body.notes + (body.interpretation || "") + (body.referenceText || "");
+  const text =
+    body.notes +
+    (body.interpretation || "") +
+    (body.referenceText || "") +
+    (body.solutions ? body.solutions.join("") : "");
   return total + text.length * 3;
 }
 
@@ -79,4 +109,35 @@ export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Added to the timeout for each assignment page after the first. */
+export const PER_EXTRA_PAGE_MS = 120_000;
+/**
+ * Ceiling on a scaled timeout, whatever the page count. Long enough for a
+ * full paper, short enough that a wedged upstream cannot hold a tab open
+ * all day - the heartbeats would keep it alive indefinitely otherwise.
+ */
+export const MAX_TIMEOUT_MS = 2_700_000;
+
+/**
+ * How long one task may run, given how much was uploaded.
+ *
+ * A single question is the case every measured timing came from (the hardest
+ * fixture answers in 14-259 s depending on model and level), so `baseMs` is
+ * the floor and applies to a one-page upload. A whole exam paper is not one
+ * long question but a dozen of them in one request, and both the reading and
+ * the writing grow with it, so each further page adds `PER_EXTRA_PAGE_MS`.
+ *
+ * Lecture-notes pages count half: they are read once as reference and never
+ * solved, so they add reading time but no answers.
+ */
+export function taskTimeoutMs(
+  baseMs: number,
+  imageCount: number,
+  referenceImageCount = 0,
+) {
+  const pages = imageCount + referenceImageCount / 2;
+  const scaled = baseMs + Math.max(0, pages - 1) * PER_EXTRA_PAGE_MS;
+  return Math.max(baseMs, Math.min(scaled, MAX_TIMEOUT_MS));
 }

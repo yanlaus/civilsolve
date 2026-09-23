@@ -3,7 +3,8 @@ import { Calculator, Loader2 } from "lucide-react";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { useInterpret } from "@/hooks/use-interpret";
-import { isRunActive, useSolve } from "@/hooks/use-solve";
+import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import type { ProviderKey } from "../../shared/providers";
@@ -22,10 +23,11 @@ const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
+  judge: ProviderKey | null;
 };
 
 export default function CivilAnswerAppPage() {
-  const { runs, start, cancel } = useSolve();
+  const { runs, judgeRun, start, cancel } = useSolve();
   const { pipeline, start: startInterpret, reset: resetInterpret } = useInterpret();
   const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
@@ -57,9 +59,12 @@ export default function CivilAnswerAppPage() {
     };
   }, []);
 
-  const isSolving = Object.values(runs).some(isRunActive);
+  const isSolving = Object.values(runs).some(isRunActive) || isJudgeActive(judgeRun);
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
+
+  // A long solve on a phone: keep the screen from locking while it runs.
+  useWakeLock(isSolving || isInterpreting);
 
   const statusMessage = prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
   const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
@@ -77,6 +82,7 @@ export default function CivilAnswerAppPage() {
     notes,
     effort,
     verify,
+    judge,
   }: SolveSubmission) {
     setError("");
     resetInterpret();
@@ -118,13 +124,13 @@ export default function CivilAnswerAppPage() {
       }
 
       if (verify) {
-        setPendingSolve({ providers, body });
+        setPendingSolve({ providers, body, judge });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
       }
 
-      start(providers, body);
+      start(providers, body, judge);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -136,10 +142,10 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve) return;
-    const { providers, body } = pendingSolve;
+    const { providers, body, judge } = pendingSolve;
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText });
+    start(providers, { ...body, interpretation: confirmedText }, judge);
   }
 
   return (
@@ -191,7 +197,7 @@ export default function CivilAnswerAppPage() {
             </div>
           }
         >
-          <SolutionPanel runs={runs} />
+          <SolutionPanel runs={runs} judgeRun={judgeRun} />
         </Suspense>
       </div>
     </main>

@@ -10,7 +10,13 @@ import {
 } from "../../shared/interpretation";
 import { PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
 import type { InterpretRequestBody } from "../../shared/stream-protocol";
-import { fetchSseStream, readSseEvents } from "@/lib/sse";
+import {
+  fetchSseStream,
+  isConnectionLost,
+  readSseEvents,
+  StreamInterruptedError,
+  withResume,
+} from "@/lib/sse";
 
 export type InterpretPipeline =
   | { status: "idle" }
@@ -46,29 +52,39 @@ export function useInterpret() {
       const labelB = PROVIDER_LABELS[config.interpreterB];
       const labelV = PROVIDER_LABELS[config.verifier];
 
+      // Each step restarts on its own if its connection drops (a phone
+      // backgrounding the browser, usually), so a reading that already
+      // arrived is never thrown away with it.
+      const step = (
+        stage: string,
+        provider: ProviderKey,
+        body: InterpretRequestBody,
+      ) => {
+        setPipeline({ status: "running", stage });
+        return withResume(
+          () => runInterpretRequest(provider, body, abort.signal),
+          abort.signal,
+          (message) => setPipeline({ status: "running", stage: `${stage} ${message}` }),
+        );
+      };
+
       try {
         // The readers run one after another, not together: two concurrent
         // streams is exactly the load that trips the free plan's CPU limit.
-        setPipeline({ status: "running", stage: `Reading the question with ${labelA}...` });
-        const resultA = await runInterpretRequest(
+        const resultA = await step(
+          `Reading the question with ${labelA}...`,
           config.interpreterA,
           { mode: "interpret", images, notes, effort: config.readerEffort },
-          abort.signal,
         );
 
-        setPipeline({ status: "running", stage: `Reading the question with ${labelB}...` });
-        const resultB = await runInterpretRequest(
+        const resultB = await step(
+          `Reading the question with ${labelB}...`,
           config.interpreterB,
           { mode: "interpret", images, notes, effort: config.readerEffort },
-          abort.signal,
         );
 
-        setPipeline({
-          status: "running",
-          stage: `Cross-checking both readings with ${labelV}...`,
-        });
-
-        const verified = await runInterpretRequest(
+        const verified = await step(
+          `Cross-checking both readings with ${labelV}...`,
           config.verifier,
           {
             mode: "verify",
@@ -79,7 +95,6 @@ export function useInterpret() {
               interpretationToText(resultB),
             ],
           },
-          abort.signal,
         );
 
         setPipeline({
@@ -91,8 +106,11 @@ export function useInterpret() {
         if (abort.signal.aborted) return;
         setPipeline({
           status: "error",
-          message:
-            error instanceof Error ? error.message : "The interpretation pipeline failed.",
+          message: isConnectionLost(error)
+            ? "The connection kept dropping during the interpretation pass. Keep this page open and try again."
+            : error instanceof Error
+              ? error.message
+              : "The interpretation pipeline failed.",
         });
       }
     },
@@ -125,5 +143,7 @@ async function runInterpretRequest(
     }
   }
 
-  throw new Error(`${PROVIDER_LABELS[provider]}: the interpretation stream ended unexpectedly.`);
+  throw new StreamInterruptedError(
+    `${PROVIDER_LABELS[provider]}: the interpretation stream ended before the reading arrived.`,
+  );
 }

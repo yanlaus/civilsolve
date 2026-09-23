@@ -25,6 +25,7 @@ export type Dialect = "responses" | "chat-completions" | "gemini";
 export type WorkerEnv = {
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
+  MINIMAX_API_KEY?: string;
   OPENCODE_API_KEY?: string;
   GOOGLE_API_KEY?: string;
 
@@ -35,6 +36,7 @@ export type WorkerEnv = {
   DEEPSEEK_CHANNEL?: string;
   GROK_CHANNEL?: string;
   MIMO_CHANNEL?: string;
+  MINIMAX_CHANNEL?: string;
   MUSE_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
@@ -45,6 +47,8 @@ export type WorkerEnv = {
   OPENCODE_DEEPSEEK_MODEL?: string;
   OPENCODE_GROK_MODEL?: string;
   OPENCODE_MIMO_MODEL?: string;
+  OPENCODE_MINIMAX_MODEL?: string;
+  MINIMAX_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
@@ -54,6 +58,7 @@ export type WorkerEnv = {
   // --- Endpoint overrides (proxies) --------------------------------------
   POE_BASE_URL?: string;
   OPENCODE_BASE_URL?: string;
+  MINIMAX_BASE_URL?: string;
   GOOGLE_BASE_URL?: string;
 
   // --- Behaviour ---------------------------------------------------------
@@ -127,6 +132,18 @@ type RouteSpec = {
    * producing a confidently wrong answer.
    */
   minEffort?: EffortKey;
+  /**
+   * Ceiling on the reasoning level. For a model whose top levels think so
+   * long that the request dies before an answer arrives, this keeps a level
+   * the route cannot finish out of reach. No route sets one today - MiniMax
+   * did until its timeout was raised instead.
+   */
+  maxEffort?: EffortKey;
+  /**
+   * How long this route may run before the task is abandoned, overriding
+   * SAFETY_TIMEOUT_MS in run.ts. For a model worth waiting longer for.
+   */
+  timeoutMs?: number;
   /**
    * Set false when the upstream cannot stream and honour structured output at
    * the same time. Streaming only buys progress updates; a parseable answer
@@ -240,12 +257,74 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "chat-completions",
       pathSuffix: "/chat/completions",
       modelVar: "OPENCODE_MIMO_MODEL",
-      // OpenCode Zen's free MiMo tier. The docs call it "mimo-v2.5-free", but
-      // the Go gateway rejects that id and serves it as plain "mimo-v2.5"
-      // (the paid sibling is "mimo-v2.5-pro"). Verified to read the diagram:
-      // asked for the values shown in the B.8 image it returned all six.
-      defaultModel: "mimo-v2.5",
+      // OpenCode Zen's free MiMo tier: the Zen catalogue lists it as
+      // "mimo-v2.6-flash-free" and the Go gateway serves the same tier as
+      // "mimo-v2.6-flash" (the paid sibling is "mimo-v2.6-pro"). Verified to
+      // read the diagram: asked for the values shown in the B.8 image it
+      // returned all six. Was "mimo-v2.5" until 22 September 2026.
+      defaultModel: "mimo-v2.6-flash",
       effort: CLAMPED_EFFORT,
+    },
+  },
+  minimax: {
+    // MiniMax's own API, on the owner's MINIMAX_API_KEY - first in the chain
+    // since 23 September 2026. Their MiniMax account is a monthly token plan,
+    // not per-call billing, so this costs nothing extra per solve and leaves
+    // the OpenCode Go quota for the five providers that have nowhere else to
+    // go. The plan ends in October 2026: MINIMAX_CHANNEL is the chain
+    // "minimax,opencode", so when MiniMax refuses the account the Worker
+    // moves the solve to OpenCode Go by itself.
+    // The endpoint is plain OpenAI chat-completions and reads images, so no
+    // separate dialect is needed - the anthropic-protocol route this provider
+    // used until 19 September 2026 is not coming back. Same model either way,
+    // spelled "MiniMax-M3" here and "minimax-m3" on the gateway.
+    minimax: {
+      dialect: "chat-completions",
+      keyVar: "MINIMAX_API_KEY",
+      urlVar: "MINIMAX_BASE_URL",
+      defaultUrl: "https://api.minimaxi.com/v1",
+      pathSuffix: "/chat/completions",
+      modelVar: "MINIMAX_MODEL",
+      // Mainland host. International deployments use https://api.minimax.io.
+      // "MiniMax-M3[1m]" selects the 1M-token context window.
+      defaultModel: "MiniMax-M3",
+      effort: CLAMPED_EFFORT,
+      // Accepts response_format but does not enforce it: on a two-problem
+      // upload it answered {"problems": [...]} with step_by_step as an
+      // array. Flagged unstructured so the prompt spells out the six-field
+      // contract, including "cover every problem inside these same fields".
+      structured: false,
+      // M3 is worth waiting for and its thinking runs long: on the B.8
+      // fixture it wrote 93-104k characters and was still going at the
+      // default 280 s, three production runs out of three. `reasoning_effort`
+      // does not shorten it (measured at every level on both routes, no
+      // monotonic relationship), so time is the only lever. Cloudflare
+      // enforces no wall-clock limit while the client is connected and the
+      // 15 s heartbeats keep the stream alive.
+      timeoutMs: 1_200_000,
+    },
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_MINIMAX_MODEL",
+      // Back on 22 September 2026 after being dropped on 19 September (1/4 on
+      // the B.8 fixture on its own API, where it thought itself out of tokens
+      // at "high"). This is a different route: MiniMax's own channel is gone,
+      // it runs on the Go subscription now, and "minimax-m3" is a newer model
+      // than the "MiniMax-M2" that failed. Verified to read the diagram: all
+      // six values from the B.8 image. "minimax-m2.7" and "minimax-m2.5" are
+      // listed by the gateway but answer 503 "Endpoint is unavailable".
+      // It wraps its reasoning in <think> tags inside the message content;
+      // stripThinkTags in shared/solution.ts removes them before parsing.
+      defaultModel: "minimax-m3",
+      effort: CLAMPED_EFFORT,
+      structured: false,
+      // Same 20 minutes as the direct route: the gateway runs the same model
+      // and it ran past 280 s at "medium" (105-148k characters) and "high"
+      // (95k) on production. It was capped at "low" until 23 September 2026;
+      // the cap is gone because waiting longer beats refusing the level.
+      timeoutMs: 1_200_000,
     },
   },
   muse: {
@@ -272,6 +351,7 @@ const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   deepseek: "opencode",
   grok: "opencode",
   mimo: "opencode",
+  minimax: "opencode",
   muse: "opencode",
 };
 
@@ -282,6 +362,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   deepseek: "DEEPSEEK_CHANNEL",
   grok: "GROK_CHANNEL",
   mimo: "MIMO_CHANNEL",
+  minimax: "MINIMAX_CHANNEL",
   muse: "MUSE_CHANNEL",
 };
 
@@ -290,6 +371,14 @@ export type Route = {
   channel: ChannelKey;
   dialect: Dialect;
   model: string;
+  /**
+   * Models to switch to, in order, when an attempt on `model` fails in a way
+   * worth retrying (503, 429, a dropped stream, a useless fragment). Comes
+   * from a comma-separated model var: "gemini-3.8-flash,gemini-3.5-flash"
+   * tries 3.8 first and 3.5 if it does not answer. Switching model does not
+   * spend the transient-retry budget - the fallback gets a fresh start.
+   */
+  fallbackModels: string[];
   endpoint: string;
   apiKey: string;
   effort: EffortSpec;
@@ -297,6 +386,16 @@ export type Route = {
   forceEffort?: EffortKey;
   /** Floor on the reasoning level. */
   minEffort?: EffortKey;
+  /** Ceiling on the reasoning level. */
+  maxEffort?: EffortKey;
+  /** Overrides the default safety timeout in run.ts. */
+  timeoutMs?: number;
+  /**
+   * Further usable channels for this provider, in order, from a chained
+   * channel var ("minimax,opencode"). Empty for a single channel and for a
+   * pinned route (the interpretation pass).
+   */
+  fallbackChannels: ChannelKey[];
   /** False when the upstream cannot stream and keep structured output. */
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
@@ -313,18 +412,34 @@ function readVar(env: WorkerEnv, name: keyof WorkerEnv) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function channelFor(provider: ProviderKey, env: WorkerEnv) {
-  const requested = readVar(env, CHANNEL_VAR[provider]).toLowerCase();
-  if (!requested) {
-    return { channel: DEFAULT_CHANNEL[provider], problem: "" };
+/**
+ * The channels a provider may use, in order. A channel var may be a chain -
+ * "minimax,opencode" - and the Worker moves down it when a channel refuses
+ * the account or stops answering (see switchChannel in run.ts).
+ */
+function channelsFor(provider: ProviderKey, env: WorkerEnv) {
+  const requested = readVar(env, CHANNEL_VAR[provider])
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!requested.length) {
+    return { channels: [DEFAULT_CHANNEL[provider]], problem: "" };
   }
-  if (!isChannelKey(requested)) {
+  const unknown = requested.find((entry) => !isChannelKey(entry));
+  if (unknown) {
     return {
-      channel: DEFAULT_CHANNEL[provider],
-      problem: `${CHANNEL_VAR[provider]} is set to "${requested}", which is not a known channel.`,
+      channels: [DEFAULT_CHANNEL[provider]],
+      problem: `${CHANNEL_VAR[provider]} names "${unknown}", which is not a known channel.`,
     };
   }
-  return { channel: requested, problem: "" };
+  return { channels: [...new Set(requested)] as ChannelKey[], problem: "" };
+}
+
+/** Whether a channel can serve the provider right now: a route exists and its key is set. */
+function channelUsable(provider: ProviderKey, channel: ChannelKey, env: WorkerEnv) {
+  const spec = ROUTES[provider][channel];
+  return Boolean(spec && readVar(env, spec.keyVar));
 }
 
 /**
@@ -338,9 +453,15 @@ export function resolveRoute(
   env: WorkerEnv,
   override?: RouteOverride,
 ): Route {
-  const { channel, problem: channelProblem } = override?.channel
-    ? { channel: override.channel, problem: "" }
-    : channelFor(provider, env);
+  const { channels, problem: channelProblem } = override?.channel
+    ? { channels: [override.channel], problem: "" }
+    : channelsFor(provider, env);
+  // The first channel that can actually serve comes first, so removing a
+  // key (a plan that ended) moves the provider down its chain without a
+  // redeploy. With none usable, the first one is kept for its error message.
+  const usable = channels.filter((candidate) => channelUsable(provider, candidate, env));
+  const channel = usable[0] ?? channels[0];
+  const fallbackChannels = usable.slice(1);
   const spec = ROUTES[provider][channel];
 
   if (!spec) {
@@ -350,6 +471,8 @@ export function resolveRoute(
       channel,
       dialect: "responses",
       model: "",
+      fallbackModels: [],
+      fallbackChannels: [],
       endpoint: "",
       apiKey: "",
       effort: { kind: "none" },
@@ -364,17 +487,30 @@ export function resolveRoute(
   }
 
   const apiKey = readVar(env, spec.keyVar);
+  // A model var may be a chain: primary first, fallbacks after.
+  const [model, ...fallbackModels] = (
+    override?.model ||
+    readVar(env, spec.modelVar) ||
+    spec.defaultModel
+  )
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
   return {
     provider,
     channel,
     dialect: spec.dialect,
-    model: override?.model || readVar(env, spec.modelVar) || spec.defaultModel,
+    model,
+    fallbackModels,
+    fallbackChannels,
     endpoint:
       (readVar(env, spec.urlVar) || spec.defaultUrl).replace(/\/$/, "") + (spec.pathSuffix || ""),
     apiKey,
     effort: spec.effort,
     forceEffort: spec.forceEffort,
     minEffort: spec.minEffort,
+    maxEffort: spec.maxEffort,
+    timeoutMs: spec.timeoutMs,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
@@ -385,13 +521,22 @@ export function resolveRoute(
 }
 
 // Reading the diagram is a comprehension task where a misread poisons the
-// solve, so the interpretation pass uses top-tier Poe models - which are also
-// the cheap CPU routes (Poe buffers upstream). Only providers with a Poe route
-// are pinned; a non-Poe pick (DeepSeek, Grok) keeps its normal route.
+// solve, so the interpretation pass pins its providers to routes chosen for
+// it rather than the solve-time channel. Only providers listed here are
+// pinned; any other pick (DeepSeek, Muse Spark, ...) keeps its normal route.
 //
-// gpt-5.4-pro reads correctly but the pro tier over-thinks a transcription
-// task (~95 s vs ~5 s for gemini); set INTERPRET_CHATGPT_MODEL=gpt-5.4 to
-// trade a little away for a much faster reader.
+// ChatGPT is pinned to gpt-5.6-luna on OpenCode Go - the default judge of
+// the pass since 22 September 2026, at the owner's request (no Poe). It
+// read on Poe's gpt-5.4-pro before that: correct, but the pro tier
+// over-thinks a transcription task (~95 s vs ~5 s for Gemini) and bills the
+// Poe account. To go back, set chatgpt to "poe" below and
+// INTERPRET_CHATGPT_MODEL to a Poe bot id.
+//
+// Gemini reads on Google, free-tier Flash, with a model chain: 3.8-flash
+// first, 3.5-flash when 3.8 is unavailable (it answered 503 "high demand" on
+// four of six solves the day this was added; 3.5 was 3/3). If GOOGLE_API_KEY
+// is not configured the reader falls back to the Poe pin so the pass keeps
+// working.
 const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
   chatgpt: "INTERPRET_CHATGPT_MODEL",
   gemini: "INTERPRET_GEMINI_MODEL",
@@ -399,18 +544,32 @@ const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
 };
 
 const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
-  chatgpt: "gpt-5.4-pro",
-  gemini: "gemini-3.1-pro",
+  chatgpt: "gpt-5.6-luna",
+  gemini: "gemini-3.8-flash,gemini-3.5-flash",
   claude: "claude-opus-4.8",
 };
+
+/** Where each pinned reader runs. Gemini needs its key; see interpretOverride. */
+const INTERPRET_CHANNEL: Partial<Record<ProviderKey, ChannelKey>> = {
+  chatgpt: "opencode",
+  gemini: "google",
+  claude: "poe",
+};
+
+const INTERPRET_GEMINI_POE_FALLBACK = "gemini-3.1-pro";
 
 export function interpretOverride(
   provider: ProviderKey,
   env: WorkerEnv,
 ): RouteOverride | undefined {
+  const channel = INTERPRET_CHANNEL[provider];
+  if (!channel) return undefined;
+  if (provider === "gemini" && !readVar(env, "GOOGLE_API_KEY")) {
+    return { channel: "poe", model: INTERPRET_GEMINI_POE_FALLBACK };
+  }
   const varName = INTERPRET_MODEL_VAR[provider];
   const model = (varName && readVar(env, varName)) || INTERPRET_MODEL_DEFAULT[provider];
-  return model ? { channel: "poe", model } : undefined;
+  return model ? { channel, model } : undefined;
 }
 
 /** Health payload for one provider. Never exposes key values. */
@@ -422,6 +581,9 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     configured: route.configured && !route.problem,
     ...(route.forceEffort ? { forcedEffort: route.forceEffort } : {}),
     ...(route.minEffort ? { minEffort: route.minEffort } : {}),
+    ...(route.maxEffort ? { maxEffort: route.maxEffort } : {}),
+    ...(route.fallbackModels.length ? { fallbackModels: route.fallbackModels } : {}),
+    ...(route.fallbackChannels.length ? { fallbackChannels: route.fallbackChannels } : {}),
   };
 }
 
@@ -911,6 +1073,16 @@ export function extractPayloadError(dialect: Dialect, payload: Record<string, un
   if (error) {
     const message = readString(error, "message");
     if (message) return message;
+  }
+
+  // MiniMax's own envelope: HTTP 200 with {"base_resp": {"status_code": N,
+  // "status_msg": "..."}} and no choices when the call was refused. The code
+  // is kept in the text, "(1008)", so an ended plan reads as an account
+  // refusal (ACCOUNT_WORDS in run.ts) and moves down the channel chain.
+  const baseResp = asRecord(payload.base_resp);
+  const baseCode = baseResp?.status_code;
+  if (typeof baseCode === "number" && baseCode !== 0) {
+    return `${readString(baseResp, "status_msg") || "The provider refused the request"} (${baseCode})`;
   }
 
   if (dialect === "responses") {

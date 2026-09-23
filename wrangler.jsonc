@@ -16,10 +16,20 @@
     // actually supports).
     "CHATGPT_CHANNEL": "opencode",
     "CLAUDE_CHANNEL": "poe",
-    "GEMINI_CHANNEL": "poe",
+    // Google since 21 September 2026: free-tier Flash, the cheapest CPU route
+    // of any, and correct on both fixtures. "poe" serves gemini-3.1-pro (Pro,
+    // paid) if the Google key is ever lost.
+    "GEMINI_CHANNEL": "google",
     "DEEPSEEK_CHANNEL": "opencode",
     "GROK_CHANNEL": "opencode",
     "MIMO_CHANNEL": "opencode",
+    // An ordered chain: MiniMax's own API on the owner's token plan first
+    // (MINIMAX_API_KEY), OpenCode Go second. When MiniMax refuses the
+    // account - the plan ended, the key was revoked - or stops answering,
+    // the Worker moves that solve to OpenCode Go by itself and says so.
+    // Removing the MINIMAX_API_KEY secret skips straight to OpenCode Go.
+    // To pin one: "minimax" (plan only) or "opencode" (Go only).
+    "MINIMAX_CHANNEL": "minimax,opencode",
     "MUSE_CHANNEL": "opencode",
 
     // Model per channel. Every one of these must be vision-capable: the
@@ -34,21 +44,37 @@
     // fixture. Revert to "deepseek-v4-flash-vision-exp" if it regresses.
     "OPENCODE_DEEPSEEK_MODEL": "deepseek-v4.1-flash",
     "OPENCODE_GROK_MODEL": "grok-4.6",
-    // OpenCode Zen's free MiMo tier. The docs say "mimo-v2.5-free"; the Go
-    // gateway serves it as "mimo-v2.5" ("mimo-v2.5-pro" is the paid one).
-    "OPENCODE_MIMO_MODEL": "mimo-v2.5",
+    // OpenCode Zen's free MiMo tier. Zen lists "mimo-v2.6-flash-free"; the Go
+    // gateway serves it as "mimo-v2.6-flash" ("mimo-v2.6-pro" is the paid one).
+    "OPENCODE_MIMO_MODEL": "mimo-v2.6-flash",
+    // MiniMax has no free tier on either gateway, so this runs on the Go
+    // subscription quota. "minimax-m2.7"/"minimax-m2.5" answer 503.
+    "OPENCODE_MINIMAX_MODEL": "minimax-m3",
+    // The default MiniMax route: their own API spells the model with
+    // capitals, the Go gateway spells it lower-case.
+    "MINIMAX_MODEL": "MiniMax-M3",
     // Free "contributor" tier; the workspace must opt in to its data
     // collection or the gateway answers 403 DataPolicyError.
     "OPENCODE_MUSE_MODEL": "muse-spark-1.3-contributor",
     "POE_CHATGPT_MODEL": "gpt-5.4",
     "POE_CLAUDE_MODEL": "claude-opus-4.8",
     "POE_GEMINI_MODEL": "gemini-3.1-pro",
-    // Google ids are preview-suffixed on the Pro tier; "gemini-3.1-pro" 404s.
-    "GOOGLE_GEMINI_MODEL": "gemini-3.1-pro-preview",
-    // The optional interpretation pass runs on top-tier Poe models, set here.
-    // gpt-5.4-pro reads well but is slow (~95s); gpt-5.4 is much faster.
-    "INTERPRET_CHATGPT_MODEL": "gpt-5.4-pro",
-    "INTERPRET_GEMINI_MODEL": "gemini-3.1-pro",
+    // Only used when GEMINI_CHANNEL is "google". A model var may be a chain,
+    // primary first: on a 503 / 429 / dropped stream the Worker moves to the
+    // next model instead of retrying the same one. The owner's Google key is
+    // free-tier: Flash models work, "gemini-3.1-pro-preview" answers 429.
+    // 3.8-flash reads best but answered 503 "high demand" on four of six
+    // solves the day this was set; 3.5-flash was 3/3.
+    "GOOGLE_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
+    // The optional interpretation pass pins these providers here (any other
+    // pick keeps its normal route). ChatGPT is gpt-5.6-luna on OpenCode Go -
+    // the pass's default judge; Poe's gpt-5.4-pro read well but slowly
+    // (~95 s) and billed Poe. Gemini reads on Google (free-tier Flash, the
+    // cheapest CPU of any route) with the same chain as above, and falls
+    // back to Poe's gemini-3.1-pro only if GOOGLE_API_KEY is unset. Claude
+    // is Opus on Poe.
+    "INTERPRET_CHATGPT_MODEL": "gpt-5.6-luna",
+    "INTERPRET_GEMINI_MODEL": "gemini-3.8-flash,gemini-3.5-flash",
     "INTERPRET_CLAUDE_MODEL": "claude-opus-4.8",
 
     // Endpoint overrides (proxies). Defaults:
@@ -57,7 +83,12 @@
     //   "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
 
     // Comma-separated provider keys that should skip upstream streaming
-    // (still delivered to the browser over SSE), e.g. "deepseek".
+    // (still delivered to the browser over SSE). Was "deepseek" while the
+    // account was on the free plan (10 ms CPU): DeepSeek streams its
+    // reasoning token by token and was killed at 2,010 ms. On Workers Paid
+    // (since 22 September 2026, 30 s CPU) the stream fits, so it is empty:
+    // streaming shows progress and is not subject to OpenCode's ~100-120 s
+    // idle cut. Set it back to "deepseek" if the account ever drops to free.
     "NO_STREAM": ""
   },
   "observability": {

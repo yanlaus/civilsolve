@@ -58,8 +58,22 @@ export function sanitizeText(value: string) {
 // Structured solution parsing (raw model text -> StructuredSolution)
 // ---------------------------------------------------------------------------
 
+/**
+ * Removes `<think>...</think>` reasoning that a model put in its *content*
+ * rather than in a reasoning field. MiniMax M3 on OpenCode Go does this, and
+ * its thinking is long (60-76k characters on the B.8 fixture) and full of
+ * braces, so leaving it in makes the first `{` of the candidate land inside
+ * the reasoning and everything after it parse as garbage. An unclosed
+ * `<think>` means the answer never arrived, so the rest is dropped too.
+ */
+export function stripThinkTags(value: string) {
+  const closed = value.replace(/<think>[\s\S]*?<\/think>/gi, " ");
+  const open = closed.search(/<think>/i);
+  return (open >= 0 ? closed.slice(0, open) : closed).trim();
+}
+
 export function normalizeJsonCandidate(rawText: string) {
-  const trimmed = sanitizeText(rawText);
+  const trimmed = stripThinkTags(sanitizeText(rawText));
   if (!trimmed) return trimmed;
 
   const withoutFence = trimmed
@@ -102,7 +116,7 @@ const CUT_OFF_BEFORE_ANSWER = "The response was cut off before reaching the fina
 function recoverTruncatedJson(
   rawText: string,
 ): { record: Record<string, unknown>; cutField: string | null } | null {
-  const text = sanitizeText(rawText).replace(/^```(?:json)?\s*/i, "");
+  const text = stripThinkTags(sanitizeText(rawText)).replace(/^```(?:json)?\s*/i, "");
   const start = text.indexOf("{");
   if (start < 0) return null;
   // To the END, not to the last "}": a LaTeX body is full of braces.
@@ -241,7 +255,7 @@ export function parseStructuredSolution(
 }
 
 function synthesizeStructuredSolutionFromText(rawText: string): StructuredSolution | null {
-  const text = sanitizeText(rawText);
+  const text = stripThinkTags(sanitizeText(rawText));
   if (text.length < 40) {
     return null;
   }
@@ -347,75 +361,158 @@ function normalizeStructuredSolution(
   };
 }
 
+/**
+ * Any value a model put where text belongs, as text: a string as-is, a list
+ * as one entry per line (numbered unless the entries already carry their
+ * own "Step 3 -" / "3." labels), an object as "key = value" lines.
+ */
+function textOf(value: unknown): string {
+  if (typeof value === "string") return sanitizeText(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const items = value.map((entry) => textOf(entry)).filter(Boolean);
+    if (!items.length) return "";
+    const labelled = items.every((item) => /^(step\s*\d+|\d+[.)]|\(\w\))/i.test(item));
+    return labelled
+      ? items.join("\n\n")
+      : items.map((item, index) => `${index + 1}. ${item}`).join("\n");
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    // A step or formula object: {name, latex, substitution} and the like.
+    const parts = Object.entries(record)
+      .map(([key, entry]) => {
+        const text = textOf(entry);
+        if (!text) return "";
+        return typeof entry === "string" && /^(name|title|label|description|text)$/i.test(key)
+          ? text
+          : `${key} = ${text}`;
+      })
+      .filter(Boolean);
+    return parts.join("\n");
+  }
+  return "";
+}
+
+function readTextField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const text = textOf(record[key]);
+    if (text) return text;
+  }
+  return "";
+}
+
+/**
+ * `{"problems": [...]}`: the shape a model invents when it is handed several
+ * problems and not held to the schema. Every problem is kept, each under its
+ * own heading, in all five text fields - the app shows one solution per
+ * provider, and an exam paper is many problems. (Until 23 September 2026
+ * this read problems[0] only, so a 16-question paper showed question 1.)
+ *
+ * Field shapes vary by model: MiniMax M3 sent `step_by_step` as a list of
+ * "Step N -" strings, `given` as an object and `formulas` as a list of
+ * {name, latex, substitution} objects; older runs sent strings or a nested
+ * `solution` object. textOf takes whichever arrives.
+ */
 function normalizeProblemsShape(record: Record<string, unknown>): StructuredSolution | null {
   const problems = record.problems;
   if (!Array.isArray(problems) || !problems.length) {
     return null;
   }
 
-  const first = problems[0];
-  if (!first || typeof first !== "object") {
+  const parts = problems
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((problem, index) => {
+      const label =
+        readTextField(problem, ["problem_id", "problem_number", "id", "number", "label", "title"]) ||
+        `Problem ${index + 1}`;
+      const interpreted = readTextField(problem, [
+        "interpreted_problem",
+        "interpretedProblem",
+        "statement",
+        "problem",
+        "question",
+        "problem_text",
+      ]);
+      const given = readTextField(problem, ["given", "given_information"]);
+      const required = readTextField(problem, ["required", "required_quantity"]);
+      const assumptions = readTextField(problem, ["assumptions", "notes", "missing_data"]);
+      const formulas = readTextField(problem, ["formulas", "equations"]);
+      const legacySteps = [
+        readNestedString(problem, ["solution", "formula"]),
+        readNestedString(problem, ["solution", "substitution"]),
+        readNestedString(problem, ["solution", "result"]),
+        ...readStringArray(problem, "formula_substitution_result"),
+      ].filter(Boolean);
+      const steps =
+        readTextField(problem, [
+          "step_by_step",
+          "stepByStep",
+          "stepbystep",
+          "steps",
+          "worked_solution",
+          "solution_text",
+          "working",
+        ]) ||
+        (legacySteps.length ? legacySteps.map((part, i) => `${i + 1}. ${part}`).join("\n") : "");
+      const answer = readTextField(problem, [
+        "final_answer",
+        "finalAnswer",
+        "finalanswer",
+        "answer",
+        "result",
+      ]);
+      const latex = readTextField(problem, ["latex_body", "latex"]);
+      return { label, interpreted, given, required, assumptions, formulas, steps, answer, latex };
+    })
+    // A problem with neither working nor an answer contributes nothing.
+    .filter((part) => part.steps || part.answer);
+
+  if (!parts.length || !parts.some((part) => part.answer)) {
     return null;
   }
 
-  const problem = first as Record<string, unknown>;
-  const interpretedProblem =
-    readStringField(problem, [
-      "interpreted_problem",
-      "interpretedProblem",
-      "statement",
-      "problem",
-      "question",
-      "problem_text",
-    ]) || "";
-  const finalAnswer =
-    readStringField(problem, [
-      "final_answer",
-      "finalAnswer",
-      "finalanswer",
-      "answer",
-      "result",
-    ]) || "";
+  const many = parts.length > 1;
+  const section = (label: string, body: string, heading: "###" | "bold") =>
+    !many ? body : heading === "###" ? `### ${label}\n\n${body}` : `**${label}.** ${body}`;
+  const join = (pick: (part: (typeof parts)[number]) => string, heading: "###" | "bold") =>
+    parts
+      .map((part) => (pick(part) ? section(part.label, pick(part), heading) : ""))
+      .filter(Boolean)
+      .join("\n\n");
 
-  const directStepByStep = readStringField(problem, [
-    "step_by_step",
-    "stepByStep",
-    "stepbystep",
-    "worked_solution",
-    "solution_text",
-  ]);
-
-  const stepParts = [
-    readNestedString(problem, ["solution", "formula"]),
-    readNestedString(problem, ["solution", "substitution"]),
-    readNestedString(problem, ["solution", "result"]),
-    ...readStringArray(problem, "formula_substitution_result"),
-  ].filter(Boolean);
-
-  const given =
-    formatStringArray(problem.given) ||
-    formatStringArray(problem.given_information);
-  const required = readStringField(problem, ["required", "required_quantity"]);
-  const assumptions = [given ? `Given:\n${given}` : "", required ? `Required:\n${required}` : ""]
-    .filter(Boolean)
-    .join("\n\n") ||
-    readStringField(problem, ["assumptions", "notes", "missing_data"]) ||
-    "Assumptions were not explicitly stated.";
-
-  if (!interpretedProblem || !finalAnswer || (!directStepByStep && !stepParts.length)) {
-    return null;
-  }
-
-  const problemNumberLabel = readStringField(problem, ["problem_number"]) ||
-    (typeof problem.problem_number === "number" ? String(problem.problem_number) : "");
+  const assumptions = join(
+    (part) =>
+      [
+        part.given ? `Given:\n${part.given}` : "",
+        part.required ? `Required:\n${part.required}` : "",
+        part.assumptions,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    "###",
+  );
+  const steps = join(
+    (part) => [part.formulas ? `Formulas:\n${part.formulas}` : "", part.steps].filter(Boolean).join("\n\n"),
+    "###",
+  );
+  // LaTeX per problem is kept only when every problem has some; a partial
+  // document is worse than the one finalizeProviderArtifact rebuilds.
+  const latex = parts.every((part) => part.latex)
+    ? parts
+        .map((part) => (many ? `\\section*{${part.label}}\n${part.latex}` : part.latex))
+        .join("\n\n")
+    : readStringField(record, ["latex_body"]);
 
   return {
-    title: `Worked Solution${problemNumberLabel ? ` ${problemNumberLabel}` : ""}`.trim(),
-    interpreted_problem: interpretedProblem,
-    assumptions,
-    step_by_step: directStepByStep || stepParts.map((part, index) => `${index + 1}. ${part}`).join("\n"),
-    final_answer: finalAnswer,
-    latex_body: readStringField(record, ["latex_body"]),
+    title:
+      readStringField(record, ["title", "assignment_title"]) ||
+      (many ? `Worked Solutions (${parts.length} problems)` : `Worked Solution ${parts[0].label}`.trim()),
+    interpreted_problem: join((part) => part.interpreted, "bold"),
+    assumptions: assumptions || "Assumptions were not explicitly stated.",
+    step_by_step: steps,
+    final_answer: join((part) => part.answer, "bold"),
+    latex_body: latex,
   };
 }
 
@@ -861,6 +958,28 @@ function hasMeaningfulContent(value: string, minimumLength = 10) {
 // ---------------------------------------------------------------------------
 // Finalization: raw model text -> normalized ProviderArtifact
 // ---------------------------------------------------------------------------
+
+/**
+ * Flattens a solution into the text a judge reads (see /api/judge). The
+ * LaTeX body is left out - it duplicates the working - and the whole thing
+ * is capped at `limit` characters with the working kept ahead of the tail,
+ * so a runaway solution still hands the judge its reading and its answer.
+ */
+export function artifactToText(artifact: ProviderArtifact, limit = Infinity) {
+  const head = [
+    `Interpreted problem:\n${artifact.interpretedProblem}`,
+    artifact.assumptions ? `Assumptions:\n${artifact.assumptions}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const answer = `Final answer:\n${artifact.finalAnswer}`;
+  const budget = limit - head.length - answer.length - 24;
+  let working = `Solution:\n${artifact.stepByStep}`;
+  if (working.length > budget) {
+    working = budget > 80 ? `${working.slice(0, budget - 16)}\n[... cut ...]` : "";
+  }
+  return [head, working, answer].filter(Boolean).join("\n\n").trim();
+}
 
 export function finalizeProviderArtifact(
   provider: ProviderKey,

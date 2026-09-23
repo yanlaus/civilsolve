@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, ExternalLink, Loader2 } from "lucide-react";
-import { PROVIDER_KEYS, type ProviderKey } from "../../../shared/providers";
+import { Check, CheckCircle2, Download, ExternalLink, Loader2, Scale, X } from "lucide-react";
+import { SOLUTION_LETTERS } from "../../../shared/judgement";
+import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../../shared/providers";
 import type { ProviderArtifact } from "../../../shared/solution";
-import { isRunActive, type ProviderRuns } from "@/hooks/use-solve";
+import { isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
 import { exportPdf, exportTex, openInOverleaf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { SolutionArticle } from "./solution-article";
@@ -27,7 +28,37 @@ function viewSource(artifact: ProviderArtifact, view: ViewKey) {
         : artifact.finalAnswer;
 }
 
-export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
+/** What the verdict says about one solver: correct, wrong, or not judged. */
+function solverMark(
+  judgeRun: JudgeRun,
+  provider: ProviderKey,
+): "correct" | "wrong" | null {
+  if (judgeRun.status !== "done") return null;
+  const index = judgeRun.solvers.indexOf(provider);
+  if (index < 0) return null;
+  return judgeRun.judgement.correct.includes(index) ? "correct" : "wrong";
+}
+
+/** "Gemini's solution is correct", "Gemini and Muse Spark are correct", ... */
+function verdictHeadline(labels: string[], correct: number[]) {
+  if (correct.length === 0) {
+    return labels.length === 2 ? "Neither solution is correct" : "None of the solutions is correct";
+  }
+  if (correct.length === labels.length) {
+    return labels.length === 2 ? "Both solutions are correct" : "All solutions are correct";
+  }
+  const names = correct.map((index) => labels[index]);
+  if (names.length === 1) return `${names[0]}'s solution is correct`;
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are correct`;
+}
+
+export default function SolutionPanel({
+  runs,
+  judgeRun,
+}: {
+  runs: ProviderRuns;
+  judgeRun: JudgeRun;
+}) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
@@ -82,11 +113,14 @@ export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
         </h2>
       </div>
 
+      {judgeRun.status !== "idle" ? <JudgementCard judgeRun={judgeRun} /> : null}
+
       <div className="overflow-hidden rounded-2xl border border-[#e8e3db] bg-white shadow-[0_4px_16px_rgba(27,22,16,0.08)] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e]">
         <div className="border-b-2 border-[#e8e3db] px-2 pt-1 dark:border-[#1e2a40]">
           <div className="flex overflow-x-auto">
             {visibleProviders.map((provider) => {
               const run = runs[provider.key];
+              const mark = solverMark(judgeRun, provider.key);
               return (
                 <button
                   key={provider.key}
@@ -98,7 +132,14 @@ export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
                       : "text-[#8a7f72] hover:text-[#1b1610] dark:text-[#a8a098] dark:hover:text-[#e4e0db]"
                   }`}
                 >
-                  <div>{provider.label}</div>
+                  <div className="flex items-center gap-1.5">
+                    {provider.label}
+                    {mark === "correct" ? (
+                      <Check className="h-3.5 w-3.5 text-[#2d8a4e] dark:text-[#3daf66]" aria-label="Judged correct" />
+                    ) : mark === "wrong" ? (
+                      <X className="h-3.5 w-3.5 text-[#c0392b] dark:text-[#f2b8b2]" aria-label="Judged wrong" />
+                    ) : null}
+                  </div>
                   <span
                     className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
                       activeProvider === provider.key ? "bg-[#b35c1e] dark:bg-[#e8903a]" : "bg-transparent"
@@ -212,5 +253,153 @@ export default function SolutionPanel({ runs }: { runs: ProviderRuns }) {
         />
       ) : null}
     </section>
+  );
+}
+
+const CONFIDENCE_CLASS = {
+  high: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]",
+  medium:
+    "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10] dark:border-[#5b512a] dark:text-[#e6d6a0]",
+  low: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]",
+} as const;
+
+/** Compact rendered markdown for the verdict's fields (math included). */
+function Prose({ source }: { source: string }) {
+  const html = useMemo(() => renderMarkdown(source), [source]);
+  return (
+    <div
+      className="solution-content prose prose-sm prose-stone max-w-none min-w-0 overflow-x-hidden leading-7 dark:prose-invert"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function Assessment({
+  label,
+  letter,
+  text,
+  correct,
+}: {
+  label: string;
+  letter: string;
+  text: string;
+  correct: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-[10px] border border-[#e8e3db] bg-[#faf8f5] px-4 py-3 dark:border-[#1e2a40] dark:bg-[#0e1420]">
+      <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+        {correct ? (
+          <Check className="h-3.5 w-3.5 text-[#2d8a4e] dark:text-[#3daf66]" aria-hidden="true" />
+        ) : (
+          <X className="h-3.5 w-3.5 text-[#c0392b] dark:text-[#f2b8b2]" aria-hidden="true" />
+        )}
+        Solution {letter} · {label}
+      </div>
+      {text ? <Prose source={text} /> : <p className="text-sm text-[#8a7f72]">No assessment given.</p>}
+    </div>
+  );
+}
+
+/**
+ * The answer cross-check's result: which solvers the judge found correct,
+ * the judge's own verified answer, and what each solution got wrong. The
+ * judge only ever saw "Solution A", "Solution B", ...; the provider names
+ * are added back here from the order the solvers ran in.
+ */
+function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
+  if (judgeRun.status === "idle") return null;
+  const judgeLabel = PROVIDER_LABELS[judgeRun.judge];
+
+  if (judgeRun.status !== "done") {
+    const tone =
+      judgeRun.status === "error"
+        ? "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]"
+        : "border-[#d4cdc3] bg-white text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]";
+    return (
+      <div className={`mb-4 flex items-center gap-3 rounded-[10px] border px-4 py-3 text-sm print:hidden ${tone}`}>
+        {judgeRun.status === "error" ? (
+          <Scale className="h-4 w-4 shrink-0" aria-hidden="true" />
+        ) : (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#b35c1e] dark:text-[#e8903a]" />
+        )}
+        <span>
+          <span className="font-semibold">Cross-check ({judgeLabel}): </span>
+          {judgeRun.status === "streaming"
+            ? `writing the verdict... ${judgeRun.charsReceived.toLocaleString()} characters received.`
+            : judgeRun.message}
+        </span>
+      </div>
+    );
+  }
+
+  const { judgement, solvers, skipped } = judgeRun;
+  const labels = solvers.map((provider) => PROVIDER_LABELS[provider]);
+  const headlineTone =
+    judgement.correct.length === 0
+      ? "text-[#c0392b] dark:text-[#f2b8b2]"
+      : "text-[#2d8a4e] dark:text-[#3daf66]";
+
+  return (
+    <div className="mb-4 rounded-2xl border-2 border-[#b35c1e] bg-white p-5 shadow-[0_0_0_4px_rgba(179,92,30,0.12)] print:hidden dark:border-[#e8903a] dark:bg-[#151d2e]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+          Cross-check verdict
+          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
+            judged by {judgeLabel}
+          </span>
+        </p>
+        <span
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.7rem] font-medium ${CONFIDENCE_CLASS[judgement.confidence]}`}
+        >
+          {judgement.confidence} confidence
+        </span>
+      </div>
+
+      <p className={`mt-2 text-base font-semibold ${headlineTone}`}>
+        {verdictHeadline(labels, judgement.correct)}
+      </p>
+      {skipped.length ? (
+        <p className="mt-1 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+          Not graded: {skipped.map((provider) => PROVIDER_LABELS[provider]).join(", ")} returned
+          no solution.
+        </p>
+      ) : null}
+
+      {judgement.final_answer ? (
+        <div className="mt-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+            Verified final answer
+          </div>
+          <Prose source={judgement.final_answer} />
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {solvers.map((provider, index) => (
+          <Assessment
+            key={provider}
+            label={PROVIDER_LABELS[provider]}
+            letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
+            text={judgement.assessments[index] ?? ""}
+            correct={judgement.correct.includes(index)}
+          />
+        ))}
+      </div>
+
+      {judgement.comparison ? (
+        <div className="mt-4">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+            Why
+          </div>
+          <Prose source={judgement.comparison} />
+        </div>
+      ) : null}
+
+      <p className="mt-4 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+        The judge is a model too — treat this as a second opinion, not an answer key. Open
+        each solution above and check the step it flags.
+      </p>
+    </div>
   );
 }

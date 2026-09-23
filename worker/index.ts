@@ -3,12 +3,15 @@ import {
   interpretationSchema,
   parseInterpretation,
 } from "../shared/interpretation";
+import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
 import {
   buildInterpretPrompt,
+  buildJudgePrompt,
   buildTutorPrompt,
   buildVerifyPrompt,
   INTERPRET_INSTRUCTIONS,
   isEffortKey,
+  JUDGE_INSTRUCTIONS,
   SOLVE_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
@@ -28,6 +31,7 @@ import {
   MAX_NOTES_LENGTH,
   MAX_REFERENCE_IMAGES,
   MAX_REFERENCE_TEXT,
+  MAX_SOLUTION_TEXT,
 } from "../shared/stream-protocol";
 import { interpretOverride, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, type RunTaskParams } from "./run";
@@ -231,7 +235,7 @@ app.post("/api/interpret/:provider", async (c) => {
   return startSse(c, {
     provider,
     env: c.env,
-    // The interpretation pass runs on Poe top-tier models (see interpretOverride).
+    // The interpretation pass pins some providers to routes chosen for it (see interpretOverride).
     routeOverride: interpretOverride(provider, c.env),
     // Readers default to a modest budget - they transcribe, they do not
     // derive - and the user can raise it. The judge defaults to the strongest
@@ -246,7 +250,66 @@ app.post("/api/interpret/:provider", async (c) => {
       schema: interpretationSchema as unknown as Record<string, unknown>,
       images: assignment.images,
     },
-    finalize: (rawText) => ({ interpretation: parseInterpretation(rawText, provider) }),
+    finalize: (rawText, { lastAttempt }) => ({
+      interpretation: parseInterpretation(rawText, provider, { allowIncomplete: lastAttempt }),
+    }),
+  });
+});
+
+// The answer cross-check: grades the selected solvers' solutions against the
+// images. Runs on the provider's normal solve route - no override - so the
+// judge is whatever the user picked, at the effort the most reliable solves
+// used.
+app.post("/api/judge/:provider", async (c) => {
+  const parsed = await readRequest(c);
+  if ("response" in parsed) return parsed.response;
+  const { provider, body } = parsed;
+
+  const assignment = readImages(body.images, MAX_IMAGES, "Images");
+  if ("error" in assignment) return c.json({ error: assignment.error }, 400);
+  if (assignment.images.length < 1) {
+    return c.json({ error: `Provide between 1 and ${MAX_IMAGES} images.` }, 400);
+  }
+
+  const candidates = Array.isArray(body.solutions) ? body.solutions : [];
+  if (
+    candidates.length < 2 ||
+    candidates.length > MAX_JUDGED_SOLUTIONS ||
+    candidates.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    return c.json(
+      { error: `The cross-check needs between 2 and ${MAX_JUDGED_SOLUTIONS} solutions.` },
+      400,
+    );
+  }
+  const solutions = (candidates as string[]).map((entry) => entry.slice(0, MAX_SOLUTION_TEXT));
+
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "high";
+
+  return startSse(c, {
+    provider,
+    env: c.env,
+    effort,
+    task: {
+      session: crypto.randomUUID(),
+      prompt: ({ enforceShape }) =>
+        buildJudgePrompt(notes, solutions, {
+          enforceShape,
+          interpretation: interpretation || undefined,
+        }),
+      instructions: JUDGE_INSTRUCTIONS,
+      schemaName: "civil_judgement",
+      schema: judgementSchema as unknown as Record<string, unknown>,
+      images: assignment.images,
+    },
+    finalize: (rawText, { lastAttempt }) => ({
+      judgement: parseJudgement(rawText, provider, solutions.length, {
+        allowIncomplete: lastAttempt,
+      }),
+    }),
   });
 });
 

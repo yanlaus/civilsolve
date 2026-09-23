@@ -4,10 +4,11 @@
 // worker/channels.ts. This module only owns the parts that are the same for
 // every channel and every task: immediate SSE headers, heartbeats, the safety
 // timeout, the retry/downgrade policy, and translation into the app-level SSE
-// protocol. Both /api/solve and /api/interpret run through it.
+// protocol. /api/solve, /api/interpret and /api/judge all run through it.
 
 import { EFFORT_KEYS, type EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
+import { taskTimeoutMs } from "../shared/stream-protocol";
 import {
   buildRequest,
   extractCompleted,
@@ -32,6 +33,18 @@ import {
 
 export type { WorkerEnv };
 
+/**
+ * How long one task may run before it is abandoned, unless the route sets
+ * its own `timeoutMs`. Covers every attempt, so a retry cannot extend it.
+ *
+ * 280 s came in with the original import and carried no recorded reason;
+ * 300 s is the Workers paid CPU ceiling, so it reads as "just under five
+ * minutes". That reasoning does not actually apply: Cloudflare enforces no
+ * wall-clock limit on an HTTP request while the client stays connected, and
+ * time spent waiting on `fetch()` is not billed as CPU at all (a 77 s solve
+ * costs ~3 s of CPU). What the number really encodes is how long a user
+ * should wait before being told nothing is coming.
+ */
 const SAFETY_TIMEOUT_MS = 280_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_TRANSIENT_RETRIES = 1;
@@ -68,9 +81,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function raiseToFloor(requested: EffortKey, floor: EffortKey | undefined): EffortKey {
-  if (!floor) return requested;
-  return EFFORT_KEYS.indexOf(requested) < EFFORT_KEYS.indexOf(floor) ? floor : requested;
+/** Clamps the requested level into the route's [minEffort, maxEffort] band. */
+function clampEffort(requested: EffortKey, route: Route): EffortKey {
+  let index = EFFORT_KEYS.indexOf(requested);
+  if (route.minEffort) index = Math.max(index, EFFORT_KEYS.indexOf(route.minEffort));
+  if (route.maxEffort) index = Math.min(index, EFFORT_KEYS.indexOf(route.maxEffort));
+  return EFFORT_KEYS[index];
 }
 
 /**
@@ -118,15 +134,59 @@ function isRetryableStatus(status: number) {
  * here: …"}}`; the user needs that sentence, not the JSON around it. The raw
  * body stays on the error for paramRejection, which pattern-matches it.
  */
-function errorBodyMessage(body: string): string {
+/** The upstream's own error text, or "" when the body carries none. */
+function explicitErrorMessage(body: string): string {
   try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-    const message = parsed?.error?.message ?? parsed?.message;
-    if (typeof message === "string" && message.trim()) return message.trim();
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+    const error = parsed?.error;
+    const message =
+      (error && typeof error === "object" ? (error as { message?: unknown }).message : error) ??
+      parsed?.message;
+    return typeof message === "string" ? message.trim() : "";
   } catch {
-    // Not JSON - the raw body is the message.
+    // Not JSON - the raw body is the message, if there is one.
+    return body.trim().slice(0, 500);
   }
-  return body.slice(0, 500);
+}
+
+function errorBodyMessage(body: string): string {
+  return explicitErrorMessage(body) || body.trim().slice(0, 500) || "(empty response body)";
+}
+
+/**
+ * A 400/422 whose body carries no error message at all. Measured on OpenCode
+ * Go's DeepSeek (22 September 2026): the body is {"model":"deepseek-v4.1-flash"}
+ * and it is the strict JSON schema being refused without saying so - the
+ * same request with `json_object` or no response_format was 20/20 fine,
+ * while strict failed 1/10 one hour and 9/10 the next as the gateway's
+ * backend mix shifted (another backend refuses it *with* a message naming
+ * the schema). So paramRejection reads it as a schema rejection and steps
+ * down the ladder; only once there is no schema left to drop is it retried
+ * as transient.
+ */
+/**
+ * Words an upstream uses when the *account* is the problem - a plan that
+ * ended, a balance at zero, a revoked key - rather than the request. MiniMax
+ * tags its own errors with a code: 1004 authentication, 1008 insufficient
+ * balance, 2049 invalid key.
+ */
+const ACCOUNT_WORDS =
+  /insufficient[_ ]?balance|balance (is )?(not enough|insufficient)|quota|credit|billing|payment required|subscription|plan (has )?(expired|ended)|expired|authori[sz](ed|ation)_error|login fail|invalid api key|\((1004|1008|2049)\)/i;
+
+/**
+ * The upstream turned the account away. A different channel is a different
+ * account, so this is the one failure worth moving down a channel chain for
+ * instead of failing: when the owner's MiniMax token plan ends, MiniMax
+ * answers 401 {"error":{"type":"authorized_error",...}} and the solve
+ * should carry on over OpenCode Go.
+ */
+function isAccountRefusal(error: UpstreamError) {
+  if (error.status === 401 || error.status === 402 || error.status === 403) return true;
+  return ACCOUNT_WORDS.test(error.body || error.message);
+}
+
+function isSilentRejection(status: number, body: string) {
+  return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
 
 function upstreamError(label: string, status: number, body: string): UpstreamError {
@@ -135,7 +195,7 @@ function upstreamError(label: string, status: number, body: string): UpstreamErr
   ) as UpstreamError;
   error.status = status;
   error.body = body;
-  error.retryable = isRetryableStatus(status);
+  error.retryable = isRetryableStatus(status) || isSilentRejection(status, body);
   return error;
 }
 
@@ -166,6 +226,10 @@ const PARAM_WORDS = /param|参数|參數|field|unsupported|unrecognized|unknown|
  */
 function paramRejection(error: UpstreamError): DropTarget | null {
   if (error.status !== 400 && error.status !== 422) return null;
+  // Says nothing, but every observed case was the strict schema (see
+  // isSilentRejection). If the schema is already gone, canDrop fails and
+  // the error falls through to the transient retry it is marked for.
+  if (isSilentRejection(error.status, error.body ?? "")) return "schema";
   const body = error.body || error.message;
   // Checked before the reasoning words: a gateway that refuses forced tools
   // while thinking is on names both, and dropping the tool is the fix.
@@ -258,20 +322,26 @@ export async function runTask(
     });
   }, HEARTBEAT_INTERVAL_MS);
 
-  const route = resolveRoute(provider, env, routeOverride);
+  // Not const: a model chain ("a,b") swaps `model` in on a retryable failure.
+  let route = resolveRoute(provider, env, routeOverride);
   // A route may pin its reasoning level (a deliberately "always max" model)
   // or set a floor under the user's choice. Not const: a model that spends its
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
-  let effort = route.forceEffort ?? raiseToFloor(requestedEffort, route.minEffort);
+  let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
+  // Scales with the upload: a whole exam paper is a dozen questions in one
+  // request, not one long question (see taskTimeoutMs).
+  const timeoutMs = taskTimeoutMs(
+    route.timeoutMs ?? SAFETY_TIMEOUT_MS,
+    task.images.length,
+    task.referenceImages?.length ?? 0,
+  );
   const abort = new AbortController();
   const safetyTimer = setTimeout(() => {
-    abort.abort(
-      new Error(
-        `${route.label} timed out after ${Math.round(SAFETY_TIMEOUT_MS / 1000)} seconds.`,
-      ),
-    );
-  }, SAFETY_TIMEOUT_MS);
+    const seconds = Math.round(timeoutMs / 1000);
+    const spent = seconds >= 120 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`;
+    abort.abort(new Error(`${route.label} timed out after ${spent}.`));
+  }, timeoutMs);
 
   try {
     if (route.problem) {
@@ -281,15 +351,73 @@ export async function runTask(
 
     await write({ type: "status", message: `Asking ${route.label}...` });
 
-    const streamUpstream = wantsUpstreamStream(route, env);
-    const maxSteps = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES + MAX_EFFORT_STEPDOWNS;
+    let streamUpstream = wantsUpstreamStream(route, env);
+    const channelChain = route.fallbackChannels;
+    const stepsPerRoute = 1 + MAX_DOWNGRADES + MAX_TRANSIENT_RETRIES + MAX_EFFORT_STEPDOWNS;
+    const maxSteps =
+      stepsPerRoute +
+      // Each fallback model gets its own attempt plus its own transient retry.
+      route.fallbackModels.length * (1 + MAX_TRANSIENT_RETRIES) +
+      // Each fallback channel is a fresh route with its own ladder.
+      channelChain.length * stepsPerRoute;
 
     let caps = startingCapabilities(route, effort);
     let transientRetries = 0;
     let effortStepDowns = 0;
     let blindDowngrades = 0;
+    let modelFallbacks = 0;
+    let channelFallbacks = 0;
     let lastError: UpstreamError | null = null;
     let rawText = "";
+
+    /**
+     * Switches to the next model in the chain, if any, and says so. Used
+     * wherever the same request would otherwise be retried as-is: a model
+     * that did not answer is more likely fixed by a different model than by
+     * asking it again. The fallback starts with a fresh transient budget.
+     */
+    const switchModel = async (): Promise<boolean> => {
+      const next = route.fallbackModels[modelFallbacks];
+      if (!next) return false;
+      modelFallbacks += 1;
+      const previous = route.model;
+      route = { ...route, model: next };
+      transientRetries = 0;
+      await write({
+        type: "status",
+        message: `${route.label}: ${previous} did not answer. Trying ${next}...`,
+      });
+      // Same pause as a transient retry. Measured on Google: after 3.8-flash
+      // closed the socket on a 190 KB request, an immediate 3.5-flash call to
+      // the same host failed too while the same call from a cold client
+      // succeeded - the host needs a moment, whichever model comes next.
+      await sleep(RETRY_DELAY_MS);
+      return true;
+    };
+    /**
+     * Moves the provider to the next channel in its chain, if any, and says
+     * why. A channel is a different account and endpoint - the owner's
+     * MiniMax token plan, then the OpenCode Go subscription - so everything
+     * negotiated against the old one starts over: capabilities, effort band,
+     * model chain, retry budgets. The safety timeout does not; it bounds the
+     * whole task.
+     */
+    const switchChannel = async (why: string): Promise<boolean> => {
+      const next = channelChain[channelFallbacks];
+      if (!next) return false;
+      channelFallbacks += 1;
+      const previous = route.label;
+      route = resolveRoute(provider, env, { channel: next });
+      effort = route.forceEffort ?? clampEffort(requestedEffort, route);
+      caps = startingCapabilities(route, effort);
+      streamUpstream = wantsUpstreamStream(route, env);
+      transientRetries = 0;
+      blindDowngrades = 0;
+      modelFallbacks = 0;
+      await write({ type: "status", message: `${previous} ${why}. Trying ${route.label}...` });
+      return true;
+    };
+
     // Set when a cut-off response was accepted by `finalize` inside the loop,
     // so it is not parsed a second time under stricter terms at the end.
     let donePayload: Record<string, unknown> | null = null;
@@ -322,7 +450,23 @@ export async function runTask(
           : await fetchNonStreamed(route.dialect, route.label, request, abort.signal);
         await flushDeltas();
         lastError = null;
-        break;
+        if (!rawText.trim()) break; // reported as empty below
+
+        // A completed response the task cannot use - not JSON, or JSON with
+        // the substance missing - is a reason to try the next model in the
+        // chain, if there is one, rather than an error. With no chain left
+        // the parser is told so and delivers what it can.
+        const canSwitch = modelFallbacks < route.fallbackModels.length;
+        try {
+          donePayload = finalize(rawText, { lastAttempt: !canSwitch });
+          break;
+        } catch (error) {
+          if (canSwitch && (await switchModel())) continue;
+          // The same model would most likely produce the same output.
+          const unusable = toError(error);
+          unusable.retryable = false;
+          throw unusable;
+        }
       } catch (error) {
         pending = "";
         lastError = toError(error);
@@ -339,7 +483,9 @@ export async function runTask(
         if (lastError.partialText !== undefined) {
           const lowered = lastError.lowerEffort ? stepDownEffort(route, effort) : null;
           const canStepDown = Boolean(lowered) && effortStepDowns < MAX_EFFORT_STEPDOWNS;
-          const canRetry = transientRetries < MAX_TRANSIENT_RETRIES;
+          const canRetry =
+            modelFallbacks < route.fallbackModels.length ||
+            transientRetries < MAX_TRANSIENT_RETRIES;
           try {
             donePayload = finalize(lastError.partialText, {
               lastAttempt: !canStepDown && !canRetry,
@@ -359,6 +505,7 @@ export async function runTask(
             });
             continue;
           }
+          if (await switchModel()) continue;
           if (canRetry) {
             transientRetries += 1;
             await write({
@@ -374,6 +521,23 @@ export async function runTask(
         // Never retry once partial output reached the client (the case above
         // excepted).
         if (deltaEmitted) break;
+
+        // The account behind this channel was turned away - a plan that ended,
+        // a revoked key. Nothing about the request will fix that; another
+        // channel in the chain might. With no chain left this falls through
+        // to the usual handling, so a provider without one behaves exactly as
+        // before (a 429 that mentions "quota" still gets its transient retry).
+        if (isAccountRefusal(lastError) && channelFallbacks < channelChain.length) {
+          // A refusal inside an HTTP 200 body has no status or body of its
+          // own; its text is the error message, after the route label.
+          const detail = (
+            explicitErrorMessage(lastError.body ?? "") ||
+            lastError.message.replace(`${route.label}: `, "")
+          ).slice(0, 140);
+          const code = lastError.status ? `HTTP ${lastError.status}: ` : "";
+          const why = `refused the account (${code}${detail}) - the plan may have ended`;
+          if (await switchChannel(why)) continue;
+        }
 
         const drop = paramRejection(lastError);
         if (
@@ -411,7 +575,14 @@ export async function runTask(
           }
         }
 
-        if (!isRetryable(lastError) || transientRetries >= MAX_TRANSIENT_RETRIES) break;
+        if (!isRetryable(lastError)) break;
+        if (await switchModel()) continue;
+        if (transientRetries >= MAX_TRANSIENT_RETRIES) {
+          // This channel has had its retry. The next one in the chain gets a
+          // fresh attempt before the solve is given up on.
+          if (await switchChannel("is not answering")) continue;
+          break;
+        }
         transientRetries += 1;
         await write({
           type: "status",
@@ -422,11 +593,11 @@ export async function runTask(
     }
 
     if (lastError) throw lastError;
-    if (!donePayload && !rawText.trim()) {
+    if (!donePayload) {
       throw new Error(`${route.label} returned an empty response.`);
     }
 
-    await write({ type: "done", ...(donePayload ?? finalize(rawText, { lastAttempt: true })) });
+    await write({ type: "done", ...donePayload });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {

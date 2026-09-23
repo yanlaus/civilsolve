@@ -3,7 +3,12 @@
 // and the client (rendering the review step). No DOM, no Workers APIs.
 
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
-import { normalizeJsonCandidate, sanitizeText } from "./solution";
+import {
+  normalizeJsonCandidate,
+  sanitizeText,
+  stripThinkTags,
+  type ParseOptions,
+} from "./solution";
 
 export type InterpretationResult = {
   interpreted_problem: string;
@@ -53,15 +58,25 @@ export function interpretationToText(result: InterpretationResult) {
 export function parseInterpretation(
   rawText: string,
   provider: ProviderKey,
+  options: ParseOptions = {},
 ): InterpretationResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(normalizeJsonCandidate(rawText));
   } catch {
-    // Non-JSON output still carries the interpretation as prose.
-    const text = sanitizeText(rawText);
+    // Non-JSON output. The readers are told to return JSON and, on Google
+    // and Poe, are held to a schema - so prose here means the response was
+    // cut off or the model ignored its instructions, and a retry (or the
+    // next model in the chain) is the better outcome. Only on the last
+    // attempt is the text worth delivering as the reading. Measured on
+    // gemini-3.8-flash: a 313-character JSON fragment landed here whole,
+    // in interpreted_problem, with every other field empty.
+    const text = stripThinkTags(sanitizeText(rawText));
     if (text.length < 20) {
       throw new Error(`${PROVIDER_LABELS[provider]} returned an empty interpretation.`);
+    }
+    if (!options.allowIncomplete) {
+      throw new Error(`${PROVIDER_LABELS[provider]} did not return a JSON interpretation.`);
     }
     return {
       interpreted_problem: text,
@@ -91,6 +106,15 @@ export function parseInterpretation(
   if (!result.interpreted_problem && !result.diagram_description) {
     throw new Error(
       `${PROVIDER_LABELS[provider]} did not produce a usable interpretation.`,
+    );
+  }
+
+  // A reading with neither the givens nor the ask is a reader that skipped
+  // its job (seen once on gemini-3.8-flash: statement and diagram filled,
+  // `given` and `required` empty). With attempts left, ask again.
+  if (!options.allowIncomplete && !result.given && !result.required) {
+    throw new Error(
+      `${PROVIDER_LABELS[provider]} returned an interpretation with no given quantities and nothing required.`,
     );
   }
 
