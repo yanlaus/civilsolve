@@ -88,14 +88,16 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
 ]);
 
 /**
- * Ticked by default in the upload form. Several providers may be selected
- * and they solve at the same time (the account is on Workers Paid; on the
- * free plan concurrent streams got killed). Gemini Flash on Google was right
- * on both fixtures and is the cheapest route of any; Muse Spark was 3/3 on
- * the hard fixture where it finished, for free. Two solvers is also what the
- * answer cross-check needs.
+ * Ticked by default in the upload form, in picker order. Several providers
+ * may be selected and they solve at the same time (the account is on Workers
+ * Paid; on the free plan concurrent streams got killed). Gemini Flash on
+ * Google was right on both fixtures and is the cheapest route of any;
+ * DeepSeek Flash is the lightest draw on the OpenCode Go plan and solved a
+ * two-problem paper correctly on production; Muse Spark was 3/3 on the hard
+ * fixture where it finished, for free. Three solvers give the answer
+ * cross-check a majority to weigh, and still leave it room for a fourth.
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["gemini", "muse"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["gemini", "deepseek", "muse"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two

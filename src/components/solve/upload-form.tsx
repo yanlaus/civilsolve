@@ -122,7 +122,7 @@ export function UploadForm({
   const [interpreterA, setInterpreterA] = useState<ProviderKey>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
-  const [readerEffort, setReaderEffort] = useState<EffortKey>("low");
+  const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
   const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
   const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
   const [effort, setEffort] = useState<EffortKey>("high");

@@ -24,7 +24,7 @@ export type InterpretRequestBody = {
   notes: string;
   /** Verify mode: the two candidate interpretations to reconcile. */
   interpretations?: [string, string];
-  /** Reasoning level. Defaults to "low" for readers and "max" for the judge. */
+  /** Reasoning level. Defaults to "medium" for readers and "max" for the judge. */
   effort?: EffortKey;
 };
 
