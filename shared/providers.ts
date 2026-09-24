@@ -51,6 +51,15 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 };
 
 /**
+ * Providers that cost nothing but fail often: badged "Free but unstable" in
+ * the picker and shown last among the solution tabs, so a dependable answer
+ * is what the page opens on. Gemini runs on the owner's free-tier Google key,
+ * where gemini-3.8-flash declined most requests and gemini-3.5-flash kept
+ * answering 503 "high demand" (22-23 September 2026).
+ */
+export const UNSTABLE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["gemini"]);
+
+/**
  * Models badged as China models in the picker, at the owner's choice: MiMo
  * is Xiaomi's and MiniMax is MiniMax's, both reached on their mainland
  * deployments. DeepSeek is Chinese too and was badged for one day, but the

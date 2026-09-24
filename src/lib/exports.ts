@@ -1,8 +1,7 @@
-// Client-side solution exports: print-to-PDF, .tex download, Overleaf.
-// The old server compiled PDFs with pdflatex; on Cloudflare the browser
-// does the work instead.
-
-import { buildLatexDocument, type ProviderArtifact } from "../../shared/solution";
+// Client-side solution export: print-to-PDF. The old server compiled PDFs
+// with pdflatex; on Cloudflare the browser does the work instead. The .tex
+// download and "Open in Overleaf" were removed on 25 September 2026 - users
+// only save PDFs.
 
 function slugify(value: string) {
   return (
@@ -26,34 +25,4 @@ export function exportPdf(title: string) {
   } finally {
     document.title = previousTitle;
   }
-}
-
-export function exportTex(artifact: ProviderArtifact) {
-  const source = buildLatexDocument(artifact.latexBody);
-  const blob = new Blob([source], { type: "application/x-tex" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${slugify(artifact.title)}.tex`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-/** Opens the solution's LaTeX source as a new Overleaf project. */
-export function openInOverleaf(artifact: ProviderArtifact) {
-  const source = buildLatexDocument(artifact.latexBody);
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = "https://www.overleaf.com/docs";
-  form.target = "_blank";
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "encoded_snip";
-  input.value = encodeURIComponent(source);
-  form.append(input);
-  document.body.append(form);
-  form.submit();
-  form.remove();
 }

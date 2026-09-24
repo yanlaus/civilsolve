@@ -115,6 +115,15 @@ const GEMINI_BUDGET: EffortSpec = {
   values: { low: 2048, medium: 8192, high: 16384, max: 32768 },
 };
 
+/**
+ * 20 minutes, for the models that think past the default 280 s
+ * (SAFETY_TIMEOUT_MS in run.ts) on a hard paper at "high". The page-count
+ * allowance in taskTimeoutMs still goes on top. It costs nothing while the
+ * model is making progress: a task runs in a TaskJob, so nobody has to keep
+ * the page open, and the time is spent waiting on the upstream, not CPU.
+ */
+const LONG_THINKING_TIMEOUT_MS = 1_200_000;
+
 // ---------------------------------------------------------------------------
 // Route table
 // ---------------------------------------------------------------------------
@@ -247,6 +256,9 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // untested. "deepseek-v4-pro" and "deepseek-v4-flash" are text-only.
       defaultModel: "deepseek-v4.1-flash",
       effort: CLAMPED_EFFORT,
+      // On the two-part B.5 paper at "high" it answered in 249 s, 31 s short
+      // of the default limit (production, 25 September 2026).
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
   grok: {
@@ -272,6 +284,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // returned all six. Was "mimo-v2.5" until 22 September 2026.
       defaultModel: "mimo-v2.6-flash",
       effort: CLAMPED_EFFORT,
+      // On the two-part B.5 paper at "high" it streamed reasoning for the
+      // whole default 280 s without writing a character of the answer, and
+      // timed out (production, 25 September 2026).
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
   minimax: {
@@ -309,7 +325,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // monotonic relationship), so time is the only lever. Cloudflare
       // enforces no wall-clock limit while the client is connected and the
       // 15 s heartbeats keep the stream alive.
-      timeoutMs: 1_200_000,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
     opencode: {
       ...OPENCODE_SPEC,
@@ -332,7 +348,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // and it ran past 280 s at "medium" (105-148k characters) and "high"
       // (95k) on production. It was capped at "low" until 23 September 2026;
       // the cap is gone because waiting longer beats refusing the level.
-      timeoutMs: 1_200_000,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
   muse: {

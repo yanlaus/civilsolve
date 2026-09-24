@@ -1,6 +1,6 @@
 // Provider-agnostic solution parsing, repair, and display normalization.
 // Pure string logic shared by the Worker (finalizing streamed responses)
-// and the client (building .tex downloads).
+// and the client (flattening solutions for the cross-check judge).
 
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
 
@@ -932,19 +932,6 @@ export function buildLatexFallback(solution: StructuredSolution) {
     "\\subsection*{Final Answer}",
     markdownToLatex(solution.final_answer || "Unavailable."),
   ].join("\n\n");
-}
-
-export function buildLatexDocument(latexBody: string) {
-  return String.raw`\documentclass[11pt]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage{amsmath,amssymb}
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{textcomp}
-\setlength{\parskip}{0.75em}
-\setlength{\parindent}{0pt}
-\begin{document}
-` + latexBody + "\n\\end{document}\n";
 }
 
 function hasMeaningfulContent(value: string, minimumLength = 10) {
