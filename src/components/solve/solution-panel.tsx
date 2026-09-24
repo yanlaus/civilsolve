@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle2, Download, ExternalLink, Loader2, Scale, X } from "lucide-react";
+import { Check, CheckCircle2, Download, Loader2, Scale, X } from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
-import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../../shared/providers";
+import {
+  PROVIDER_KEYS,
+  PROVIDER_LABELS,
+  UNSTABLE_PROVIDERS,
+  type ProviderKey,
+} from "../../../shared/providers";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
-import { exportPdf, exportTex, openInOverleaf } from "@/lib/exports";
+import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { SolutionArticle } from "./solution-article";
 import { PROVIDER_OPTIONS } from "./upload-form";
@@ -62,8 +67,12 @@ export default function SolutionPanel({
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
+  // Picker order, except that an unstable provider (Gemini) goes last: the
+  // page opens on the first finished tab, and that should be a dependable one.
   const visibleProviders = PROVIDER_OPTIONS.filter(
     (provider) => runs[provider.key].status !== "idle",
+  ).sort(
+    (a, b) => Number(UNSTABLE_PROVIDERS.has(a.key)) - Number(UNSTABLE_PROVIDERS.has(b.key)),
   );
   const firstDone = visibleProviders.find(
     (provider) => runs[provider.key].status === "done",
@@ -179,22 +188,6 @@ export default function SolutionPanel({
                 >
                   <Download className="h-4 w-4" />
                   Save as PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => exportTex(activeArtifact)}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-2 text-sm font-semibold text-[#1b1610] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#e4e0db]"
-                >
-                  <Download className="h-4 w-4" />
-                  LaTeX (.tex)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openInOverleaf(activeArtifact)}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-2 text-sm font-semibold text-[#1b1610] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#e4e0db]"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Open in Overleaf
                 </button>
               </div>
             </div>

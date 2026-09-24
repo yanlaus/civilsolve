@@ -18,6 +18,7 @@ import {
   PenSquare,
   Scale,
   Sparkles,
+  TriangleAlert,
   Upload,
   Waves,
   X,
@@ -38,6 +39,7 @@ import {
   LOWER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
+  UNSTABLE_PROVIDERS,
   type HealthResponse,
   type ProviderKey,
   type ProviderStatus,
@@ -556,6 +558,7 @@ export function UploadForm({
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
             const china = CHINA_PROVIDERS.has(provider.key);
+            const unstable = UNSTABLE_PROVIDERS.has(provider.key);
             // Brand, account, model - nothing else. Effort floors are shown
             // under Thinking Effort, and a model chain announces itself in the
             // status line when it actually switches.
@@ -607,6 +610,15 @@ export function UploadForm({
                       >
                         <Feather className="h-3 w-3" aria-hidden="true" />
                         Less credit
+                      </span>
+                    ) : null}
+                    {unstable ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-[#ecdcae] bg-[#fdf8e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a6a12] dark:border-[#4a3f1a] dark:bg-[#2a2310] dark:text-[#e0c46a]"
+                        title={`${provider.label} costs nothing but often fails to answer - its tab is shown last.`}
+                      >
+                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+                        Free but unstable
                       </span>
                     ) : null}
                     {china ? (
