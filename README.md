@@ -192,14 +192,14 @@ The judge runs on the provider's normal solve route at `high` by default (the mo
 
 The timeout is a **floor per route plus an allowance per page**, counted across every attempt so a retry cannot extend it.
 
-| Upload | Most providers | MiniMax |
+| Upload | Most providers | DeepSeek, MiMo, MiniMax |
 |---|---|---|
 | 1 question | 4.7 min | 20 min |
 | 3 pages | 8.7 min | 24 min |
 | 8 pages | 18.7 min | 34.7 min |
 | 16 pages (the cap) | 34.7 min | 45 min (the ceiling) |
 
-`SAFETY_TIMEOUT_MS` in `worker/run.ts` is the 280 s floor; a route overrides it with `timeoutMs`, and MiniMax sets 20 minutes on both of its routes — on the B.8 fixture it wrote 93–104k characters of reasoning and was still going at 280 s on three production runs out of three, and no effort level shortens that. `taskTimeoutMs` in `shared/stream-protocol.ts` then adds `PER_EXTRA_PAGE_MS` (2 min) for each assignment page after the first, because a whole exam paper is a dozen questions in one request rather than one long question, and both the reading and the writing grow with it. Lecture-notes pages count half: they are read once as reference and never solved. `MAX_TIMEOUT_MS` (45 min) caps the result so a wedged upstream cannot hold a tab open all day — the heartbeats would otherwise keep it alive indefinitely.
+`SAFETY_TIMEOUT_MS` in `worker/run.ts` is the 280 s floor; a route overrides it with `timeoutMs`, and three routes set 20 minutes (`LONG_THINKING_TIMEOUT_MS`): MiniMax on both of its routes — on the B.8 fixture it wrote 93–104k characters of reasoning and was still going at 280 s on three production runs out of three, and no effort level shortens that — and DeepSeek and MiMo, which on the two-part B.5 paper at `high` took 249 s and more than 280 s (MiMo timed out without writing a character). `taskTimeoutMs` in `shared/stream-protocol.ts` then adds `PER_EXTRA_PAGE_MS` (2 min) for each assignment page after the first, because a whole exam paper is a dozen questions in one request rather than one long question, and both the reading and the writing grow with it. Lecture-notes pages count half: they are read once as reference and never solved. `MAX_TIMEOUT_MS` (45 min) caps the result so a wedged upstream cannot hold a tab open all day — the heartbeats would otherwise keep it alive indefinitely.
 
 Nothing in the platform forces these numbers. Cloudflare enforces no wall-clock limit on an HTTP request while the client stays connected, and time spent waiting on `fetch()` is not billed as CPU (a 77 s solve costs ~3 s of CPU). They encode how long a user should wait before being told nothing is coming; the 15 s heartbeats are what keep the stream itself alive. The 280 s value arrived with the original import and had no recorded reason until this was written.
 
