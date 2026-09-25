@@ -80,6 +80,17 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
 
+/**
+ * A provider's name in the reader and judge lists. Those are plain <select>s
+ * with no room for a badge, so the one warning that matters there goes in
+ * the text: Gemini's free key often does not answer.
+ */
+function reviewerLabel(key: ProviderKey) {
+  return UNSTABLE_PROVIDERS.has(key)
+    ? `${PROVIDER_LABELS[key]} (free but unstable)`
+    : PROVIDER_LABELS[key];
+}
+
 // One glyph per provider so the cards read at a glance. Lucide, like the rest
 // of the UI, rather than vendor logos: no assets, no trademark questions, and
 // they take the accent colour in both themes.
@@ -752,7 +763,7 @@ export function UploadForm({
                 >
                   {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
                     <option key={option.key} value={option.key}>
-                      {option.label}
+                      {reviewerLabel(option.key)}
                     </option>
                   ))}
                 </select>
@@ -818,7 +829,7 @@ export function UploadForm({
               >
                 {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
                   <option key={option.key} value={option.key}>
-                    {option.label}
+                    {reviewerLabel(option.key)}
                   </option>
                 ))}
               </select>

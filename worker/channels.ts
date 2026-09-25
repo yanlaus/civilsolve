@@ -359,10 +359,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
-  // A reader and judge only (REVIEW_ONLY_PROVIDERS): /api/solve refuses it.
-  // Back on 25 September 2026 on the route it had until 19 September; its
-  // own Kimi Code endpoint (api.kimi.com) answers deployed Workers with a 403
-  // challenge page, so the Go gateway is the only way to reach it.
+  // Back on 25 September 2026 on the route it had until 19 September, as a
+  // reader and judge; a solver again since 26 September, in Gemini's place.
+  // Its own Kimi Code endpoint (api.kimi.com) answered deployed Workers with
+  // a 403 challenge page, so the Go gateway is the way to reach it.
   kimi: {
     opencode: {
       ...OPENCODE_SPEC,
@@ -376,6 +376,9 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       defaultModel: "kimi-k2.7-code",
       effort: CLAMPED_EFFORT,
       minEffort: "medium",
+      // As a solver at "high" it answered B.8 in 138 s and 271 s - the second
+      // 9 s short of the default limit - and B.5 in 193 s (26 September 2026).
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
       // Accepts a strict json_schema and does not enforce it: streamed, one
       // interpretation in five came back as `{\n \t}` after 11k characters of
       // reasoning that ended "Now output raw JSON" (25 September 2026). With
