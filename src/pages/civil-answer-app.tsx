@@ -6,6 +6,7 @@ import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
+import { formatClock, useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import type { ProviderKey } from "../../shared/providers";
 import {
@@ -27,7 +28,7 @@ type PendingSolve = {
 };
 
 export default function CivilAnswerAppPage() {
-  const { runs, judgeRun, start, cancel, restore, dismiss } = useSolve();
+  const { runs, judgeRun, progress, judgeProgress, start, cancel, restore, dismiss } = useSolve();
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
@@ -76,7 +77,22 @@ export default function CivilAnswerAppPage() {
   // A long solve on a phone: keep the screen from locking while it runs.
   useWakeLock(isSolving || isInterpreting);
 
-  const statusMessage = prepStatus || (pipeline.status === "running" ? pipeline.stage : "");
+  // The interpretation step in progress, with its latest server status and a
+  // running clock, so a slow reader is visibly still working.
+  const now = useNow(isInterpreting);
+  const interpretStatus =
+    pipeline.status === "running"
+      ? [
+          pipeline.stage,
+          pipeline.detail,
+          `${formatClock(now - pipeline.startedAt)} elapsed${
+            pipeline.deadlineAt ? `, gives up at ${formatClock(pipeline.deadlineAt - pipeline.startedAt)}` : ""
+          }`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
+  const statusMessage = prepStatus || interpretStatus;
   const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
 
   function clearRecovered() {
@@ -230,7 +246,12 @@ export default function CivilAnswerAppPage() {
               </button>
             </div>
           ) : null}
-          <SolutionPanel runs={runs} judgeRun={judgeRun} />
+          <SolutionPanel
+            runs={runs}
+            judgeRun={judgeRun}
+            progress={progress}
+            judgeProgress={judgeProgress}
+          />
         </Suspense>
       </div>
     </main>

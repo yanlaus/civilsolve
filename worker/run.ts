@@ -8,7 +8,7 @@
 
 import { EFFORT_KEYS, type EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
-import { taskTimeoutMs } from "../shared/stream-protocol";
+import { formatDuration, taskTimeoutMs } from "../shared/stream-protocol";
 import {
   buildRequest,
   extractCompleted,
@@ -320,6 +320,21 @@ export type RunTaskParams = {
 export type TaskEvent = { type: string } & Record<string, unknown>;
 
 /**
+ * How long this task may run: the route's floor (SAFETY_TIMEOUT_MS unless the
+ * route sets `timeoutMs`) scaled by the upload, since a whole exam paper is a
+ * dozen questions in one request, not one long question (see taskTimeoutMs).
+ * A TaskJob reads it too, to tell the page when the task will give up.
+ */
+export function taskTimeoutFor({ provider, env, routeOverride, task }: RunTaskParams) {
+  const route = resolveRoute(provider, env, routeOverride);
+  return taskTimeoutMs(
+    route.timeoutMs ?? SAFETY_TIMEOUT_MS,
+    task.images.length,
+    task.referenceImages?.length ?? 0,
+  );
+}
+
+/**
  * Where a task's events go. The inline path hands runTask the client's own
  * response stream (streamSink): when that client goes away `event` rejects
  * and the task stops, as it always has. A TaskJob (Durable Object) hands it
@@ -358,8 +373,9 @@ export function streamSink(writer: WritableStreamDefaultWriter<Uint8Array>): Tas
  */
 export async function runTask(
   sink: TaskSink,
-  { provider, env, effort: requestedEffort, routeOverride, task, finalize, signal }: RunTaskParams,
+  params: RunTaskParams,
 ) {
+  const { provider, env, effort: requestedEffort, routeOverride, task, finalize, signal } = params;
   const write = (event: TaskEvent) => sink.event(event);
 
   const heartbeat = setInterval(() => sink.heartbeat(), HEARTBEAT_INTERVAL_MS);
@@ -371,19 +387,17 @@ export async function runTask(
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
   let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
-  // Scales with the upload: a whole exam paper is a dozen questions in one
-  // request, not one long question (see taskTimeoutMs).
-  const timeoutMs = taskTimeoutMs(
-    route.timeoutMs ?? SAFETY_TIMEOUT_MS,
-    task.images.length,
-    task.referenceImages?.length ?? 0,
-  );
+  const timeoutMs = taskTimeoutFor(params);
   const abort = new AbortController();
   signal?.addEventListener("abort", () => abort.abort(new Error("Cancelled.")), { once: true });
+  // Marks the error event, so the page can tell "ran out of time, returned
+  // nothing" apart from a failure.
+  let timedOut = false;
   const safetyTimer = setTimeout(() => {
-    const seconds = Math.round(timeoutMs / 1000);
-    const spent = seconds >= 120 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`;
-    abort.abort(new Error(`${route.label} timed out after ${spent}.`));
+    timedOut = true;
+    abort.abort(
+      new Error(`${route.label} timed out after ${formatDuration(timeoutMs)} and returned nothing.`),
+    );
   }, timeoutMs);
 
   try {
@@ -505,8 +519,17 @@ export async function runTask(
           break;
         } catch (error) {
           if (canSwitch && (await switchModel())) continue;
-          // The same model would most likely produce the same output.
+          // Asked again, the same model usually answers properly: these are
+          // one-off degenerations, not a steady refusal - MiMo's blank
+          // template of PLACEHOLDER_* fields, Kimi's empty object (both
+          // 25 September 2026). One retry, from the transient budget; the
+          // safety timeout still bounds the whole task.
           const unusable = toError(error);
+          if (transientRetries < MAX_TRANSIENT_RETRIES) {
+            transientRetries += 1;
+            await write({ type: "status", message: `${unusable.message} Retrying...` });
+            continue;
+          }
           unusable.retryable = false;
           throw unusable;
         }
@@ -644,7 +667,7 @@ export async function runTask(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {
-      await write({ type: "error", message });
+      await write({ type: "error", message, ...(timedOut ? { timedOut: true } : {}) });
     } catch {
       // client already disconnected
     }
