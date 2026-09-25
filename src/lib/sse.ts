@@ -310,14 +310,14 @@ async function errorMessage(response: Response) {
  * run instead of starting it over, and Stop can cancel it. `connections`
  * counts the streams that reached the page (each opens with that event),
  * which is how withResume tells a reconnection that got through from one
- * that did not. `timing` is what the job said about its start and deadline,
+ * that did not. `timing` is what the job said about when it started,
  * on the server's clock, with `clockOffset` (this page's clock minus the
  * server's) to convert them.
  */
 export type JobHandle = {
   id: string | null;
   connections: number;
-  timing?: { startedAt?: number; deadlineAt?: number; clockOffset: number };
+  timing?: { startedAt?: number; clockOffset: number };
 };
 
 export function jobHandle(id: string | null = null): JobHandle {
@@ -336,12 +336,11 @@ export function takeJobEvent(
   if (event.name !== "job") return false;
   handle.connections += 1;
   try {
-    const { id, startedAt, deadlineAt, now } = JSON.parse(event.data) as Record<string, unknown>;
+    const { id, startedAt, now } = JSON.parse(event.data) as Record<string, unknown>;
     if (typeof now === "number") {
       handle.timing = {
         clockOffset: Date.now() - now,
         ...(typeof startedAt === "number" ? { startedAt } : {}),
-        ...(typeof deadlineAt === "number" ? { deadlineAt } : {}),
       };
     }
     if (typeof id === "string" && id) {

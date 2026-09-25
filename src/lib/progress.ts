@@ -1,7 +1,6 @@
 // What a running task has been doing, for the progress box under its tab:
-// when it started, when the server gives up on it, and every status line so
-// far - each retry, model switch, dropped connection - with the time it came
-// in. A phone left on a long solve should never be looking at one unchanging
+// when it started and every status line so far - each retry, model switch,
+// dropped connection - with the time it came in. A phone left on a long solve should never be looking at one unchanging
 // line with no idea whether anything is happening.
 //
 // All times are this page's clock. The job reports its own times on the
@@ -17,8 +16,6 @@ export type ProgressEvent = { at: number; message: string };
 
 export type Progress = {
   startedAt: number;
-  /** When the server gives up on the task. Unknown until the job says. */
-  deadlineAt?: number;
   /** When the task finished, either way. */
   endedAt?: number;
   events: ProgressEvent[];
@@ -28,7 +25,7 @@ export type Progress = {
 const CONNECTION_NOTE = /^(Connection lost|This device is offline)/;
 
 export type ProgressTracker = {
-  /** The job's `job` event arrived: take its start time and deadline. */
+  /** The job's `job` event arrived: take its start time. */
   job(handle: JobHandle): void;
   /** A status from the server; `at` is the server's time, when it sent one. */
   status(message: string, at?: unknown): void;
@@ -58,11 +55,9 @@ export function trackProgress(publish: (progress: Progress) => void): ProgressTr
       const timing = handle.timing;
       if (!timing) return;
       if (clockOffset === null) clockOffset = timing.clockOffset;
-      set({
-        ...progress,
-        ...(timing.startedAt !== undefined ? { startedAt: timing.startedAt + clockOffset } : {}),
-        ...(timing.deadlineAt !== undefined ? { deadlineAt: timing.deadlineAt + clockOffset } : {}),
-      });
+      if (timing.startedAt !== undefined) {
+        set({ ...progress, startedAt: timing.startedAt + clockOffset });
+      }
     },
     status(message, at) {
       const when = local(at);

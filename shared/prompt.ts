@@ -17,7 +17,7 @@ export const SOLVE_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Use English for every user-facing field unless the user explicitly requests another language.";
 
 export const INTERPRET_INSTRUCTIONS =
-  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English.";
+  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English, except in a `traditional_chinese` field where one is asked for.";
 
 export const JUDGE_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading two candidate solutions against the attached assignment; verify, do not trust. Use English.";
@@ -54,6 +54,8 @@ const INTERPRETATION_FIELDS = [
   "required",
   "discrepancies",
 ] as const;
+
+const VERIFIED_INTERPRETATION_FIELDS = [...INTERPRETATION_FIELDS, "traditional_chinese"] as const;
 
 export type TutorPromptExtras = {
   /** Human-confirmed problem statement from the interpretation pipeline. */
@@ -175,6 +177,7 @@ export function buildVerifyPrompt(
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
+    "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, as plain text with no Markdown or backticks. Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep only numbers, units, symbols, variable names, formulas and the figure's own labels (such as Fig. B.8b) exactly as in English, for example W = 0.5 kN, P_A, 30°. Every other field stays in English.",
     "Return JSON matching the required schema exactly.",
     "",
     "Interpretation A:",
@@ -187,7 +190,7 @@ export function buildVerifyPrompt(
   ];
 
   if (options?.enforceShape) {
-    sections.push(...shapeContract(INTERPRETATION_FIELDS));
+    sections.push(...shapeContract(VERIFIED_INTERPRETATION_FIELDS));
   }
 
   return sections.join("\n");

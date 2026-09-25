@@ -7,7 +7,11 @@
 // Durable Object - the request body is, and both sides turn it into the same
 // task here.
 
-import { interpretationSchema, parseInterpretation } from "../shared/interpretation";
+import {
+  interpretationSchema,
+  parseInterpretation,
+  verifiedInterpretationSchema,
+} from "../shared/interpretation";
 import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
 import {
   buildInterpretPrompt,
@@ -179,8 +183,12 @@ function buildInterpret(
         session: crypto.randomUUID(),
         prompt: buildPrompt,
         instructions: INTERPRET_INSTRUCTIONS,
-        schemaName: "civil_interpretation",
-        schema: interpretationSchema as unknown as Record<string, unknown>,
+        // The reconciler also writes the reading in Traditional Chinese, for
+        // the review step; the readers only need English.
+        schemaName: mode === "verify" ? "civil_verified_interpretation" : "civil_interpretation",
+        schema: (mode === "verify"
+          ? verifiedInterpretationSchema
+          : interpretationSchema) as unknown as Record<string, unknown>,
         images: assignment.images,
       },
       finalize: (rawText, { lastAttempt }) => ({
