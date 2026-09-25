@@ -20,7 +20,7 @@ import {
   SOLVE_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
-import { isProviderKey, type ProviderKey } from "../shared/providers";
+import { isProviderKey, isSolverKey, PROVIDER_LABELS, type ProviderKey } from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import {
   DATA_URL_PATTERN,
@@ -80,6 +80,12 @@ export function buildTask(
   env: WorkerEnv,
 ): BuiltTask {
   if (!isProviderKey(providerName)) return { error: "Unknown provider.", status: 404 };
+  if (kind === "solve" && !isSolverKey(providerName)) {
+    return {
+      error: `${PROVIDER_LABELS[providerName]} reads questions and judges answers, but does not solve.`,
+      status: 400,
+    };
+  }
   if (kind === "solve") return buildSolve(providerName, body, env);
   if (kind === "interpret") return buildInterpret(providerName, body, env);
   return buildJudge(providerName, body, env);

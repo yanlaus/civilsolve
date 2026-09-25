@@ -50,7 +50,7 @@ Adding a channel = one entry in `ROUTES` plus its env vars in `WorkerEnv` and `w
 Pure string logic compiled into both bundles — no DOM, no Workers APIs, no imports from `src/` or `worker/`.
 
 - `stream-protocol.ts` — request body types, `SolveEvent` / `InterpretEvent` / `JudgeEvent` (`status` | `delta` | `done` | `error`), every size limit, and `taskTimeoutMs` (how long a task may run, given how much was uploaded).
-- `providers.ts` — `ProviderKey` / `ChannelKey` registries, defaults (`DEFAULT_PROVIDER`, `DEFAULT_INTERPRETERS`, `DEFAULT_VERIFIER`), `HealthResponse` shape.
+- `providers.ts` — `ProviderKey` / `ChannelKey` registries, defaults (`DEFAULT_PROVIDER`, `DEFAULT_INTERPRETERS`, `DEFAULT_VERIFIER`), `HealthResponse` shape. `PROVIDER_KEYS` is every provider (the reader and judge lists); `SOLVER_KEYS` leaves out `REVIEW_ONLY_PROVIDERS` (Kimi), and only those get solver cards - the worker refuses a solve for the rest.
 - `prompt.ts` — `EffortKey` and the solve / interpret / verify prompt builders. `enforceShape` appends the six-field contract when the route cannot pin the schema (`structured: false`).
 - `solution.ts` — `solutionSchema` plus the repair pipeline (`finalizeProviderArtifact`) that makes the lower schema rungs safe: alternate field names, `problems[]` shapes, schema-name wrappers, JSON-in-a-field, a JSON prefix cut off mid-stream (`recoverTruncatedJson`), `<think>` reasoning left in the content (`stripThinkTags`, needed by MiniMax), plain-text synthesis, LaTeX fence stripping.
 - `interpretation.ts` — the same pair (schema + parser) for the interpretation pass.
