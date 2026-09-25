@@ -27,20 +27,24 @@ export type ProviderKey =
   | "muse";
 
 /**
- * Every provider, in picker order - the order of the reader and judge lists.
- * Claude sits last because it costs the most per solve (below). The solver
- * cards use SOLVER_KEYS, which leaves out the review-only providers.
+ * Every provider, in picker order - the order of the solver cards, the
+ * reader and judge lists, the solution tabs and the letters the judge sees.
+ * The two dearest (Grok, Claude) close the solvers. The solver cards use
+ * SOLVER_KEYS, which leaves out the review-only providers.
  */
 export const PROVIDER_KEYS: ProviderKey[] = [
+  // The owner's order for the solver cards (26 September 2026).
   "chatgpt",
-  "gemini",
   "deepseek",
-  "grok",
+  "muse",
+  "kimi",
   "mimo",
   "minimax",
-  "kimi",
-  "muse",
+  "grok",
   "claude",
+  // Reader and judge only (REVIEW_ONLY_PROVIDERS), so it has no card; last
+  // in those lists.
+  "gemini",
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
@@ -79,12 +83,13 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 };
 
 /**
- * Providers that cost nothing but fail often: marked "free but unstable" in
- * the reader and judge lists (and badged so on a solver card, and shown last
- * among the solution tabs, should one ever be a solver again). Gemini runs on
- * the owner's free-tier Google key, where gemini-3.8-flash declined most
- * requests and gemini-3.5-flash kept answering 503 "high demand" (22-23 and
- * 26 September 2026).
+ * Providers that cost nothing but fail often: badged "Free but unstable" on a
+ * solver card and shown last among the solution tabs - should one be a solver
+ * again. Gemini runs on the owner's free-tier Google key, where
+ * gemini-3.8-flash declined most requests and gemini-3.5-flash kept answering
+ * 503 "high demand" (22-23 and 26 September 2026). As a reader or judge it is
+ * not marked: the owner asked for the "(free but unstable)" note to come off
+ * those lists on 26 September.
  */
 export const UNSTABLE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["gemini"]);
 
@@ -130,13 +135,13 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
  * may be selected and they solve at the same time (the account is on Workers
  * Paid; on the free plan concurrent streams got killed). DeepSeek Flash is
  * the lightest draw on the OpenCode Go plan and solved a two-problem paper
- * correctly on production; Kimi (kimi-k2.7-code on Go) took Gemini's place on
- * 26 September 2026, when the free Google key stopped answering; Muse Spark
- * was 3/3 on the hard fixture where it finished, for free. Three solvers give
- * the answer cross-check a majority to weigh, and still leave it room for a
- * fourth.
+ * correctly on production; Muse Spark was 3/3 on the hard fixture where it
+ * finished, for free. Two is the fewest the answer cross-check can compare.
+ * Kimi was ticked too for one day (26 September 2026, in Gemini's place) and
+ * was unticked at the owner's request; it misread B.8 at "medium" on
+ * production the same day, though it was 2/2 at "high".
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["deepseek", "kimi", "muse"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["deepseek", "muse"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
