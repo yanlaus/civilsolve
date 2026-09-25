@@ -45,6 +45,7 @@ export type WorkerEnv = {
   GROK_CHANNEL?: string;
   MIMO_CHANNEL?: string;
   MINIMAX_CHANNEL?: string;
+  KIMI_CHANNEL?: string;
   MUSE_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
@@ -57,6 +58,7 @@ export type WorkerEnv = {
   OPENCODE_MIMO_MODEL?: string;
   OPENCODE_MINIMAX_MODEL?: string;
   MINIMAX_MODEL?: string;
+  OPENCODE_KIMI_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
@@ -351,6 +353,31 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
+  // A reader and judge only (REVIEW_ONLY_PROVIDERS): /api/solve refuses it.
+  // Back on 25 September 2026 on the route it had until 19 September; its
+  // own Kimi Code endpoint (api.kimi.com) answers deployed Workers with a 403
+  // challenge page, so the Go gateway is the only way to reach it.
+  kimi: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_KIMI_MODEL",
+      // k2.7-code over k3 on cost. At effort "low" it misread a 4 m UDL as 6 m
+      // on the overhanging-beam fixture (13.75/36.25 for 10/30); at "medium"
+      // and above it read the same diagram correctly (55 s / 185 s), hence
+      // the floor.
+      defaultModel: "kimi-k2.7-code",
+      effort: CLAMPED_EFFORT,
+      minEffort: "medium",
+      // Accepts a strict json_schema and does not enforce it: streamed, one
+      // interpretation in five came back as `{\n \t}` after 11k characters of
+      // reasoning that ended "Now output raw JSON" (25 September 2026). With
+      // no response_format and the shape spelled out in the prompt, five out
+      // of five came back whole.
+      structured: false,
+    },
+  },
   muse: {
     opencode: {
       ...OPENCODE_SPEC,
@@ -376,6 +403,7 @@ const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
   grok: "opencode",
   mimo: "opencode",
   minimax: "opencode",
+  kimi: "opencode",
   muse: "opencode",
 };
 
@@ -387,6 +415,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   grok: "GROK_CHANNEL",
   mimo: "MIMO_CHANNEL",
   minimax: "MINIMAX_CHANNEL",
+  kimi: "KIMI_CHANNEL",
   muse: "MUSE_CHANNEL",
 };
 

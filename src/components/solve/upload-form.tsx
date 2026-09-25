@@ -14,6 +14,7 @@ import {
   Gem,
   Lightbulb,
   Loader2,
+  Moon,
   Orbit,
   PenSquare,
   Scale,
@@ -39,6 +40,7 @@ import {
   LOWER_CREDIT_PROVIDERS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
+  SOLVER_KEYS,
   UNSTABLE_PROVIDERS,
   type HealthResponse,
   type ProviderKey,
@@ -70,8 +72,13 @@ const MAX_FILES = 10;
 const MAX_LECTURE_FILES = 6;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
+// Every provider: the reader, reconciler and judge lists (and the solution
+// tabs). The solver cards show SOLVER_OPTIONS, which leaves out the
+// review-only providers - Kimi reads and judges but does not solve.
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
+
+const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
 
 // One glyph per provider so the cards read at a glance. Lucide, like the rest
 // of the UI, rather than vendor logos: no assets, no trademark questions, and
@@ -83,6 +90,7 @@ const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
   grok: Zap,
   mimo: Orbit,
   minimax: Atom,
+  kimi: Moon,
   muse: Lightbulb,
   claude: Asterisk,
 };
@@ -155,7 +163,7 @@ export function UploadForm({
         setSelectedProviders((current) => {
           const configured = current.filter((key) => payload.providers[key]?.configured);
           if (configured.length) return configured;
-          const firstConfigured = PROVIDER_KEYS.find((key) => payload.providers[key]?.configured);
+          const firstConfigured = SOLVER_KEYS.find((key) => payload.providers[key]?.configured);
           return firstConfigured ? [firstConfigured] : current;
         });
       })
@@ -172,7 +180,7 @@ export function UploadForm({
     providerStatus ? providerStatus[provider]?.configured !== false : true;
 
   const noneConfigured = Boolean(
-    providerStatus && PROVIDER_KEYS.every((key) => !providerStatus[key]?.configured),
+    providerStatus && SOLVER_KEYS.every((key) => !providerStatus[key]?.configured),
   );
 
   // Some routes put a floor under the reasoning level (minEffort; a pinned
@@ -350,7 +358,7 @@ export function UploadForm({
     setSelectedProviders((current) =>
       current.includes(provider)
         ? current.filter((key) => key !== provider)
-        : PROVIDER_KEYS.filter((key) => key === provider || current.includes(key)),
+        : SOLVER_KEYS.filter((key) => key === provider || current.includes(key)),
     );
   }
 
@@ -550,7 +558,7 @@ export function UploadForm({
           </span>
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {PROVIDER_OPTIONS.map((provider) => {
+          {SOLVER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
             const checked = selectedProviders.includes(provider.key) && available;

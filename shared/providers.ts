@@ -11,7 +11,8 @@
 // Moonshot / MiniMax channels and the Anthropic-protocol dialect they alone
 // used are in git history. MiniMax came back on 22 September on a different
 // route (OpenCode Go, minimax-m3) after re-testing correct on B.8 at low and
-// medium and on the beam - see AGENTS.md.
+// medium and on the beam - see AGENTS.md. Kimi came back on 25 September as
+// a reader and judge only, never a solver (REVIEW_ONLY_PROVIDERS).
 
 export type ProviderKey =
   | "chatgpt"
@@ -21,9 +22,14 @@ export type ProviderKey =
   | "grok"
   | "mimo"
   | "minimax"
+  | "kimi"
   | "muse";
 
-/** Picker order. Claude sits last because it costs the most per solve (below). */
+/**
+ * Every provider, in picker order - the order of the reader and judge lists.
+ * Claude sits last because it costs the most per solve (below). The solver
+ * cards use SOLVER_KEYS, which leaves out the review-only providers.
+ */
 export const PROVIDER_KEYS: ProviderKey[] = [
   "chatgpt",
   "gemini",
@@ -31,12 +37,31 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "grok",
   "mimo",
   "minimax",
+  "kimi",
   "muse",
   "claude",
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
+}
+
+/**
+ * Offered as a reader or reconciler in the interpretation pass and as the
+ * cross-check judge, but never as a solver. Kimi (kimi-k2.7-code on OpenCode
+ * Go) was dropped as a solver on 19 September 2026 - 0/4 on the B.8 fixture -
+ * and came back in these two roles only, at the owner's request, on
+ * 25 September.
+ */
+export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["kimi"]);
+
+/** The solver cards, in picker order: every provider that is not review-only. */
+export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(
+  (key) => !REVIEW_ONLY_PROVIDERS.has(key),
+);
+
+export function isSolverKey(value: string): value is ProviderKey {
+  return (SOLVER_KEYS as string[]).includes(value);
 }
 
 export const PROVIDER_LABELS: Record<ProviderKey, string> = {
@@ -47,6 +72,7 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   grok: "Grok",
   mimo: "MiMo",
   minimax: "MiniMax",
+  kimi: "Kimi",
   muse: "Muse Spark",
 };
 
