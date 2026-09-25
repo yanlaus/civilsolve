@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Download, Loader2, Scale, X } from "lucide-react";
+import { Check, CheckCircle2, Download, Languages, Loader2, Scale, X } from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
   PROVIDER_KEYS,
@@ -546,6 +546,19 @@ function JudgementCard({
             Why
           </div>
           <Prose source={judgement.comparison} />
+        </div>
+      ) : null}
+
+      {judgement.traditional_chinese ? (
+        <div
+          lang="zh-Hant-HK"
+          className="mt-4 rounded-[10px] border border-[#e8e3db] bg-[#faf8f5] px-4 py-3 dark:border-[#1e2a40] dark:bg-[#0e1420]"
+        >
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+            繁體中文 · Traditional Chinese
+          </div>
+          <Prose source={judgement.traditional_chinese} />
         </div>
       ) : null}
 

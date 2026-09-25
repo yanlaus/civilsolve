@@ -30,6 +30,12 @@ export type JudgementResult = {
   /** Where the solutions differ and the decisive reason for the verdict. */
   comparison: string;
   confidence: Confidence;
+  /**
+   * The verdict explained again in Traditional Chinese - which solutions are
+   * right, the verified answer, what each got wrong and why - shown under the
+   * English. Empty when the judge left it out.
+   */
+  traditional_chinese: string;
 };
 
 export const CONFIDENCES: Confidence[] = ["high", "medium", "low"];
@@ -46,8 +52,16 @@ export const judgementSchema = {
     assessments: { type: "array", items: { type: "string" } },
     comparison: { type: "string" },
     confidence: { type: "string", enum: CONFIDENCES },
+    traditional_chinese: { type: "string" },
   },
-  required: ["correct_solutions", "final_answer", "assessments", "comparison", "confidence"],
+  required: [
+    "correct_solutions",
+    "final_answer",
+    "assessments",
+    "comparison",
+    "confidence",
+    "traditional_chinese",
+  ],
 } as const;
 
 /** Letter -> index, accepting "A", "a", "Solution A", "solver b", "1". */
@@ -151,6 +165,7 @@ export function parseJudgement(
       assessments: Array.from({ length: count }, () => ""),
       comparison: text,
       confidence: "low",
+      traditional_chinese: "",
     };
   }
 
@@ -169,6 +184,7 @@ export function parseJudgement(
     assessments: readAssessments(record.assessments, count),
     comparison: read("comparison") || read("discrepancies") || read("reasoning"),
     confidence: readConfidence(read("confidence")),
+    traditional_chinese: read("traditional_chinese") || read("chinese"),
   };
 
   // A verdict with no reasoning behind it is a judge that skipped its job;

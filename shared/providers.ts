@@ -12,7 +12,8 @@
 // used are in git history. MiniMax came back on 22 September on a different
 // route (OpenCode Go, minimax-m3) after re-testing correct on B.8 at low and
 // medium and on the beam - see AGENTS.md. Kimi came back on 25 September as
-// a reader and judge only, never a solver (REVIEW_ONLY_PROVIDERS).
+// a reader and judge, and on 26 September as a solver too, taking Gemini's
+// place, while Gemini became reader and judge only (REVIEW_ONLY_PROVIDERS).
 
 export type ProviderKey =
   | "chatgpt"
@@ -48,12 +49,13 @@ export function isProviderKey(value: string): value is ProviderKey {
 
 /**
  * Offered as a reader or reconciler in the interpretation pass and as the
- * cross-check judge, but never as a solver. Kimi (kimi-k2.7-code on OpenCode
- * Go) was dropped as a solver on 19 September 2026 - 0/4 on the B.8 fixture -
- * and came back in these two roles only, at the owner's request, on
- * 25 September.
+ * cross-check judge, but never as a solver. Gemini since 26 September 2026,
+ * at the owner's request: its free-tier Google key answers 503 "high demand"
+ * on both models of its chain more often than not, and a solver that rarely
+ * answers only delays the cross-check. Kimi held this place from
+ * 25 September and became a solver again when Gemini left.
  */
-export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["kimi"]);
+export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["gemini"]);
 
 /** The solver cards, in picker order: every provider that is not review-only. */
 export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(
@@ -77,11 +79,12 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 };
 
 /**
- * Providers that cost nothing but fail often: badged "Free but unstable" in
- * the picker and shown last among the solution tabs, so a dependable answer
- * is what the page opens on. Gemini runs on the owner's free-tier Google key,
- * where gemini-3.8-flash declined most requests and gemini-3.5-flash kept
- * answering 503 "high demand" (22-23 September 2026).
+ * Providers that cost nothing but fail often: marked "free but unstable" in
+ * the reader and judge lists (and badged so on a solver card, and shown last
+ * among the solution tabs, should one ever be a solver again). Gemini runs on
+ * the owner's free-tier Google key, where gemini-3.8-flash declined most
+ * requests and gemini-3.5-flash kept answering 503 "high demand" (22-23 and
+ * 26 September 2026).
  */
 export const UNSTABLE_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["gemini"]);
 
@@ -125,14 +128,15 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
 /**
  * Ticked by default in the upload form, in picker order. Several providers
  * may be selected and they solve at the same time (the account is on Workers
- * Paid; on the free plan concurrent streams got killed). Gemini Flash on
- * Google was right on both fixtures and is the cheapest route of any;
- * DeepSeek Flash is the lightest draw on the OpenCode Go plan and solved a
- * two-problem paper correctly on production; Muse Spark was 3/3 on the hard
- * fixture where it finished, for free. Three solvers give the answer
- * cross-check a majority to weigh, and still leave it room for a fourth.
+ * Paid; on the free plan concurrent streams got killed). DeepSeek Flash is
+ * the lightest draw on the OpenCode Go plan and solved a two-problem paper
+ * correctly on production; Kimi (kimi-k2.7-code on Go) took Gemini's place on
+ * 26 September 2026, when the free Google key stopped answering; Muse Spark
+ * was 3/3 on the hard fixture where it finished, for free. Three solvers give
+ * the answer cross-check a majority to weigh, and still leave it room for a
+ * fourth.
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["gemini", "deepseek", "muse"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["deepseek", "kimi", "muse"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two

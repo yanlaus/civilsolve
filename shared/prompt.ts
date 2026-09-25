@@ -20,7 +20,7 @@ export const INTERPRET_INSTRUCTIONS =
   "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English, except in a `traditional_chinese` field where one is asked for.";
 
 export const JUDGE_INSTRUCTIONS =
-  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading two candidate solutions against the attached assignment; verify, do not trust. Use English.";
+  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading candidate solutions against the attached assignment; verify, do not trust. Use English, except in the `traditional_chinese` field.";
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -231,7 +231,8 @@ export function buildJudgePrompt(
     `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}): what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.`,
     "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
-    "Format formulas in `final_answer`, `assessments` and `comparison` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
+    "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer, what each solution got right or wrong, and the decisive reason - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
+    "Format formulas in `final_answer`, `assessments`, `comparison` and `traditional_chinese` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
     "Return JSON matching the required schema exactly.",
     "",
     userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
@@ -253,10 +254,10 @@ export function buildJudgePrompt(
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic
     // all-strings skeleton cannot express.
-    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high"}`;
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
     sections.push(
       "",
-      "Return exactly one JSON object with these 5 fields:",
+      "Return exactly one JSON object with these 6 fields:",
       skeleton,
       `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` has exactly ${count} strings, in order; \`confidence\` is one of "high", "medium", "low".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
