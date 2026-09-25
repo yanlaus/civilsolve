@@ -366,7 +366,8 @@ function normalizeStructuredSolution(
  * as one entry per line (numbered unless the entries already carry their
  * own "Step 3 -" / "3." labels), an object as "key = value" lines.
  */
-function textOf(value: unknown): string {
+/** Any JSON value as readable text: arrays numbered, objects as `key = value` lines. */
+export function textOf(value: unknown): string {
   if (typeof value === "string") return sanitizeText(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) {

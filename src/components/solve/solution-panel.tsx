@@ -100,11 +100,11 @@ function EventLog({ progress, current }: { progress?: Progress; current?: string
 
 /**
  * The progress bar of a task still running: what it is doing, how long it has
- * taken, how long the server will give it, and what happened on the way.
+ * taken so far, and what happened on the way. The timeout is deliberately not
+ * shown - only the time spent (the owner's choice, 25 September 2026).
  */
 function ProgressBox({ line, progress, now }: { line: string; progress?: Progress; now: number }) {
   const elapsed = progress ? now - progress.startedAt : 0;
-  const limit = progress?.deadlineAt ? progress.deadlineAt - progress.startedAt : 0;
   return (
     <div className="rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
       <div className="flex items-center gap-3">
@@ -116,19 +116,6 @@ function ProgressBox({ line, progress, now }: { line: string; progress?: Progres
           </span>
         ) : null}
       </div>
-      {limit > 0 ? (
-        <>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e8e3db] dark:bg-[#2a3650]">
-            <div
-              className="h-full rounded-full bg-[#b35c1e] transition-[width] duration-1000 ease-linear dark:bg-[#e8903a]"
-              style={{ width: `${Math.min(100, (elapsed / limit) * 100)}%` }}
-            />
-          </div>
-          <div className="mt-1 text-[0.7rem] text-[#8a7f72] dark:text-[#a8a098]">
-            {formatClock(elapsed)} of up to {formatClock(limit)} - the server gives up after that.
-          </div>
-        </>
-      ) : null}
       <EventLog progress={progress} current={line} />
     </div>
   );

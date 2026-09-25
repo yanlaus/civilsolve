@@ -85,9 +85,7 @@ export default function CivilAnswerAppPage() {
       ? [
           pipeline.stage,
           pipeline.detail,
-          `${formatClock(now - pipeline.startedAt)} elapsed${
-            pipeline.deadlineAt ? `, gives up at ${formatClock(pipeline.deadlineAt - pipeline.startedAt)}` : ""
-          }`,
+          `${formatClock(now - pipeline.startedAt)} elapsed`,
         ]
           .filter(Boolean)
           .join(" · ")
@@ -211,6 +209,7 @@ export default function CivilAnswerAppPage() {
           <InterpretationReview
             interpretation={pipeline.interpretation}
             initialText={pipeline.text}
+            note={pipeline.note}
             onConfirm={confirmInterpretation}
             onCancel={cancelAll}
           />

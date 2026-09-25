@@ -261,6 +261,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // On the two-part B.5 paper at "high" it answered in 249 s, 31 s short
       // of the default limit (production, 25 September 2026).
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
+      // The prompt spells out the fields as well. The gateway's backends
+      // differ: one refuses a strict schema silently (see isSilentRejection),
+      // the other accepts it and then, on one B.8 reading, streamed six
+      // characters - every field present and empty (25 September 2026), the
+      // same blank-template failure Kimi showed before it got the contract.
+      structured: false,
     },
   },
   grok: {
