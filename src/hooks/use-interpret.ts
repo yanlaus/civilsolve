@@ -13,6 +13,7 @@ import type { InterpretRequestBody } from "../../shared/stream-protocol";
 import {
   cancelJob,
   isConnectionLost,
+  jobHandle,
   openTaskStream,
   readSseEvents,
   StreamInterruptedError,
@@ -72,10 +73,11 @@ export function useInterpret() {
         body: InterpretRequestBody,
       ) => {
         setPipeline({ status: "running", stage });
-        const handle: JobHandle = { id: null };
+        const handle = jobHandle();
         jobRef.current = handle;
         return withResume(
           () => runInterpretRequest(provider, body, abort.signal, handle),
+          handle,
           abort.signal,
           (message) => setPipeline({ status: "running", stage: `${stage} ${message}` }),
         );
@@ -120,7 +122,7 @@ export function useInterpret() {
         setPipeline({
           status: "error",
           message: isConnectionLost(error)
-            ? "The connection kept dropping during the interpretation pass. Keep this page open and try again."
+            ? "Could not reach the server for 2 minutes during the interpretation pass. Check the connection and run it again."
             : error instanceof Error
               ? error.message
               : "The interpretation pipeline failed.",

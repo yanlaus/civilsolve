@@ -25,6 +25,7 @@ import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
   cancelJob,
   isConnectionLost,
+  jobHandle,
   openTaskStream,
   readSseEvents,
   StreamInterruptedError,
@@ -32,6 +33,11 @@ import {
   withResume,
   type JobHandle,
 } from "@/lib/sse";
+
+// Shown once withResume has tried for RECONNECT_WINDOW_MS. The job itself
+// kept running on the server, and its id is saved, so a reload re-attaches.
+const UNREACHABLE =
+  "Could not reach the server for 2 minutes. The model keeps working there - reload this page to pick up";
 
 export type ProviderRun =
   | { status: "idle" }
@@ -160,7 +166,7 @@ export function useSolve() {
             });
             return;
           }
-          const handle: JobHandle = { id: known ?? null };
+          const handle = jobHandle(known ?? null);
           handlesRef.current.push(handle);
           const onJob = (id: string) => {
             run.solveJobs[provider] = id;
@@ -172,6 +178,7 @@ export function useSolve() {
             // the page is visible again (see withResume).
             await withResume(
               () => streamProvider(provider, body, abort.signal, update, handle, onJob),
+              handle,
               abort.signal,
               (message) => update(provider, { status: "waiting", message }),
             );
@@ -180,7 +187,7 @@ export function useSolve() {
             update(provider, {
               status: "error",
               message: isConnectionLost(error)
-                ? "The connection kept dropping before the solution arrived. Keep this page open and try again."
+                ? `${UNREACHABLE} the solution (kept for 24 hours).`
                 : error instanceof Error
                   ? error.message
                   : "The solve request failed.",
@@ -339,7 +346,7 @@ async function runJudge(
   const saved = run.judge;
   if (!saved) return;
   const judge = saved.provider;
-  const handle: JobHandle = { id: saved.jobId ?? null };
+  const handle = jobHandle(saved.jobId ?? null);
 
   let solvers: ProviderKey[];
   let skipped: ProviderKey[];
@@ -442,7 +449,7 @@ async function runJudge(
   };
 
   try {
-    await withResume(attempt, signal, (message) =>
+    await withResume(attempt, handle, signal, (message) =>
       setJudgeRun({ status: "waiting", judge, message }),
     );
   } catch (error) {
@@ -451,7 +458,7 @@ async function runJudge(
       status: "error",
       judge,
       message: isConnectionLost(error)
-        ? "The connection kept dropping before the verdict arrived. Keep this page open and try again."
+        ? `${UNREACHABLE} the verdict (kept for 24 hours).`
         : error instanceof Error
           ? error.message
           : "The cross-check request failed.",

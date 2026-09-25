@@ -56,6 +56,14 @@ export async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGen
  */
 export class StreamInterruptedError extends Error {}
 
+/**
+ * The server no longer has the job a page tried to re-attach to - the
+ * object running it was reset mid-run. The only way on is to ask again from
+ * scratch, which runs the model again, so withResume does that at most
+ * MAX_RESTARTS times.
+ */
+export class JobLostError extends Error {}
+
 // How each engine words a request whose connection went away: Safari "Load
 // failed" / "The network connection was lost.", Chrome "Failed to fetch" /
 // "network error", Firefox "NetworkError when attempting to fetch resource.",
@@ -95,38 +103,128 @@ export function whenVisible(signal: AbortSignal): Promise<void> {
   });
 }
 
-/**
- * How many times one request reconnects after losing its connection. Two:
- * a user may leave the page more than once during a long solve.
- */
-export const MAX_RESUMES = 2;
+/** Resolves once the browser reports a network (at once if it does) or `signal` aborts. */
+function whenOnline(signal: AbortSignal): Promise<void> {
+  if (typeof navigator === "undefined" || navigator.onLine !== false) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      window.removeEventListener("online", finish);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    window.addEventListener("online", finish);
+    signal.addEventListener("abort", finish);
+  });
+}
+
+/** Waits `ms`, or less if `signal` aborts first. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish);
+  });
+}
 
 /**
- * Runs `attempt` again after its connection dropped, up to MAX_RESUMES
- * times. It first waits until the page is visible (a hidden tab would just
- * lose the new connection too) and reports that through `onRestart`. The
- * attempts in this app open their stream with openTaskStream, so "again"
- * means re-attaching to the same server-side job - the model call kept
- * running meanwhile - and only means starting over when the server no
- * longer has that job. Any other failure is rethrown untouched.
+ * How long withResume keeps reconnecting before it gives up: two minutes of
+ * failed attempts in a row. The clock starts over whenever a reconnection
+ * gets through, and stops while the page is hidden or the browser is
+ * offline, so a long solve survives any number of short outages.
+ *
+ * It used to be two attempts 1.5 s apart, and that gave up inside three
+ * seconds: an iPhone switching between Wi-Fi and mobile data, or waking its
+ * screen, takes longer than that to get its network back, so a user who
+ * never left the page saw "the connection kept dropping" while the job was
+ * running fine on the server (reproduced on production, 25 September 2026).
+ */
+export const RECONNECT_WINDOW_MS = 120_000;
+
+/** The wait before the first reconnection; it doubles each time, up to the max. */
+const FIRST_RECONNECT_DELAY_MS = 1_500;
+const MAX_RECONNECT_DELAY_MS = 15_000;
+
+/**
+ * How many times a task is asked for again from scratch because the server
+ * lost its job (JobLostError). Each one runs the model again, so once.
+ */
+export const MAX_RESTARTS = 1;
+
+/**
+ * Runs `attempt` again after its connection dropped. The attempts in this
+ * app open their stream with openTaskStream, so "again" means re-attaching
+ * to the same server-side job - the model call kept running meanwhile -
+ * which costs nothing, so it keeps trying until RECONNECT_WINDOW_MS passes
+ * without one getting through (`handle.connections` counts the ones that
+ * did). It waits for the page to be visible (a hidden tab would just lose
+ * the new connection too) and for the browser to be online before each try,
+ * and reports what it is doing through `onRestart`. Starting over, when the
+ * server no longer has the job, happens at most MAX_RESTARTS times. Any
+ * other failure is rethrown untouched.
  */
 export async function withResume<T>(
   attempt: () => Promise<T>,
+  handle: JobHandle,
   signal: AbortSignal,
   onRestart: (message: string) => void,
 ): Promise<T> {
-  for (let resumes = 0; ; resumes += 1) {
+  let restarts = 0;
+  let failures = 0;
+  let outageStartedAt = 0;
+  let delay = FIRST_RECONNECT_DELAY_MS;
+
+  for (;;) {
+    const connectionsBefore = handle.connections;
     try {
       return await attempt();
     } catch (error) {
-      if (signal.aborted || !isConnectionLost(error) || resumes >= MAX_RESUMES) throw error;
+      if (signal.aborted) throw error;
+      if (error instanceof JobLostError) {
+        if (restarts >= MAX_RESTARTS) throw error;
+        restarts += 1;
+      } else if (!isConnectionLost(error)) {
+        throw error;
+      }
+
+      if (failures === 0 || handle.connections !== connectionsBefore) {
+        // The first drop, or this attempt got through before dropping: a new
+        // outage starts now.
+        failures = 0;
+        outageStartedAt = Date.now();
+        delay = FIRST_RECONNECT_DELAY_MS;
+      } else if (Date.now() - outageStartedAt >= RECONNECT_WINDOW_MS) {
+        throw error;
+      }
+      failures += 1;
+
+      let waited = false;
       if (typeof document !== "undefined" && document.visibilityState !== "visible") {
         onRestart("Connection lost while this page was in the background. Reconnecting when you return...");
         await whenVisible(signal);
-        if (signal.aborted) throw error;
+        waited = true;
       }
-      onRestart("Connection lost. Reconnecting...");
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        onRestart("This device is offline. Reconnecting when the network is back...");
+        await whenOnline(signal);
+        waited = true;
+      }
+      if (signal.aborted) throw error;
+      if (waited) {
+        // Time spent away or offline is not time spent failing to reconnect.
+        outageStartedAt = Date.now();
+        delay = FIRST_RECONNECT_DELAY_MS;
+      }
+
+      onRestart(
+        failures === 1 ? "Connection lost. Reconnecting..." : `Connection lost. Reconnecting (attempt ${failures})...`,
+      );
+      await pause(delay, signal);
+      if (signal.aborted) throw error;
+      delay = Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);
     }
   }
 }
@@ -180,9 +278,16 @@ async function errorMessage(response: Response) {
  * A task's run on the server. Every task runs in a job of its own that
  * outlives the page (worker/jobs.ts); the stream opens with a `job` event
  * naming it. Knowing the id, a dropped connection re-attaches to the same
- * run instead of starting it over, and Stop can cancel it.
+ * run instead of starting it over, and Stop can cancel it. `connections`
+ * counts the streams that reached the page (each opens with that event),
+ * which is how withResume tells a reconnection that got through from one
+ * that did not.
  */
-export type JobHandle = { id: string | null };
+export type JobHandle = { id: string | null; connections: number };
+
+export function jobHandle(id: string | null = null): JobHandle {
+  return { id, connections: 0 };
+}
 
 /**
  * Records the id from a stream's `job` event. Returns true when `event` was
@@ -194,6 +299,7 @@ export function takeJobEvent(
   onJob?: (id: string) => void,
 ): boolean {
   if (event.name !== "job") return false;
+  handle.connections += 1;
   try {
     const { id } = JSON.parse(event.data) as { id?: unknown };
     if (typeof id === "string" && id) {
@@ -212,8 +318,8 @@ export function takeJobEvent(
  * send - a run restored after the page reloaded - so only re-attaching works.
  *
  * A job the server no longer has (expired, or reset mid-run) clears the
- * handle. With a body that is a StreamInterruptedError, so withResume asks
- * again from scratch; without one it is the final answer.
+ * handle. With a body that is a JobLostError, so withResume asks again from
+ * scratch; without one it is the final answer.
  */
 export async function openTaskStream(
   handle: JobHandle,
@@ -227,7 +333,7 @@ export async function openTaskStream(
       handle.id = null;
       const message = await errorMessage(response);
       if (body === null) throw new Error(message);
-      throw new StreamInterruptedError(message);
+      throw new JobLostError(message);
     }
     return streamOf(response);
   }
