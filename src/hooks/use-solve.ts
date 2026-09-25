@@ -21,6 +21,7 @@ import {
   type JudgeRequestBody,
   type SolveRequestBody,
 } from "../../shared/stream-protocol";
+import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
 import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
   cancelJob,
@@ -44,9 +45,13 @@ export type ProviderRun =
   | { status: "waiting"; message: string }
   | { status: "streaming"; charsReceived: number }
   | { status: "done"; solution: ProviderArtifact }
-  | { status: "error"; message: string };
+  /** `timedOut`: the task ran out of time and returned nothing (an orange dot, not red). */
+  | { status: "error"; message: string; timedOut?: boolean };
 
 export type ProviderRuns = Record<ProviderKey, ProviderRun>;
+
+/** Each running or finished solver's timeline (lib/progress.ts). */
+export type ProgressMap = Partial<Record<ProviderKey, Progress>>;
 
 /**
  * The cross-check judge's progress. `solvers` records which provider was
@@ -64,7 +69,7 @@ export type JudgeRun =
       skipped: ProviderKey[];
       judgement: JudgementResult;
     }
-  | { status: "error"; judge: ProviderKey; message: string };
+  | { status: "error"; judge: ProviderKey; message: string; timedOut?: boolean };
 
 const IDLE_RUNS = Object.fromEntries(
   PROVIDER_KEYS.map((key) => [key, { status: "idle" } as ProviderRun]),
@@ -96,6 +101,8 @@ function waitingRuns(providers: ProviderKey[], message: string): ProviderRuns {
 export function useSolve() {
   const [runs, setRuns] = useState<ProviderRuns>(IDLE_RUNS);
   const [judgeRun, setJudgeRun] = useState<JudgeRun>({ status: "idle" });
+  const [progress, setProgress] = useState<ProgressMap>({});
+  const [judgeProgress, setJudgeProgress] = useState<Progress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   /** Every job of the current run, so Stop can cancel them on the server. */
   const handlesRef = useRef<JobHandle[]>([]);
@@ -133,6 +140,8 @@ export function useSolve() {
     clearRun();
     setRuns(IDLE_RUNS);
     setJudgeRun({ status: "idle" });
+    setProgress({});
+    setJudgeProgress(null);
   }, [stopCurrent]);
 
   /**
@@ -147,6 +156,8 @@ export function useSolve() {
       abortRef.current = abort;
       saveRun(run);
       const persist = () => saveRun(run);
+      setProgress({});
+      setJudgeProgress(null);
 
       // Finished solutions, kept here as well as in state so the judge step
       // can read them without waiting on a render.
@@ -172,18 +183,25 @@ export function useSolve() {
             run.solveJobs[provider] = id;
             persist();
           };
+          const tracker = trackProgress((next) =>
+            setProgress((current) => ({ ...current, [provider]: next })),
+          );
           try {
             // A dropped connection - on a phone, usually the browser being
             // put in the background - re-attaches to this provider's job once
             // the page is visible again (see withResume).
             await withResume(
-              () => streamProvider(provider, body, abort.signal, update, handle, onJob),
+              () => streamProvider(provider, body, abort.signal, update, handle, onJob, tracker),
               handle,
               abort.signal,
-              (message) => update(provider, { status: "waiting", message }),
+              (message) => {
+                tracker.note(message);
+                update(provider, { status: "waiting", message });
+              },
             );
           } catch (error) {
             if (abort.signal.aborted) return;
+            tracker.end();
             update(provider, {
               status: "error",
               message: isConnectionLost(error)
@@ -196,7 +214,16 @@ export function useSolve() {
         });
 
         if (!run.judge || abort.signal.aborted) return;
-        await runJudge(run, body, solutions, abort.signal, setJudgeRun, handlesRef.current, persist);
+        await runJudge(
+          run,
+          body,
+          solutions,
+          abort.signal,
+          setJudgeRun,
+          handlesRef.current,
+          persist,
+          setJudgeProgress,
+        );
       })();
     },
     [stopCurrent],
@@ -235,7 +262,7 @@ export function useSolve() {
     return true;
   }, [execute]);
 
-  return { runs, judgeRun, start, cancel, restore, dismiss };
+  return { runs, judgeRun, progress, judgeProgress, start, cancel, restore, dismiss };
 }
 
 /**
@@ -273,13 +300,17 @@ async function streamProvider(
   update: (provider: ProviderKey, run: ProviderRun) => void,
   handle: JobHandle,
   onJob: (id: string) => void,
+  tracker: ProgressTracker,
 ): Promise<"done" | "error"> {
   let charsReceived = 0;
   const stream = await openTaskStream(handle, `/api/solve/${provider}`, body, signal);
   let outcome: "done" | "error" | null = null;
 
   for await (const event of readSseEvents(stream)) {
-    if (takeJobEvent(handle, event, onJob)) continue;
+    if (takeJobEvent(handle, event, onJob)) {
+      tracker.job(handle);
+      continue;
+    }
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(event.data) as Record<string, unknown>;
@@ -293,6 +324,7 @@ async function streamProvider(
       // retrying, so the count starts over rather than continuing from the
       // discarded text.
       charsReceived = 0;
+      tracker.status(payload.message, payload.at);
       update(provider, { status: "waiting", message: payload.message });
     } else if (event.name === "delta" && typeof payload.text === "string") {
       charsReceived += payload.text.length;
@@ -303,13 +335,19 @@ async function streamProvider(
       typeof payload.solution === "object"
     ) {
       outcome = "done";
+      tracker.end(payload.at);
       update(provider, {
         status: "done",
         solution: payload.solution as ProviderArtifact,
       });
     } else if (event.name === "error" && typeof payload.message === "string") {
       outcome = "error";
-      update(provider, { status: "error", message: payload.message });
+      tracker.end(payload.at);
+      update(provider, {
+        status: "error",
+        message: payload.message,
+        ...(payload.timedOut === true ? { timedOut: true } : {}),
+      });
     }
   }
 
@@ -342,6 +380,7 @@ async function runJudge(
   setJudgeRun: (run: JudgeRun) => void,
   handles: JobHandle[],
   persist: () => void,
+  setJudgeProgress: (progress: Progress) => void,
 ) {
   const saved = run.judge;
   if (!saved) return;
@@ -403,6 +442,7 @@ async function runJudge(
     saved.jobId = id;
     persist();
   };
+  const tracker = trackProgress(setJudgeProgress);
 
   const attempt = async () => {
     let charsReceived = 0;
@@ -410,7 +450,10 @@ async function runJudge(
     let terminal = false;
 
     for await (const event of readSseEvents(stream)) {
-      if (takeJobEvent(handle, event, onJob)) continue;
+      if (takeJobEvent(handle, event, onJob)) {
+        tracker.job(handle);
+        continue;
+      }
       let payload: Record<string, unknown>;
       try {
         payload = JSON.parse(event.data) as Record<string, unknown>;
@@ -420,6 +463,7 @@ async function runJudge(
 
       if (event.name === "status" && typeof payload.message === "string") {
         charsReceived = 0;
+        tracker.status(payload.message, payload.at);
         setJudgeRun({ status: "waiting", judge, message: payload.message });
       } else if (event.name === "delta" && typeof payload.text === "string") {
         charsReceived += payload.text.length;
@@ -430,6 +474,7 @@ async function runJudge(
         typeof payload.judgement === "object"
       ) {
         terminal = true;
+        tracker.end(payload.at);
         setJudgeRun({
           status: "done",
           judge,
@@ -439,7 +484,13 @@ async function runJudge(
         });
       } else if (event.name === "error" && typeof payload.message === "string") {
         terminal = true;
-        setJudgeRun({ status: "error", judge, message: payload.message });
+        tracker.end(payload.at);
+        setJudgeRun({
+          status: "error",
+          judge,
+          message: payload.message,
+          ...(payload.timedOut === true ? { timedOut: true } : {}),
+        });
       }
     }
 
@@ -449,11 +500,13 @@ async function runJudge(
   };
 
   try {
-    await withResume(attempt, handle, signal, (message) =>
-      setJudgeRun({ status: "waiting", judge, message }),
-    );
+    await withResume(attempt, handle, signal, (message) => {
+      tracker.note(message);
+      setJudgeRun({ status: "waiting", judge, message });
+    });
   } catch (error) {
     if (signal.aborted) return;
+    tracker.end();
     setJudgeRun({
       status: "error",
       judge,

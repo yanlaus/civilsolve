@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Download, Loader2, Scale, X } from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
@@ -8,9 +8,17 @@ import {
   type ProviderKey,
 } from "../../../shared/providers";
 import type { ProviderArtifact } from "../../../shared/solution";
-import { isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
+import { formatDuration } from "../../../shared/stream-protocol";
+import {
+  isJudgeActive,
+  isRunActive,
+  type JudgeRun,
+  type ProgressMap,
+  type ProviderRuns,
+} from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
+import { formatClock, useNow, type Progress } from "@/lib/progress";
 import { SolutionArticle } from "./solution-article";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
@@ -57,12 +65,96 @@ function verdictHeadline(labels: string[], correct: number[]) {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are correct`;
 }
 
+// A task that ran out of time and returned nothing is shown in orange, apart
+// from the red of a real failure: nothing went wrong that a rerun could not fix.
+const TIMEOUT_DOT = "bg-[#e67e22] dark:bg-[#f0a35e]";
+const TIMEOUT_BOX =
+  "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12] dark:border-[#5b4020] dark:text-[#f0b878]";
+const ERROR_BOX =
+  "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]";
+
+/**
+ * Every status line so far, with when it came, so a long wait shows its
+ * history - each retry, model switch and dropped connection - instead of one
+ * line that never changes. The line already shown above is left out.
+ */
+function EventLog({ progress, current }: { progress?: Progress; current?: string }) {
+  if (!progress) return null;
+  const events = progress.events.filter(
+    (event, index, all) => !(index === all.length - 1 && event.message === current),
+  );
+  if (!events.length) return null;
+  return (
+    <ol className="mt-3 space-y-1 border-t border-current/10 pt-2 text-xs opacity-80">
+      {events.map((event, index) => (
+        <li key={`${event.at}-${index}`} className="flex gap-2">
+          <span className="shrink-0 tabular-nums opacity-70">
+            {formatClock(event.at - progress.startedAt)}
+          </span>
+          <span className="min-w-0 break-words">{event.message}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * The progress bar of a task still running: what it is doing, how long it has
+ * taken, how long the server will give it, and what happened on the way.
+ */
+function ProgressBox({ line, progress, now }: { line: string; progress?: Progress; now: number }) {
+  const elapsed = progress ? now - progress.startedAt : 0;
+  const limit = progress?.deadlineAt ? progress.deadlineAt - progress.startedAt : 0;
+  return (
+    <div className="rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#b35c1e] dark:text-[#e8903a]" />
+        <span className="min-w-0 flex-1 break-words">{line}</span>
+        {progress ? (
+          <span className="shrink-0 font-semibold tabular-nums" title="Time since the request was sent">
+            {formatClock(elapsed)}
+          </span>
+        ) : null}
+      </div>
+      {limit > 0 ? (
+        <>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e8e3db] dark:bg-[#2a3650]">
+            <div
+              className="h-full rounded-full bg-[#b35c1e] transition-[width] duration-1000 ease-linear dark:bg-[#e8903a]"
+              style={{ width: `${Math.min(100, (elapsed / limit) * 100)}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[0.7rem] text-[#8a7f72] dark:text-[#a8a098]">
+            {formatClock(elapsed)} of up to {formatClock(limit)} - the server gives up after that.
+          </div>
+        </>
+      ) : null}
+      <EventLog progress={progress} current={line} />
+    </div>
+  );
+}
+
+/**
+ * How long a finished task took, when known: "2 min 15 s". Nothing under a
+ * second - that is a request refused outright, or a job the server no longer
+ * had, where a time would only mislead.
+ */
+function tookLabel(progress?: Progress) {
+  if (!progress?.endedAt) return "";
+  const took = progress.endedAt - progress.startedAt;
+  return took >= 1000 ? formatDuration(took) : "";
+}
+
 export default function SolutionPanel({
   runs,
   judgeRun,
+  progress,
+  judgeProgress,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
+  progress: ProgressMap;
+  judgeProgress: Progress | null;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -78,12 +170,31 @@ export default function SolutionPanel({
     (provider) => runs[provider.key].status === "done",
   )?.key;
 
+  // Set once the user opens a tab themselves: from then on the page stops
+  // choosing for them. Without it, opening a failed or timed-out tab while
+  // another had finished bounced straight back to the finished one, so the
+  // failure's message could never be read.
+  const userPicked = useRef(false);
+  const pickProvider = (key: ProviderKey) => {
+    userPicked.current = true;
+    setActiveProvider(key);
+  };
+
   // Auto-activate the first finished provider once, or keep a sensible tab
   // active while the current one has nothing to show yet.
   useEffect(() => {
+    // A fresh run, nothing finished yet: the page may choose again.
+    if (visibleProviders.every((provider) => isRunActive(runs[provider.key]))) {
+      userPicked.current = false;
+    }
     if (runs[activeProvider].status === "idle" && visibleProviders.length) {
       setActiveProvider(firstDone ?? visibleProviders[0].key);
-    } else if (firstDone && runs[activeProvider].status !== "done" && !isRunActive(runs[activeProvider])) {
+    } else if (
+      !userPicked.current &&
+      firstDone &&
+      runs[activeProvider].status !== "done" &&
+      !isRunActive(runs[activeProvider])
+    ) {
       setActiveProvider(firstDone);
     }
   }, [runs, activeProvider, firstDone, visibleProviders]);
@@ -91,6 +202,11 @@ export default function SolutionPanel({
   const activeRun = runs[activeProvider];
   const activeArtifact = activeRun.status === "done" ? activeRun.solution : null;
   const activeLabel = PROVIDER_OPTIONS.find((p) => p.key === activeProvider)?.label ?? "";
+  const activeProgress = progress[activeProvider];
+  // Ticks every second while anything is still running, for the clocks.
+  const now = useNow(
+    visibleProviders.some((provider) => isRunActive(runs[provider.key])) || isJudgeActive(judgeRun),
+  );
 
   const printHtml = useMemo(() => {
     if (!activeArtifact) return "";
@@ -122,7 +238,9 @@ export default function SolutionPanel({
         </h2>
       </div>
 
-      {judgeRun.status !== "idle" ? <JudgementCard judgeRun={judgeRun} /> : null}
+      {judgeRun.status !== "idle" ? (
+        <JudgementCard judgeRun={judgeRun} progress={judgeProgress ?? undefined} now={now} />
+      ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-[#e8e3db] bg-white shadow-[0_4px_16px_rgba(27,22,16,0.08)] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e]">
         <div className="border-b-2 border-[#e8e3db] px-2 pt-1 dark:border-[#1e2a40]">
@@ -134,7 +252,7 @@ export default function SolutionPanel({
                 <button
                   key={provider.key}
                   type="button"
-                  onClick={() => setActiveProvider(provider.key)}
+                  onClick={() => pickProvider(provider.key)}
                   className={`relative shrink-0 px-4 py-3 pr-8 text-left text-sm font-semibold transition ${
                     activeProvider === provider.key
                       ? "text-[#b35c1e] dark:text-[#e8903a]"
@@ -158,9 +276,18 @@ export default function SolutionPanel({
                     <Loader2 className="absolute right-2.5 top-3 h-3 w-3 animate-spin text-[#8a7f72] dark:text-[#a8a098]" />
                   ) : (
                     <span
+                      title={
+                        run.status === "error"
+                          ? run.timedOut
+                            ? "Timed out - no solution"
+                            : "Failed - no solution"
+                          : "Finished"
+                      }
                       className={`absolute right-3 top-3 h-2.5 w-2.5 rounded-full ${
                         run.status === "error"
-                          ? "bg-[#c0392b] dark:bg-[#f2b8b2]"
+                          ? run.timedOut
+                            ? TIMEOUT_DOT
+                            : "bg-[#c0392b] dark:bg-[#f2b8b2]"
                           : "bg-[#2d8a4e] dark:bg-[#3daf66]"
                       }`}
                     />
@@ -176,6 +303,11 @@ export default function SolutionPanel({
             <div className="border-b border-[#e8e3db] px-7 py-5 dark:border-[#1e2a40]">
               <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-[#8a7f72] dark:text-[#a8a098]">
                 {activeLabel}
+                {tookLabel(activeProgress) ? (
+                  <span className="ml-2 font-normal normal-case tracking-normal">
+                    answered in {tookLabel(activeProgress)}
+                  </span>
+                ) : null}
               </div>
               <div className="font-serif text-2xl font-semibold text-[#1b1610] dark:text-[#e4e0db]">
                 {activeArtifact.title}
@@ -221,18 +353,32 @@ export default function SolutionPanel({
         ) : (
           <div className="px-7 py-8">
             {activeRun.status === "error" ? (
-              <div className="rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]">
-                {activeRun.message}
+              <div
+                className={`rounded-[10px] border px-4 py-3 text-sm ${
+                  activeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
+                }`}
+              >
+                <div className="font-semibold">
+                  {activeRun.timedOut ? "Timed out - no solution returned" : "No solution returned"}
+                  {tookLabel(activeProgress) ? (
+                    <span className="font-normal"> after {tookLabel(activeProgress)}</span>
+                  ) : null}
+                </div>
+                <div className="mt-1">{activeRun.message}</div>
+                <EventLog progress={activeProgress} />
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#b35c1e] dark:text-[#e8903a]" />
-                {activeRun.status === "streaming"
-                  ? `${activeLabel} is writing the solution... ${activeRun.charsReceived.toLocaleString()} characters received.`
-                  : activeRun.status === "waiting"
-                    ? activeRun.message
-                    : "Waiting..."}
-              </div>
+              <ProgressBox
+                now={now}
+                progress={activeProgress}
+                line={
+                  activeRun.status === "streaming"
+                    ? `${activeLabel} is writing the solution... ${activeRun.charsReceived.toLocaleString()} characters received.`
+                    : activeRun.status === "waiting"
+                      ? activeRun.message
+                      : "Waiting..."
+                }
+              />
             )}
           </div>
         )}
@@ -299,28 +445,54 @@ function Assessment({
  * judge only ever saw "Solution A", "Solution B", ...; the provider names
  * are added back here from the order the solvers ran in.
  */
-function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
+function JudgementCard({
+  judgeRun,
+  progress,
+  now,
+}: {
+  judgeRun: JudgeRun;
+  progress?: Progress;
+  now: number;
+}) {
   if (judgeRun.status === "idle") return null;
   const judgeLabel = PROVIDER_LABELS[judgeRun.judge];
 
-  if (judgeRun.status !== "done") {
-    const tone =
-      judgeRun.status === "error"
-        ? "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]"
-        : "border-[#d4cdc3] bg-white text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]";
+  if (judgeRun.status === "error") {
     return (
-      <div className={`mb-4 flex items-center gap-3 rounded-[10px] border px-4 py-3 text-sm print:hidden ${tone}`}>
-        {judgeRun.status === "error" ? (
+      <div
+        className={`mb-4 rounded-[10px] border px-4 py-3 text-sm print:hidden ${
+          judgeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
+        }`}
+      >
+        <div className="flex items-center gap-3">
           <Scale className="h-4 w-4 shrink-0" aria-hidden="true" />
-        ) : (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#b35c1e] dark:text-[#e8903a]" />
-        )}
-        <span>
-          <span className="font-semibold">Cross-check ({judgeLabel}): </span>
-          {judgeRun.status === "streaming"
-            ? `writing the verdict... ${judgeRun.charsReceived.toLocaleString()} characters received.`
-            : judgeRun.message}
-        </span>
+          <span>
+            <span className="font-semibold">
+              Cross-check ({judgeLabel}){judgeRun.timedOut ? " timed out" : ""}
+              {tookLabel(progress) ? ` after ${tookLabel(progress)}` : ""}:{" "}
+            </span>
+            {judgeRun.message}
+          </span>
+        </div>
+        <EventLog progress={progress} />
+      </div>
+    );
+  }
+
+  if (judgeRun.status !== "done") {
+    // Until every solver finishes the judge has not started, so there is no
+    // clock yet - just the wait.
+    return (
+      <div className="mb-4 print:hidden">
+        <ProgressBox
+          now={now}
+          progress={progress}
+          line={`Cross-check (${judgeLabel}): ${
+            judgeRun.status === "streaming"
+              ? `writing the verdict... ${judgeRun.charsReceived.toLocaleString()} characters received.`
+              : judgeRun.message
+          }`}
+        />
       </div>
     );
   }
@@ -340,6 +512,7 @@ function JudgementCard({ judgeRun }: { judgeRun: JudgeRun }) {
           Cross-check verdict
           <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
             judged by {judgeLabel}
+            {tookLabel(progress) ? ` in ${tookLabel(progress)}` : ""}
           </span>
         </p>
         <span

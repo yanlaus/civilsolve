@@ -942,6 +942,24 @@ function hasMeaningfulContent(value: string, minimumLength = 10) {
   );
 }
 
+/**
+ * A field the model left as a template slot instead of filling it:
+ * "PLACEHOLDER_ASSUMPTIONS", "[TODO]", "<step_by_step>", "...". Seen on MiMo
+ * on 25 September 2026: the problem statement written out, and assumptions,
+ * working and answer returned as PLACEHOLDER_* tokens - valid JSON, every
+ * field a string, so nothing downstream noticed.
+ */
+export function isPlaceholderText(value: string) {
+  const text = value.trim();
+  if (!text) return false;
+  return (
+    /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(text) ||
+    /^[[<{(]?\s*(?:placeholder|todo|tbd|to be (?:filled|completed|added)(?: in)?|fill(?:ed)? in(?: later)?)\s*[\]>})]?\.?$/i.test(text) ||
+    /^<[a-z_ ]+>$/i.test(text) ||
+    /^(?:\.{3}|…)$/.test(text)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Finalization: raw model text -> normalized ProviderArtifact
 // ---------------------------------------------------------------------------
@@ -975,13 +993,30 @@ export function finalizeProviderArtifact(
 ): ProviderArtifact {
   let solution = parseStructuredSolution(rawText, provider, options);
 
+  // Template slots left unfilled. If the working went into latex_body
+  // instead, it is rebuilt from there below; if it went nowhere, this is not
+  // a solution, and no amount of leniency on a last attempt makes it one.
+  const unfilled = (["step_by_step", "final_answer"] as const).filter((field) =>
+    isPlaceholderText(solution[field]),
+  );
+  const latexHasWorking =
+    stripCodeFence(solution.latex_body).trim().length >= 200 && !isPlaceholderText(solution.latex_body);
+  if (unfilled.length && !latexHasWorking) {
+    throw new Error(
+      `${PROVIDER_LABELS[provider]} returned a blank template (${solution[unfilled[0]].trim().slice(0, 40)}) instead of a solution.`,
+    );
+  }
+  for (const field of Object.keys(solution) as Array<keyof StructuredSolution>) {
+    if (isPlaceholderText(solution[field])) solution = { ...solution, [field]: "" };
+  }
+
   let latexBody = stripCodeFence(solution.latex_body).trim();
   if (latexBody.length < 24) {
     latexBody = buildLatexFallback(solution);
   }
 
   const displayFromLatex = latexBodyToDisplayMarkdown(latexBody);
-  if (displayFromLatex && shouldPreferLatexDisplay(solution)) {
+  if (displayFromLatex && (unfilled.length || shouldPreferLatexDisplay(solution))) {
     solution = {
       ...solution,
       interpreted_problem:

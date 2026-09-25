@@ -25,6 +25,7 @@ import {
   encodeHeartbeat,
   runTask,
   SSE_HEADERS,
+  taskTimeoutFor,
   type TaskEvent,
   type TaskSink,
 } from "./run";
@@ -35,14 +36,24 @@ export const JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 const TERMINAL_TYPES = new Set(["done", "error"]);
 
+/** Statuses kept for a page that re-attaches; a run has a handful at most. */
+const MAX_STATUSES = 40;
+
 type Listener = WritableStreamDefaultWriter<Uint8Array>;
 
 export class TaskJob extends DurableObject<WorkerEnv> {
   private jobId = "";
   private running = false;
-  /** The latest `status`, replayed to a page that re-attaches mid-run. */
-  private lastStatus: TaskEvent | null = null;
+  /**
+   * Every `status` so far, each stamped with the time it happened, replayed
+   * to a page that re-attaches mid-run: it shows the whole story - each retry,
+   * each model switch - not just the latest line. Held in memory only; what
+   * is stored is still the final event alone.
+   */
+  private statuses: TaskEvent[] = [];
   private terminal: TaskEvent | null = null;
+  private startedAt = 0;
+  private deadlineAt = 0;
   private readonly listeners = new Set<Listener>();
   private readonly cancelled = new AbortController();
 
@@ -67,7 +78,7 @@ export class TaskJob extends DurableObject<WorkerEnv> {
   async alarm() {
     await this.ctx.storage.deleteAll();
     this.jobId = "";
-    this.lastStatus = null;
+    this.statuses = [];
     this.terminal = null;
   }
 
@@ -93,7 +104,15 @@ export class TaskJob extends DurableObject<WorkerEnv> {
 
     this.jobId = jobId;
     this.running = true;
-    await this.ctx.storage.put({ jobId, kind, provider, createdAt: Date.now() });
+    this.startedAt = Date.now();
+    this.deadlineAt = this.startedAt + taskTimeoutFor(built.params);
+    await this.ctx.storage.put({
+      jobId,
+      kind,
+      provider,
+      createdAt: this.startedAt,
+      deadlineAt: this.deadlineAt,
+    });
     // The safety net: a job that never finishes is still deleted, one
     // retention period after the longest run it could have had.
     await this.ctx.storage.setAlarm(Date.now() + MAX_TIMEOUT_MS + JOB_RETENTION_MS);
@@ -105,12 +124,15 @@ export class TaskJob extends DurableObject<WorkerEnv> {
   }
 
   /**
-   * An SSE stream of this job: the `job` event carrying its id, then either
-   * the stored result, or the latest status followed by everything live.
+   * An SSE stream of this job: the `job` event carrying its id and timing,
+   * then either the stored result, or every status so far followed by
+   * everything live.
    */
   private async attach(): Promise<Response> {
     const jobId = this.jobId || (await this.ctx.storage.get<string>("jobId")) || "";
     const terminal = this.terminal ?? (await this.ctx.storage.get<TaskEvent>("terminal")) ?? null;
+    const startedAt = this.startedAt || (await this.ctx.storage.get<number>("createdAt")) || 0;
+    const deadlineAt = this.deadlineAt || (await this.ctx.storage.get<number>("deadlineAt")) || 0;
     if (!jobId) {
       return Response.json(
         { error: "This result is no longer available - results are kept for 24 hours." },
@@ -125,12 +147,15 @@ export class TaskJob extends DurableObject<WorkerEnv> {
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
-    void writer.write(encodeEvent({ type: "job", id: jobId })).catch(() => {});
+    const job: TaskEvent = { type: "job", id: jobId, now: Date.now() };
+    if (startedAt) job.startedAt = startedAt;
+    if (deadlineAt) job.deadlineAt = deadlineAt;
+    void writer.write(encodeEvent(job)).catch(() => {});
     if (terminal) {
       void writer.write(encodeEvent(terminal)).catch(() => {});
       void writer.close().catch(() => {});
     } else {
-      if (this.lastStatus) void writer.write(encodeEvent(this.lastStatus)).catch(() => {});
+      for (const status of this.statuses) void writer.write(encodeEvent(status)).catch(() => {});
       this.listeners.add(writer);
     }
     return new Response(readable, { headers: SSE_HEADERS });
@@ -143,8 +168,14 @@ export class TaskJob extends DurableObject<WorkerEnv> {
    */
   private hub(): TaskSink {
     return {
-      event: async (event) => {
-        if (event.type === "status") this.lastStatus = event;
+      event: async (unstamped) => {
+        // When it happened, on the server's clock: the page places replayed
+        // statuses by it, and shows how long the task took.
+        const event =
+          unstamped.type === "delta" ? unstamped : { ...unstamped, at: Date.now() };
+        if (event.type === "status" && this.statuses.length < MAX_STATUSES) {
+          this.statuses.push(event);
+        }
         if (TERMINAL_TYPES.has(event.type)) {
           this.terminal = event;
           this.running = false;

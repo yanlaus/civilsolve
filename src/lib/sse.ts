@@ -3,7 +3,32 @@
 
 export type SseEvent = { name: string; data: string };
 
-export async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+/**
+ * How long a stream may go without a single byte before it is treated as
+ * lost. The server sends a heartbeat every 15 s, so this is three missed in a
+ * row. It catches the connection a phone drops without telling the page -
+ * a switch between Wi-Fi and mobile data, a tunnel - where the read would
+ * otherwise wait forever and the tab spin with nothing coming. withResume
+ * then re-attaches to the same job.
+ */
+export const STREAM_IDLE_MS = 45_000;
+
+/** One read, or a StreamInterruptedError once `idleMs` passes without data. */
+function readOrStall(reader: ReadableStreamDefaultReader<Uint8Array>, idleMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stalled = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reader.cancel().catch(() => {});
+      reject(new StreamInterruptedError(`No data from the server for ${idleMs / 1000} s.`));
+    }, idleMs);
+  });
+  return Promise.race([reader.read(), stalled]).finally(() => clearTimeout(timer));
+}
+
+export async function* readSseEvents(
+  body: ReadableStream<Uint8Array>,
+  idleMs = STREAM_IDLE_MS,
+): AsyncGenerator<SseEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -23,7 +48,7 @@ export async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGen
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readOrStall(reader, idleMs);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
@@ -46,7 +71,11 @@ export async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGen
     const event = flush();
     if (event) yield event;
   } finally {
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // A stalled read may still be settling; the stream is abandoned anyway.
+    }
   }
 }
 
@@ -281,9 +310,15 @@ async function errorMessage(response: Response) {
  * run instead of starting it over, and Stop can cancel it. `connections`
  * counts the streams that reached the page (each opens with that event),
  * which is how withResume tells a reconnection that got through from one
- * that did not.
+ * that did not. `timing` is what the job said about its start and deadline,
+ * on the server's clock, with `clockOffset` (this page's clock minus the
+ * server's) to convert them.
  */
-export type JobHandle = { id: string | null; connections: number };
+export type JobHandle = {
+  id: string | null;
+  connections: number;
+  timing?: { startedAt?: number; deadlineAt?: number; clockOffset: number };
+};
 
 export function jobHandle(id: string | null = null): JobHandle {
   return { id, connections: 0 };
@@ -301,7 +336,14 @@ export function takeJobEvent(
   if (event.name !== "job") return false;
   handle.connections += 1;
   try {
-    const { id } = JSON.parse(event.data) as { id?: unknown };
+    const { id, startedAt, deadlineAt, now } = JSON.parse(event.data) as Record<string, unknown>;
+    if (typeof now === "number") {
+      handle.timing = {
+        clockOffset: Date.now() - now,
+        ...(typeof startedAt === "number" ? { startedAt } : {}),
+        ...(typeof deadlineAt === "number" ? { deadlineAt } : {}),
+      };
+    }
     if (typeof id === "string" && id) {
       handle.id = id;
       onJob?.(id);

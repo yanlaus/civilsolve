@@ -44,23 +44,53 @@ export type JudgeRequestBody = {
   effort?: EffortKey;
 };
 
+/**
+ * The first event of every job's stream (worker/jobs.ts), on the first
+ * connection and on every re-attach. Times are the server's clock, in ms;
+ * `now` lets the page correct for its own clock being off, so the elapsed
+ * time it shows is the job's, not the phone's.
+ */
+export type JobEvent = {
+  type: "job";
+  id: string;
+  /** When the job started. */
+  startedAt?: number;
+  /** When the job gives up: startedAt plus its timeout (see taskTimeoutMs). */
+  deadlineAt?: number;
+  /** The server's clock when this event was sent. */
+  now?: number;
+};
+
+// Through a job, `status`, `done` and `error` carry `at`, the server time
+// they happened, so a page that re-attaches can place replayed statuses on
+// the same timeline. An error carries `timedOut` when the task ran out of
+// time rather than failing.
 export type SolveEvent =
-  | { type: "status"; message: string }
+  | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
-  | { type: "done"; solution: ProviderArtifact }
-  | { type: "error"; message: string };
+  | { type: "done"; solution: ProviderArtifact; at?: number }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
 export type InterpretEvent =
-  | { type: "status"; message: string }
+  | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
-  | { type: "done"; interpretation: InterpretationResult }
-  | { type: "error"; message: string };
+  | { type: "done"; interpretation: InterpretationResult; at?: number }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
 export type JudgeEvent =
-  | { type: "status"; message: string }
+  | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
-  | { type: "done"; judgement: JudgementResult }
-  | { type: "error"; message: string };
+  | { type: "done"; judgement: JudgementResult; at?: number }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
+
+/** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */
+export function formatDuration(ms: number) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (!minutes) return `${seconds} s`;
+  return seconds ? `${minutes} min ${seconds} s` : `${minutes} min`;
+}
 
 export const MAX_IMAGES = 16;
 export const MAX_NOTES_LENGTH = 4000;

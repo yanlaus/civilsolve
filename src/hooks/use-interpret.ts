@@ -24,7 +24,15 @@ import {
 
 export type InterpretPipeline =
   | { status: "idle" }
-  | { status: "running"; stage: string }
+  | {
+      status: "running";
+      stage: string;
+      /** The latest status from the server (a retry, a model switch) or a reconnect note. */
+      detail?: string;
+      /** When this step started and when the server gives up on it, on this page's clock. */
+      startedAt: number;
+      deadlineAt?: number;
+    }
   | { status: "review"; interpretation: InterpretationResult; text: string }
   | { status: "error"; message: string };
 
@@ -72,14 +80,23 @@ export function useInterpret() {
         provider: ProviderKey,
         body: InterpretRequestBody,
       ) => {
-        setPipeline({ status: "running", stage });
+        let current: InterpretPipeline & { status: "running" } = {
+          status: "running",
+          stage,
+          startedAt: Date.now(),
+        };
+        const report = (change: Partial<typeof current>) => {
+          current = { ...current, ...change };
+          setPipeline(current);
+        };
+        report({});
         const handle = jobHandle();
         jobRef.current = handle;
         return withResume(
-          () => runInterpretRequest(provider, body, abort.signal, handle),
+          () => runInterpretRequest(provider, body, abort.signal, handle, report),
           handle,
           abort.signal,
-          (message) => setPipeline({ status: "running", stage: `${stage} ${message}` }),
+          (message) => report({ detail: message }),
         );
       };
 
@@ -140,11 +157,22 @@ async function runInterpretRequest(
   body: InterpretRequestBody,
   signal: AbortSignal,
   handle: JobHandle,
+  report: (change: { detail?: string; startedAt?: number; deadlineAt?: number }) => void,
 ): Promise<InterpretationResult> {
   const stream = await openTaskStream(handle, `/api/interpret/${provider}`, body, signal);
+  let charsReceived = 0;
 
   for await (const event of readSseEvents(stream)) {
-    if (takeJobEvent(handle, event)) continue;
+    if (takeJobEvent(handle, event)) {
+      const timing = handle.timing;
+      if (timing) {
+        report({
+          ...(timing.startedAt !== undefined ? { startedAt: timing.startedAt + timing.clockOffset } : {}),
+          ...(timing.deadlineAt !== undefined ? { deadlineAt: timing.deadlineAt + timing.clockOffset } : {}),
+        });
+      }
+      continue;
+    }
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(event.data) as Record<string, unknown>;
@@ -152,6 +180,15 @@ async function runInterpretRequest(
       continue;
     }
 
+    // The stage line already names the model; its "Asking ..." adds nothing.
+    if (event.name === "status" && typeof payload.message === "string") {
+      charsReceived = 0;
+      report({ detail: payload.message.startsWith("Asking ") ? undefined : payload.message });
+    }
+    if (event.name === "delta" && typeof payload.text === "string") {
+      charsReceived += payload.text.length;
+      report({ detail: `writing... ${charsReceived.toLocaleString()} characters` });
+    }
     if (event.name === "done" && payload.interpretation && typeof payload.interpretation === "object") {
       return payload.interpretation as InterpretationResult;
     }
