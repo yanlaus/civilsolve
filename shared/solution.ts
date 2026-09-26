@@ -655,10 +655,24 @@ export function normalizeDisplayText(value: string) {
     .replace(/\\section\\times\s*\{/g, "\\section*{")
     .replace(/\\text\{\s*\\mathrm\{([^{}]+)\}\s*\}/g, "\\text{$1}")
     .replace(/\\text\{\s+([^{}]+)\s+\}/g, "\\text{$1}")
-    .replace(/\b(Formula|Substitute|Substitution|Result|Given|Required|Total|So):/g, "\n\n$1:")
+    .replace(
+      /([^\n]*?)\b(Formula|Substitute|Substitution|Result|Given|Required|Total|So):/g,
+      (match, before: string, label: string) =>
+        // A label run into the sentence before it gets a paragraph of its
+        // own. One that already opens its line, a bullet or a bold ("- Given:",
+        // "**Given:**") is where it belongs: the break used to leave an empty
+        // bullet, or split the bold in two (27 September 2026). So is one
+        // inside a bold heading ("**4. Calculate Result:**").
+        LABEL_ALREADY_OPENS.test(before) || (before.match(/\*\*/g) || []).length % 2 === 1
+          ? match
+          : `${before}\n\n${label}:`,
+    )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+/** What may come before a label that already opens its line: a list marker, a bold, nothing. */
+const LABEL_ALREADY_OPENS = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__|\*|_)?\s*$/;
 
 export function normalizeProviderArtifact(result: ProviderArtifact): ProviderArtifact {
   return {

@@ -64,6 +64,15 @@ const INTERPRETATION_FIELDS = [
 const VERIFIED_INTERPRETATION_FIELDS = [...INTERPRETATION_FIELDS, "traditional_chinese"] as const;
 
 /**
+ * Units go inside the math with their number and exponent. Models also wrote
+ * them half outside it - mm$^2$, kg/m$^3$, kN$\cdot$m - which the page
+ * showed as typed (27 September 2026; math-markdown.ts now typesets those
+ * too).
+ */
+const UNIT_RULE =
+  "Keep every unit inside the math, together with its number and exponent: `$A = 2827\\,\\text{mm}^2$`, `$\\rho = 790\\,\\text{kg/m}^3$`, `$M = 45\\,\\text{kN}\\cdot\\text{m}$` - never half outside it, as in mm$^2$, m^3 or kN$\\cdot$m.";
+
+/**
  * How a reading is written: Markdown with LaTeX, like a solution, because the
  * page renders it the same way - in the review step and above the solutions
  * (26 September 2026; it was plain text in a text box before, formulas and
@@ -73,6 +82,7 @@ const READING_FORMAT = [
   "Write every field as Markdown, the way the page renders it:",
   "- Put each given quantity, and each thing required, on a `- ` bullet line of its own.",
   "- Format every symbol, formula and value with its unit as LaTeX in Markdown math delimiters: `$...$` inline (for example `$d_1 = 60\\,\\text{mm}$`, `$\\theta = 30^\\circ$`, `$P_A$`), `$$...$$` for a displayed equation. Never leave a formula or a subscripted symbol as plain text such as d_1 = 60 mm.",
+  `- ${UNIT_RULE}`,
   "- No headings, no backticks, no code blocks.",
 ];
 
@@ -140,10 +150,15 @@ export function buildTutorPrompt(
     "- Final answer with units",
     "- In `final_answer`, each answer on a line of its own, as a `- ` bullet (one per part or quantity), never run together in one paragraph",
     "",
+    "Break `interpreted_problem` and `assumptions` into lines, so they are easy to read - never one long paragraph:",
+    "- `interpreted_problem`: one or two short sentences on what the problem is, then the given data and what is asked as `- ` bullet lines, one item per line (a multi-part question gets a line per part).",
+    "- `assumptions`: a `- ` bullet line per assumption.",
+    "",
     "For web-facing text fields (`interpreted_problem`, `assumptions`, `step_by_step`, and `final_answer`), format formulas with Markdown math delimiters:",
     "- Use `$...$` for short inline symbols and equations.",
     "- Use `$$...$$` for displayed equations, substitutions, and final calculated expressions.",
     "- Do not leave formulas as plain text when they contain symbols, subscripts, superscripts, fractions, or unit calculations.",
+    `- ${UNIT_RULE}`,
     "- Do not use CJK prose such as 代入, 結果, 已知, or 所求 unless the user explicitly requests a Chinese answer.",
   );
 
@@ -255,6 +270,7 @@ export function buildJudgePrompt(
     '- `confidence`: "high", "medium" or "low" in the verdict.',
     "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer, what each solution got right or wrong, and the decisive reason - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
     "Write `final_answer`, `assessments`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
+    UNIT_RULE,
     "Return JSON matching the required schema exactly.",
     "",
     userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
