@@ -20,10 +20,10 @@ import {
 import { isJudgeActive, isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
 
 const SELECT_CLASS =
-  "mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] disabled:opacity-50 dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]";
+  "mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent disabled:opacity-50";
 const BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#b35c1e] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#9a4d17] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#e8903a] dark:text-[#0e1420] dark:hover:bg-[#f5a04f]";
-const HINT_CLASS = "mt-2 text-[0.7rem] text-[#8a7f72] dark:text-[#a8a098]";
+  "cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50";
+const HINT_CLASS = "mt-2 text-[0.7rem] text-cs-ink-3";
 
 export function RunActions({
   runs,
@@ -69,7 +69,7 @@ export function RunActions({
 
   if (!canRerun) {
     return (
-      <p className="mt-4 rounded-[10px] border border-[#e8e3db] bg-white px-4 py-3 text-xs text-[#8a7f72] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e] dark:text-[#a8a098]">
+      <p className="mt-4 rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-xs text-cs-ink-3 print:hidden">
         Adding a solver, retrying one or running the cross-check needs this run&apos;s images,
         which this browser no longer has. Upload the question again to do that.
       </p>
@@ -97,15 +97,15 @@ export function RunActions({
             : "";
 
   return (
-    <div className="mt-4 grid gap-4 rounded-2xl border border-[#e8e3db] bg-white p-5 shadow-[0_1px_3px_rgba(27,22,16,0.06)] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e] sm:grid-cols-2">
+    <div className="cs-panel mt-4 grid gap-4 rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)] print:hidden sm:grid-cols-2">
       <div className="min-w-0">
-        <p className="flex items-center gap-2 text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Plus className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+        <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
+          <Plus className="h-4 w-4 text-cs-accent" aria-hidden="true" />
           Add a solver
         </p>
         {addable.length ? (
           <>
-            <label className="mt-2 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+            <label className="mt-2 block text-xs text-cs-ink-3">
               Provider
               <select
                 value={toAdd}
@@ -140,8 +140,8 @@ export function RunActions({
       </div>
 
       <div className="min-w-0">
-        <p className="flex items-center gap-2 text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+        <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
+          <Scale className="h-4 w-4 text-cs-accent" aria-hidden="true" />
           {hasVerdict ? "Cross-check again" : "Cross-check these solutions"}
         </p>
         {finished.length ? (
@@ -149,21 +149,21 @@ export function RunActions({
             {finished.map((key) => (
               <label
                 key={key}
-                className="flex cursor-pointer items-center gap-1.5 text-sm text-[#5c5347] dark:text-[#cfc7bf]"
+                className="flex cursor-pointer items-center gap-1.5 text-sm text-cs-ink-2"
               >
                 <input
                   type="checkbox"
                   checked={chosen.includes(key)}
                   disabled={locked || judging}
                   onChange={() => togglePicked(key)}
-                  className="h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+                  className="h-4 w-4 accent-cs-accent"
                 />
                 {PROVIDER_LABELS[key]}
               </label>
             ))}
           </div>
         ) : null}
-        <label className="mt-2 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+        <label className="mt-2 block text-xs text-cs-ink-3">
           Judge
           <select
             value={judge}

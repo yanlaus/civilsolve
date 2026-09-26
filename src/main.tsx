@@ -1,7 +1,11 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { applyTheme, readStoredTheme } from "./components/theme-provider";
 import "./styles.css";
+
+// Before the first render, so the saved theme never flashes the default.
+applyTheme(readStoredTheme());
 
 window.addEventListener("error", (event) => {
   console.error("[civilsolve-runtime-error]", {

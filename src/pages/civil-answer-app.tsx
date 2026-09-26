@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Calculator, History, Loader2, X } from "lucide-react";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
+import { useTheme } from "@/components/theme-provider";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { useHealth } from "@/hooks/use-health";
 import { useInterpret } from "@/hooks/use-interpret";
@@ -20,6 +22,17 @@ import {
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 
+/** The Unicorn theme's V-fin, over the wordmark. */
+function UnicornCrest() {
+  return (
+    <svg viewBox="0 0 120 34" className="mx-auto mb-2 h-7 w-auto" aria-hidden="true">
+      <path d="M57 30 4 3h12l44 20z" fill="#d4a72c" />
+      <path d="M63 30 116 3h-12L60 23z" fill="#d4a72c" />
+      <path d="M60 12l5 9-5 11-5-11z" fill="#c4262e" />
+    </svg>
+  );
+}
+
 // Prepared at submit time and needed again once the user confirms the
 // reviewed interpretation.
 type PendingSolve = {
@@ -29,6 +42,7 @@ type PendingSolve = {
 };
 
 export default function CivilAnswerAppPage() {
+  const { theme } = useTheme();
   const {
     runs,
     judgeRun,
@@ -195,18 +209,22 @@ export default function CivilAnswerAppPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f1ec] bg-[linear-gradient(rgba(139,126,112,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(139,126,112,0.07)_1px,transparent_1px)] bg-[size:28px_28px] text-[#1b1610] print:bg-none dark:bg-[#0e1420] dark:bg-[linear-gradient(rgba(100,140,200,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(100,140,200,0.04)_1px,transparent_1px)] dark:text-[#e4e0db]">
+    <main className="cs-backdrop min-h-screen text-cs-ink">
       <div className="mx-auto w-full max-w-[860px] px-5 pb-16 pt-6 sm:px-6">
-        <header className="py-9 text-center print:hidden">
+        <div className="flex justify-end print:hidden">
+          <ThemeSwitcher />
+        </div>
+        <header className="pb-9 pt-4 text-center print:hidden">
+          {theme === "unicorn" ? <UnicornCrest /> : null}
           <div className="mb-2 inline-flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-[10px] bg-[#b35c1e] text-white shadow-[0_2px_12px_rgba(179,92,30,0.15)] dark:bg-[#e8903a] dark:text-[#0e1420]">
+            <div className="cs-primary flex h-11 w-11 items-center justify-center rounded-cs bg-cs-accent text-cs-on-accent shadow-[0_2px_12px_var(--cs-ring)]">
               <Calculator className="h-5 w-5" />
             </div>
-            <div className="font-serif text-[2.1rem] font-bold tracking-normal text-[#1b1610] dark:text-[#e4e0db]">
-              Civil<span className="text-[#b35c1e] dark:text-[#e8903a]">Solve</span>
+            <div className="font-display text-[2.1rem] font-bold tracking-normal text-cs-ink">
+              Civil<span className="text-cs-accent">Solve</span>
             </div>
           </div>
-          <p className="text-xs font-medium uppercase tracking-[0.32em] text-[#8a7f72] dark:text-[#a8a098]">
+          <p className="text-xs font-medium uppercase tracking-[0.32em] text-cs-ink-3">
             Step-by-Step Engineering Solutions
           </p>
         </header>
@@ -232,29 +250,29 @@ export default function CivilAnswerAppPage() {
         ) : null}
 
         {runtimeError ? (
-          <div className="mt-5 rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] print:hidden dark:border-[#5b2a31] dark:text-[#f2b8b2]">
+          <div className="mt-5 rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger print:hidden">
             Browser runtime error: {runtimeError}
           </div>
         ) : null}
 
         <Suspense
           fallback={
-            <div className="mt-10 flex items-center justify-center gap-2 text-sm text-[#8a7f72] print:hidden dark:text-[#a8a098]">
+            <div className="mt-10 flex items-center justify-center gap-2 text-sm text-cs-ink-3 print:hidden">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading solution view...
             </div>
           }
         >
           {recovered ? (
-            <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] print:hidden dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2 print:hidden">
               <span className="flex items-center gap-2">
-                <History className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+                <History className="h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
                 Your last run, recovered from this browser. Results are kept for 24 hours.
               </span>
               <button
                 type="button"
                 onClick={clearRecovered}
-                className="inline-flex items-center gap-1 rounded-[8px] border border-[#d4cdc3] px-3 py-1 text-xs font-semibold transition hover:border-[#b35c1e] hover:text-[#b35c1e] dark:border-[#2a3650] dark:hover:border-[#e8903a] dark:hover:text-[#e8903a]"
+                className="inline-flex items-center gap-1 rounded-cs border border-cs-line px-3 py-1 text-xs font-semibold transition hover:border-cs-accent hover:text-cs-accent"
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
                 Clear

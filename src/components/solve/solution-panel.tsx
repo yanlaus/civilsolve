@@ -20,6 +20,7 @@ import {
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { formatClock, useNow, type Progress } from "@/lib/progress";
+import { ProviderLogo } from "./provider-logo";
 import { RunActions } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
 import { PROVIDER_OPTIONS } from "./upload-form";
@@ -69,11 +70,11 @@ function verdictHeadline(labels: string[], correct: number[]) {
 
 // A task that ran out of time and returned nothing is shown in orange, apart
 // from the red of a real failure: nothing went wrong that a rerun could not fix.
-const TIMEOUT_DOT = "bg-[#e67e22] dark:bg-[#f0a35e]";
+const TIMEOUT_DOT = "bg-[#e67e22]";
 const TIMEOUT_BOX =
-  "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12] dark:border-[#5b4020] dark:text-[#f0b878]";
+  "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12]";
 const ERROR_BOX =
-  "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]";
+  "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger";
 
 /**
  * Every status line so far, with when it came, so a long wait shows its
@@ -108,9 +109,9 @@ function EventLog({ progress, current }: { progress?: Progress; current?: string
 function ProgressBox({ line, progress, now }: { line: string; progress?: Progress; now: number }) {
   const elapsed = progress ? now - progress.startedAt : 0;
   return (
-    <div className="rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
+    <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
       <div className="flex items-center gap-3">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#b35c1e] dark:text-[#e8903a]" />
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs-accent" />
         <span className="min-w-0 flex-1 break-words">{line}</span>
         {progress ? (
           <span className="shrink-0 font-semibold tabular-nums" title="Time since the request was sent">
@@ -239,8 +240,8 @@ export default function SolutionPanel({
   return (
     <section className="mt-10">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <h2 className="flex items-center gap-2 font-serif text-2xl font-bold text-[#1b1610] dark:text-[#e4e0db]">
-          <CheckCircle2 className="h-5 w-5 text-[#2d8a4e] dark:text-[#3daf66]" />
+        <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-cs-ink">
+          <CheckCircle2 className="h-5 w-5 text-cs-success" />
           Solutions
         </h2>
       </div>
@@ -254,8 +255,8 @@ export default function SolutionPanel({
         />
       ) : null}
 
-      <div className="overflow-hidden rounded-2xl border border-[#e8e3db] bg-white shadow-[0_4px_16px_rgba(27,22,16,0.08)] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e]">
-        <div className="border-b-2 border-[#e8e3db] px-2 pt-1 dark:border-[#1e2a40]">
+      <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">
+        <div className="border-b-2 border-cs-line-soft px-2 pt-1">
           <div className="flex overflow-x-auto">
             {visibleProviders.map((provider) => {
               const run = runs[provider.key];
@@ -267,25 +268,26 @@ export default function SolutionPanel({
                   onClick={() => pickProvider(provider.key)}
                   className={`relative shrink-0 px-4 py-3 pr-8 text-left text-sm font-semibold transition ${
                     activeProvider === provider.key
-                      ? "text-[#b35c1e] dark:text-[#e8903a]"
-                      : "text-[#8a7f72] hover:text-[#1b1610] dark:text-[#a8a098] dark:hover:text-[#e4e0db]"
+                      ? "text-cs-accent"
+                      : "text-cs-ink-3 hover:text-cs-ink"
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
+                    <ProviderLogo provider={provider.key} className="h-4 w-4 shrink-0" />
                     {provider.label}
                     {mark === "correct" ? (
-                      <Check className="h-3.5 w-3.5 text-[#2d8a4e] dark:text-[#3daf66]" aria-label="Judged correct" />
+                      <Check className="h-3.5 w-3.5 text-cs-success" aria-label="Judged correct" />
                     ) : mark === "wrong" ? (
-                      <X className="h-3.5 w-3.5 text-[#c0392b] dark:text-[#f2b8b2]" aria-label="Judged wrong" />
+                      <X className="h-3.5 w-3.5 text-cs-danger" aria-label="Judged wrong" />
                     ) : null}
                   </div>
                   <span
                     className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
-                      activeProvider === provider.key ? "bg-[#b35c1e] dark:bg-[#e8903a]" : "bg-transparent"
+                      activeProvider === provider.key ? "bg-cs-accent" : "bg-transparent"
                     }`}
                   />
                   {isRunActive(run) ? (
-                    <Loader2 className="absolute right-2.5 top-3 h-3 w-3 animate-spin text-[#8a7f72] dark:text-[#a8a098]" />
+                    <Loader2 className="absolute right-2.5 top-3 h-3 w-3 animate-spin text-cs-ink-3" />
                   ) : (
                     <span
                       title={
@@ -299,8 +301,8 @@ export default function SolutionPanel({
                         run.status === "error"
                           ? run.timedOut
                             ? TIMEOUT_DOT
-                            : "bg-[#c0392b] dark:bg-[#f2b8b2]"
-                          : "bg-[#2d8a4e] dark:bg-[#3daf66]"
+                            : "bg-cs-danger"
+                          : "bg-cs-success"
                       }`}
                     />
                   )}
@@ -312,8 +314,8 @@ export default function SolutionPanel({
 
         {activeArtifact ? (
           <>
-            <div className="border-b border-[#e8e3db] px-7 py-5 dark:border-[#1e2a40]">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-[#8a7f72] dark:text-[#a8a098]">
+            <div className="border-b border-cs-line-soft px-7 py-5">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-cs-ink-3">
                 {activeLabel}
                 {tookLabel(activeProgress) ? (
                   <span className="ml-2 font-normal normal-case tracking-normal">
@@ -321,14 +323,14 @@ export default function SolutionPanel({
                   </span>
                 ) : null}
               </div>
-              <div className="font-serif text-2xl font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+              <div className="font-display text-2xl font-semibold text-cs-ink">
                 {activeArtifact.title}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => exportPdf(activeArtifact.title)}
-                  className="inline-flex items-center gap-2 rounded-[10px] bg-[#1b1610] px-4 py-2 text-sm font-semibold text-white dark:bg-[#e8903a] dark:text-[#0e1420]"
+                  className="inline-flex items-center gap-2 rounded-cs bg-cs-ink px-4 py-2 text-sm font-semibold text-cs-surface"
                 >
                   <Download className="h-4 w-4" />
                   Save as PDF
@@ -336,7 +338,7 @@ export default function SolutionPanel({
               </div>
             </div>
 
-            <div className="border-b-2 border-[#e8e3db] px-2 pt-1 dark:border-[#1e2a40]">
+            <div className="border-b-2 border-cs-line-soft px-2 pt-1">
               <div className="flex overflow-x-auto">
                 {VIEWS.map((view) => (
                   <button
@@ -345,14 +347,14 @@ export default function SolutionPanel({
                     onClick={() => setActiveView(view.key)}
                     className={`relative shrink-0 px-4 py-3 text-sm font-semibold transition ${
                       activeView === view.key
-                        ? "text-[#b35c1e] dark:text-[#e8903a]"
-                        : "text-[#8a7f72] hover:text-[#1b1610] dark:text-[#a8a098] dark:hover:text-[#e4e0db]"
+                        ? "text-cs-accent"
+                        : "text-cs-ink-3 hover:text-cs-ink"
                     }`}
                   >
                     {view.label}
                     <span
                       className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
-                        activeView === view.key ? "bg-[#b35c1e] dark:bg-[#e8903a]" : "bg-transparent"
+                        activeView === view.key ? "bg-cs-accent" : "bg-transparent"
                       }`}
                     />
                   </button>
@@ -366,7 +368,7 @@ export default function SolutionPanel({
           <div className="px-7 py-8">
             {activeRun.status === "error" ? (
               <div
-                className={`rounded-[10px] border px-4 py-3 text-sm ${
+                className={`rounded-cs border px-4 py-3 text-sm ${
                   activeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
                 }`}
               >
@@ -438,10 +440,10 @@ export default function SolutionPanel({
 }
 
 const CONFIDENCE_CLASS = {
-  high: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]",
+  high: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a]",
   medium:
-    "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10] dark:border-[#5b512a] dark:text-[#e6d6a0]",
-  low: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]",
+    "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
+  low: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger",
 } as const;
 
 /** Compact rendered markdown for the verdict's fields (math included). */
@@ -449,7 +451,7 @@ function Prose({ source }: { source: string }) {
   const html = useMemo(() => renderMarkdown(source), [source]);
   return (
     <div
-      className="solution-content prose prose-sm prose-stone max-w-none min-w-0 overflow-x-hidden leading-7 dark:prose-invert"
+      className="solution-content prose prose-sm prose-stone max-w-none min-w-0 overflow-x-hidden leading-7"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -467,16 +469,16 @@ function Assessment({
   correct: boolean;
 }) {
   return (
-    <div className="min-w-0 rounded-[10px] border border-[#e8e3db] bg-[#faf8f5] px-4 py-3 dark:border-[#1e2a40] dark:bg-[#0e1420]">
-      <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+    <div className="min-w-0 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3">
+      <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
         {correct ? (
-          <Check className="h-3.5 w-3.5 text-[#2d8a4e] dark:text-[#3daf66]" aria-hidden="true" />
+          <Check className="h-3.5 w-3.5 text-cs-success" aria-hidden="true" />
         ) : (
-          <X className="h-3.5 w-3.5 text-[#c0392b] dark:text-[#f2b8b2]" aria-hidden="true" />
+          <X className="h-3.5 w-3.5 text-cs-danger" aria-hidden="true" />
         )}
         Solution {letter} · {label}
       </div>
-      {text ? <Prose source={text} /> : <p className="text-sm text-[#8a7f72]">No assessment given.</p>}
+      {text ? <Prose source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
     </div>
   );
 }
@@ -505,7 +507,7 @@ function JudgementCard({
   if (judgeRun.status === "error") {
     return (
       <div
-        className={`mb-4 rounded-[10px] border px-4 py-3 text-sm print:hidden ${
+        className={`mb-4 rounded-cs border px-4 py-3 text-sm print:hidden ${
           judgeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
         }`}
       >
@@ -552,16 +554,16 @@ function JudgementCard({
   const skipped = judgeRun.skipped.filter((provider) => runs[provider].status !== "done");
   const headlineTone =
     judgement.correct.length === 0
-      ? "text-[#c0392b] dark:text-[#f2b8b2]"
-      : "text-[#2d8a4e] dark:text-[#3daf66]";
+      ? "text-cs-danger"
+      : "text-cs-success";
 
   return (
-    <div className="mb-4 rounded-2xl border-2 border-[#b35c1e] bg-white p-5 shadow-[0_0_0_4px_rgba(179,92,30,0.12)] print:hidden dark:border-[#e8903a] dark:bg-[#151d2e]">
+    <div className="cs-panel mb-4 rounded-cs-lg border-2 border-cs-accent bg-cs-surface p-5 shadow-[0_0_0_4px_var(--cs-ring)] print:hidden">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" aria-hidden="true" />
+        <p className="flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Scale className="h-4 w-4 text-cs-accent" aria-hidden="true" />
           Cross-check verdict
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
+          <span className="font-sans text-sm font-normal text-cs-ink-3">
             judged by {judgeLabel}
             {tookLabel(progress) ? ` in ${tookLabel(progress)}` : ""}
           </span>
@@ -577,13 +579,13 @@ function JudgementCard({
         {verdictHeadline(labels, judgement.correct)}
       </p>
       {skipped.length ? (
-        <p className="mt-1 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+        <p className="mt-1 text-xs text-cs-ink-3">
           Not graded: {skipped.map((provider) => PROVIDER_LABELS[provider]).join(", ")} returned
           no solution.
         </p>
       ) : null}
       {notGraded.length ? (
-        <p className="mt-1 text-xs font-medium text-[#a85a12] dark:text-[#f0b878]">
+        <p className="mt-1 text-xs font-medium text-[#a85a12]">
           Not in this verdict: {notGraded.map((provider) => PROVIDER_LABELS[provider]).join(", ")}{" "}
           finished after it. Run the cross-check again below to include{" "}
           {notGraded.length === 1 ? "it" : "them"}.
@@ -592,7 +594,7 @@ function JudgementCard({
 
       {judgement.final_answer ? (
         <div className="mt-3">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
             Verified final answer
           </div>
           <Prose source={judgement.final_answer} />
@@ -613,7 +615,7 @@ function JudgementCard({
 
       {judgement.comparison ? (
         <div className="mt-4">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
             Why
           </div>
           <Prose source={judgement.comparison} />
@@ -623,9 +625,9 @@ function JudgementCard({
       {judgement.traditional_chinese ? (
         <div
           lang="zh-Hant-HK"
-          className="mt-4 rounded-[10px] border border-[#e8e3db] bg-[#faf8f5] px-4 py-3 dark:border-[#1e2a40] dark:bg-[#0e1420]"
+          className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3"
         >
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[#8a7f72] dark:text-[#a8a098]">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
             <Languages className="h-3.5 w-3.5" aria-hidden="true" />
             繁體中文 · Traditional Chinese
           </div>
@@ -633,7 +635,7 @@ function JudgementCard({
         </div>
       ) : null}
 
-      <p className="mt-4 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+      <p className="mt-4 text-xs text-cs-ink-3">
         The judge is a model too — treat this as a second opinion, not an answer key. Open
         each solution above and check the step it flags.
       </p>
