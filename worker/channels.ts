@@ -37,7 +37,14 @@ export type WorkerEnv = {
   OPENCODE_API_KEY?: string;
   GOOGLE_API_KEY?: string;
 
+  // Everything below is an optional override. The production values are the
+  // defaults in this file (DEFAULT_CHANNELS, ROUTES, INTERPRET_MODEL_DEFAULT),
+  // so wrangler.jsonc sets none of them; set one there (production) or in
+  // .dev.vars (local) only to depart from the default. GET /api/health
+  // reports what is in effect.
+
   // --- Channel routing: which account serves each provider ---------------
+  // A value may be a chain, first usable channel first: "minimax,opencode".
   CHATGPT_CHANNEL?: string;
   CLAUDE_CHANNEL?: string;
   GEMINI_CHANNEL?: string;
@@ -49,6 +56,9 @@ export type WorkerEnv = {
   MUSE_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
+  // A value may be a chain, primary first: "gemini-3.8-flash,gemini-3.5-flash".
+  // Every model must be vision-capable - verify with an image before changing
+  // one (AGENTS.md).
   POE_CHATGPT_MODEL?: string;
   POE_CLAUDE_MODEL?: string;
   POE_GEMINI_MODEL?: string;
@@ -75,8 +85,6 @@ export type WorkerEnv = {
   // Comma-separated provider keys that should use a non-streamed upstream
   // fetch (still delivered over the same SSE response), e.g. "deepseek".
   NO_STREAM?: string;
-  /** Superseded by NO_STREAM; still read so old configs keep working. */
-  POE_NO_STREAM?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -170,9 +178,12 @@ type RouteSpec = {
    */
   streaming?: boolean;
   /**
-   * Set false when the upstream cannot be forced to emit structured output.
-   * The request then relies on the prompt plus the repair pipeline in
-   * shared/solution.ts, instead of burning round trips discovering this.
+   * Set false when the upstream accepts a schema but cannot be trusted to hold
+   * it. The prompt then always carries the explicit field contract
+   * (`enforceShape`), and the repair pipeline in shared/solution.ts takes
+   * whatever comes back. The request itself still carries the schema on the
+   * `strict` rung - this flag changes the prompt, not `response_format`; the
+   * downgrade ladder in run.ts is what drops the schema when it is refused.
    */
   structured?: boolean;
 };
@@ -232,13 +243,19 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       defaultModel: "gemini-3.1-pro",
       effort: CLAMPED_EFFORT,
     },
+    // Gemini's default channel since 21 September 2026: free-tier Flash, the
+    // cheapest CPU route of any. "poe" serves gemini-3.1-pro (Pro, paid) if
+    // the Google key is ever lost.
     google: {
       dialect: "gemini",
       keyVar: "GOOGLE_API_KEY",
       modelVar: "GOOGLE_GEMINI_MODEL",
-      // Real ids come from GET /v1beta/models. The Pro tier is preview-suffixed;
-      // "gemini-3.1-pro" does not resolve.
-      defaultModel: "gemini-3.1-pro-preview",
+      // Real ids come from GET /v1beta/models. The owner's key is free-tier:
+      // Flash models work, "gemini-3.1-pro-preview" (the Pro tier is
+      // preview-suffixed; "gemini-3.1-pro" does not resolve) answers 429. A
+      // chain, primary first: 3.8-flash reads best but answered 503 "high
+      // demand" on four of six solves the day this was set; 3.5-flash was 3/3.
+      defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
       urlVar: "GOOGLE_BASE_URL",
       defaultUrl: "https://generativelanguage.googleapis.com/v1beta",
       effort: GEMINI_BUDGET,
@@ -303,9 +320,9 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     // since 23 September 2026. Their MiniMax account is a monthly token plan,
     // not per-call billing, so this costs nothing extra per solve and leaves
     // the OpenCode Go quota for the five providers that have nowhere else to
-    // go. The plan ends in October 2026: MINIMAX_CHANNEL is the chain
-    // "minimax,opencode", so when MiniMax refuses the account the Worker
-    // moves the solve to OpenCode Go by itself.
+    // go. The plan ends in October 2026: the default channel chain is
+    // "minimax,opencode" (DEFAULT_CHANNELS), so when MiniMax refuses the
+    // account the Worker moves the solve to OpenCode Go by itself.
     // The endpoint is plain OpenAI chat-completions and reads images, so no
     // separate dialect is needed - the anthropic-protocol route this provider
     // used until 19 September 2026 is not coming back. Same model either way,
@@ -342,9 +359,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       modelVar: "OPENCODE_MINIMAX_MODEL",
       // Back on 22 September 2026 after being dropped on 19 September (1/4 on
       // the B.8 fixture on its own API, where it thought itself out of tokens
-      // at "high"). This is a different route: MiniMax's own channel is gone,
-      // it runs on the Go subscription now, and "minimax-m3" is a newer model
-      // than the "MiniMax-M2" that failed. Verified to read the diagram: all
+      // at "high"). It came back on this route, on the Go subscription (no
+      // free tier on either gateway), and "minimax-m3" is a newer model than
+      // the "MiniMax-M2" that failed; MiniMax's own API returned the next day
+      // as the first channel of the chain. Verified to read the diagram: all
       // six values from the B.8 image. "minimax-m2.7" and "minimax-m2.5" are
       // listed by the gateway but answer 503 "Endpoint is unavailable".
       // It wraps its reasoning in <think> tags inside the message content;
@@ -404,16 +422,27 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
   },
 };
 
-const DEFAULT_CHANNEL: Record<ProviderKey, ChannelKey> = {
-  chatgpt: "opencode",
-  claude: "poe",
-  gemini: "poe",
-  deepseek: "opencode",
-  grok: "opencode",
-  mimo: "opencode",
-  minimax: "opencode",
-  kimi: "opencode",
-  muse: "opencode",
+/**
+ * The channels each provider uses when its `*_CHANNEL` var is unset - the
+ * production routing. A list is a chain, first usable channel first (see
+ * channelsFor and switchChannel in run.ts).
+ */
+const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
+  chatgpt: ["opencode"],
+  claude: ["poe"],
+  gemini: ["google"],
+  deepseek: ["opencode"],
+  grok: ["opencode"],
+  mimo: ["opencode"],
+  // MiniMax's own API on the owner's token plan first (MINIMAX_API_KEY), the
+  // OpenCode Go subscription second. When MiniMax refuses the account - the
+  // plan ends in October 2026 - or stops answering, the Worker moves that
+  // solve to OpenCode Go by itself and says so. Removing the MINIMAX_API_KEY
+  // secret skips straight to OpenCode Go. MINIMAX_CHANNEL="minimax" (plan
+  // only) or "opencode" (Go only) pins one.
+  minimax: ["minimax", "opencode"],
+  kimi: ["opencode"],
+  muse: ["opencode"],
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
@@ -486,12 +515,12 @@ function channelsFor(provider: ProviderKey, env: WorkerEnv) {
     .map((entry) => entry.trim())
     .filter(Boolean);
   if (!requested.length) {
-    return { channels: [DEFAULT_CHANNEL[provider]], problem: "" };
+    return { channels: DEFAULT_CHANNELS[provider], problem: "" };
   }
   const unknown = requested.find((entry) => !isChannelKey(entry));
   if (unknown) {
     return {
-      channels: [DEFAULT_CHANNEL[provider]],
+      channels: DEFAULT_CHANNELS[provider],
       problem: `${CHANNEL_VAR[provider]} names "${unknown}", which is not a known channel.`,
     };
   }
@@ -659,8 +688,7 @@ export function supportsEffort(route: Route, effort: EffortKey) {
 export function wantsUpstreamStream(route: Route, env: WorkerEnv) {
   if (!route.streaming) return false;
 
-  const raw = `${readVar(env, "NO_STREAM")},${readVar(env, "POE_NO_STREAM")}`;
-  const flags = raw
+  const flags = readVar(env, "NO_STREAM")
     .split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);

@@ -1,22 +1,14 @@
 {
-  "defaultMode": "bypassPermissions",
-  "apiKeyHelper": "echo $ZO_CLIENT_IDENTITY_TOKEN",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(rm:*)",
-      "Bash(mkdir:*)",
-      "Bash(mv:*)",
-      "Bash(bun:*)",
-      "Bash(git:*)",
-      "Bash(chmod:*)",
-      "Bash(grep:*)",
-      "Bash(ls:*)",
-      "Bash(find:*)",
-      "Bash(curl:*)",
-      "Edit",
-      "Write",
-      "MultiEdit"
+      "Bash(npm run check)",
+      "Bash(npm run build)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit -p worker)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
     ]
-  },
-  "model": "claude-sonnet-4-5-20250929"
+  }
 }
