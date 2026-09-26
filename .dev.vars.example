@@ -14,28 +14,30 @@
 # --- Keys: one per upstream account ----------------------------------------
 
 # OpenCode Go (https://opencode.ai/go) - serves ChatGPT (GPT 5.6 Luna),
-# DeepSeek, Grok, and the free MiMo and Muse Spark tiers by default. One key,
-# two protocols behind it. Muse Spark needs a one-time data-collection opt-in
-# in the OpenCode workspace, or it answers 403 DataPolicyError.
+# DeepSeek, Kimi, Grok, and the free MiMo and Muse Spark tiers, plus MiniMax
+# when its own key is missing or refused. One key, two protocols behind it.
+# Muse Spark needs a one-time data-collection opt-in in the OpenCode
+# workspace, or it answers 403 DataPolicyError.
 OPENCODE_API_KEY=
 
-# Poe (https://poe.com/api_key) - serves Claude and Gemini by default; can also
-# serve ChatGPT (CHATGPT_CHANNEL=poe).
+# Poe (https://poe.com/api_key) - serves Claude; also Gemini when
+# GEMINI_CHANNEL=poe (or for the interpretation pass when GOOGLE_API_KEY is
+# unset), and ChatGPT when CHATGPT_CHANNEL=poe.
 POE_API_KEY=
 
-# Google AI Studio (https://aistudio.google.com/apikey) - only needed when
-# GEMINI_CHANNEL is set to "google".
+# Google AI Studio (https://aistudio.google.com/apikey) - Gemini's default
+# channel (free-tier Flash).
 GOOGLE_API_KEY=
 
-# MiniMax (https://platform.minimaxi.com) - the default channel for MiniMax.
-# Set MINIMAX_CHANNEL=opencode to run it on the OpenCode Go subscription
-# instead, and this key is then unused.
+# MiniMax (https://platform.minimaxi.com) - first in MiniMax's default channel
+# chain (minimax, then opencode). Leave it blank and MiniMax runs on OpenCode
+# Go instead.
 MINIMAX_API_KEY=
 
 # --- Optional local overrides ----------------------------------------------
-# Anything in wrangler.jsonc "vars" can be overridden here for local runs,
-# for example:
-#   GEMINI_CHANNEL=google
+# The defaults are the production routing in worker/channels.ts; any var in
+# `WorkerEnv` there can be set here to depart from it for local runs, e.g.:
+#   GEMINI_CHANNEL=poe
 #   CHATGPT_CHANNEL=poe
 #   POE_CHATGPT_MODEL=gpt-5.4-pro
 #   OPENCODE_GROK_MODEL=grok-4.5

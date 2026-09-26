@@ -121,7 +121,7 @@ export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provide
  * DeepSeek Flash is the lightest draw per solve on the OpenCode Go plan;
  * `muse-spark-1.3-contributor` is free because it is a data-collecting
  * "contributor" tier: the workspace must opt in, and what is sent - the
- * assignment images included - may be used to train it. MiMo (`mimo-v2.5`,
+ * assignment images included - may be used to train it. MiMo (`mimo-v2.6-flash`,
  * OpenCode Zen's free tier) is unbadged: neither notably dear nor notably
  * cheap on that plan.
  */
