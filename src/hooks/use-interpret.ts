@@ -2,7 +2,8 @@
 // question at the same time, a third model reconciles their readings, then
 // the result pauses in "review" for the user to edit/confirm before solving.
 // Each reader can be stopped on its own (the other's reading then goes to
-// review alone), and the whole pass with reset().
+// review alone), and the whole pass with reset(). In review, revise() asks
+// the reconciler for the reading again with the user's instructions.
 
 import { useCallback, useRef, useState } from "react";
 import type { EffortKey } from "../../shared/prompt";
@@ -70,8 +71,18 @@ export type InterpretPipeline =
       note?: string;
       /** Who read it: "DeepSeek (Flash) and Muse Spark, reconciled by ChatGPT". */
       credit: string;
+      /** Bumped by every re-generated reading, so the review starts afresh from it. */
+      version: number;
+      /** Set once the reading was re-generated with the user's instructions. */
+      revisedWith?: string;
+      /** A re-generation in progress. */
+      revising?: { startedAt: number; status: string };
+      /** Why the last re-generation left the reading as it was. */
+      reviseError?: string;
     }
   | { status: "error"; message: string };
+
+type Review = Extract<InterpretPipeline, { status: "review" }>;
 
 export type InterpretConfig = {
   interpreterA: ModelChoice;
@@ -112,6 +123,18 @@ export function useInterpret() {
   const reportRef = useRef<
     ((label: string, detail: string, state: ModelProgress["state"]) => void) | null
   >(null);
+  /**
+   * What a re-generated reading needs from the pass: its models and levels,
+   * the images and notes, and the two readings when there were two.
+   */
+  const contextRef = useRef<{
+    config: InterpretConfig;
+    images: string[];
+    notes: string;
+    readings: [string, string] | null;
+  } | null>(null);
+  /** The re-generation in flight, for its Stop. */
+  const reviseRef = useRef<RunningCall | null>(null);
 
   const stopJobs = () => {
     for (const calls of callsRef.current.values()) {
@@ -125,6 +148,8 @@ export function useInterpret() {
     abortRef.current = null;
     stopJobs();
     reportRef.current = null;
+    if (reviseRef.current) cancelJob(reviseRef.current.handle);
+    reviseRef.current = null;
     setPipeline({ status: "idle" });
   }, []);
 
@@ -146,6 +171,7 @@ export function useInterpret() {
       abortRef.current = abort;
 
       const nameOf = (choice: ModelChoice) => providerDisplayName(choice.provider, choice.variant);
+      contextRef.current = { config, images, notes, readings: null };
       const labelA = nameOf(config.interpreterA);
       const labelB = nameOf(config.interpreterB);
       const labelV = nameOf(config.verifier);
@@ -284,21 +310,24 @@ export function useInterpret() {
               ? `You stopped ${lost.label}, so this is ${kept.label}'s reading alone - not cross-checked by ${labelV}. Check it with extra care.`
               : `${lost.label} could not read the question (${failureOf(lost.reason)}), so this is ${kept.label}'s reading alone - not cross-checked by ${labelV}. Check it with extra care.`,
           credit: `${kept.label} alone`,
+          version: 0,
         });
         return;
       }
 
       try {
         beginStep("Reconciling the two readings", 2, [labelV], false);
+        const readings: [string, string] = [
+          interpretationToText(settledA.value),
+          interpretationToText(settledB.value),
+        ];
+        contextRef.current = { config, images, notes, readings };
         const verified = await call(config.verifier, {
           mode: "verify",
           images,
           notes,
           effort: config.verifierEffort,
-          interpretations: [
-            interpretationToText(settledA.value),
-            interpretationToText(settledB.value),
-          ],
+          interpretations: readings,
         });
 
         setPipeline({
@@ -309,6 +338,7 @@ export function useInterpret() {
             labelA === labelB
               ? `${labelA} twice, reconciled by ${labelV}`
               : `${labelA} and ${labelB}, reconciled by ${labelV}`,
+          version: 0,
         });
       } catch (error) {
         if (abort.signal.aborted) return;
@@ -321,7 +351,87 @@ export function useInterpret() {
     [],
   );
 
-  return { pipeline, start, reset, stopModel };
+  /**
+   * The reading again, with the user's instructions: the reconciler gets the
+   * images, the notes, the reading as the user left it (edits included), the
+   * instructions and - when there were two - the readings it came from, and
+   * writes a complete new reading, Chinese too. Until it arrives the review
+   * stays as it is, and it stays that way if this fails or is stopped.
+   */
+  const revise = useCallback((current: string, instructions: string) => {
+    const context = contextRef.current;
+    const wanted = instructions.trim();
+    if (!context || !wanted || !current.trim()) return;
+    const { config, images, notes, readings } = context;
+    const { provider, variant } = config.verifier;
+    const label = providerDisplayName(provider, variant);
+    const plain = new RegExp(String.raw`^${PROVIDER_LABELS[provider]}(?: \(via [^)]*\))?(?::\s*|\s+)`);
+    const handle = jobHandle();
+    const abort = new AbortController();
+    reviseRef.current = { handle, abort };
+    // Checked when called, not inside the state updater: React runs that
+    // later, after reviseRef has been cleared, and the result was dropped.
+    const update = (change: (review: Review) => Review) => {
+      if (reviseRef.current?.handle !== handle) return;
+      setPipeline((state) => (state.status === "review" ? change(state) : state));
+    };
+    setPipeline((state) =>
+      state.status === "review"
+        ? { ...state, revising: { startedAt: Date.now(), status: "starting..." }, reviseError: undefined }
+        : state,
+    );
+    const say = (message: string | undefined) => {
+      if (message) update((review) => ({ ...review, revising: review.revising && { ...review.revising, status: message.replace(plain, "") } }));
+    };
+    const body: InterpretRequestBody = {
+      mode: "revise",
+      images,
+      notes,
+      current: current.trim(),
+      instructions: wanted,
+      effort: config.verifierEffort,
+      ...(variant ? { variant } : {}),
+      ...(readings ? { interpretations: readings } : {}),
+    };
+    void withResume(() => runInterpretRequest(provider, body, abort.signal, handle, say), handle, abort.signal, say).then(
+      (reading) => {
+        if (handle.stopped) return;
+        update((review) => ({
+          status: "review",
+          interpretation: reading,
+          text: interpretationToText(reading),
+          credit: review.credit.includes("revised by") ? review.credit : `${review.credit}, revised by ${label}`,
+          version: review.version + 1,
+          revisedWith: wanted,
+        }));
+        reviseRef.current = null;
+      },
+      (error: unknown) => {
+        if (handle.stopped || abort.signal.aborted) return;
+        update((review) => ({
+          ...review,
+          revising: undefined,
+          reviseError: `Re-generating the reading did not work: ${failureOf(error).trim().replace(/[.。]+$/, "")}. The reading below is unchanged.`,
+        }));
+        reviseRef.current = null;
+      },
+    );
+  }, []);
+
+  /** Stops a re-generation; the reading under review stays as it was. */
+  const stopRevise = useCallback(() => {
+    const running = reviseRef.current;
+    if (!running) return;
+    stopTask(running.handle, running.abort);
+    setPipeline((state) =>
+      state.status === "review"
+        ? { ...state, revising: undefined, reviseError: "You stopped the re-generation. The reading below is unchanged." }
+        : state,
+    );
+    reviseRef.current = null;
+  }, []);
+
+  return { pipeline, start, reset, stopModel, revise, stopRevise };
 }
 
 async function runInterpretRequest(

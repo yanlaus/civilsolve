@@ -2,11 +2,15 @@
 // verified interpretation for the user to correct before solving starts,
 // with the reconciler's Traditional Chinese version beside it to check
 // against. Both are rendered like a solution - Markdown, LaTeX typeset - and
-// the English can be edited as source, with its preview a tab away.
+// the English can be edited as source, with its preview a tab away. Or the
+// reconciler can be asked for the reading again, with the user's instructions.
 
 import { lazy, Suspense, useState } from "react";
-import { Check, Eye, Languages, Pencil, TriangleAlert, X } from "lucide-react";
+import { Check, Eye, Languages, Loader2, Pencil, Square, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
+import { formatClock, useNow } from "@/lib/progress";
+import { STOP_BUTTON_CLASS } from "./interpret-progress";
+import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 
 // The math renderer (katex, marked, dompurify) stays out of the first bundle.
 const MathProse = lazy(() => import("./math-prose"));
@@ -36,6 +40,12 @@ export function InterpretationReview({
   initialText,
   note,
   solvers,
+  reviser,
+  revising,
+  reviseError,
+  revisedWith,
+  onRevise,
+  onStopRevise,
   onConfirm,
   onCancel,
 }: {
@@ -45,12 +55,21 @@ export function InterpretationReview({
   note?: string;
   /** Who solves once this is confirmed - nobody has started yet. */
   solvers: string[];
+  /** The model that re-generates the reading: the reconciler. */
+  reviser: string;
+  revising?: { startedAt: number; status: string };
+  reviseError?: string;
+  /** The instructions this reading was re-generated with. */
+  revisedWith?: string;
+  onRevise: (currentText: string, instructions: string) => void;
+  onStopRevise: () => void;
   onConfirm: (confirmedText: string) => void;
   onCancel: () => void;
 }) {
   const [text, setText] = useState(initialText);
   const [editing, setEditing] = useState(false);
   const chinese = interpretation.traditional_chinese?.trim() ?? "";
+  const now = useNow(Boolean(revising));
 
   return (
     <section className="cs-panel mt-6 rounded-cs-lg border-2 border-cs-accent bg-cs-surface p-5 shadow-[0_0_0_4px_var(--cs-ring)] print:hidden">
@@ -78,9 +97,23 @@ export function InterpretationReview({
         </div>
       ) : null}
 
+      {revisedWith ? (
+        <div className="mb-3">
+          <RevisedWith instructions={revisedWith} />
+        </div>
+      ) : null}
+
+      {reviseError ? (
+        <div className="mb-3">
+          <RevisionNotice message={reviseError} />
+        </div>
+      ) : null}
+
       {interpretation.discrepancies ? (
         <div className="mb-3 rounded-cs border border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] px-4 py-3 text-sm text-[#7a5d10]">
-          <span className="font-semibold">Discrepancies found between the two readings:</span>
+          <span className="font-semibold">
+            {revisedWith ? "What changed:" : "Discrepancies found between the two readings:"}
+          </span>
           <div className="mt-1">
             <RenderedText source={interpretation.discrepancies} />
           </div>
@@ -162,6 +195,35 @@ export function InterpretationReview({
         </div>
       ) : null}
 
+      <div className="mt-4">
+        {revising ? (
+          <div className="flex items-center gap-3 rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs-accent" aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words">
+              {reviser} is re-generating the reading with your instructions - {revising.status}
+            </span>
+            <span className="shrink-0 font-semibold tabular-nums">
+              {formatClock(now - revising.startedAt)}
+            </span>
+            <button type="button" onClick={onStopRevise} className={STOP_BUTTON_CLASS}>
+              <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+              Stop
+            </button>
+          </div>
+        ) : (
+          <RevisePanel
+            title={`Not right? Ask ${reviser} to change the reading`}
+            placeholder="e.g. The inclined jet is 30° from the vertical, not the horizontal. The 100 kPa is a gauge pressure."
+            hint={`Sends the question images, your notes, the reading above (with your edits)${
+              note ? "" : " and both readers' readings"
+            } and your instructions back to ${reviser}, which writes a new reading, Chinese included. Or edit the English yourself.`}
+            buttonLabel="Re-generate reading"
+            disabledReason={text.trim() ? undefined : "The reading is empty - write it in Edit first."}
+            onSubmit={(instructions) => onRevise(text, instructions)}
+          />
+        )}
+      </div>
+
       <div className="mt-4 flex flex-wrap justify-end gap-3">
         <button
           type="button"
@@ -174,7 +236,7 @@ export function InterpretationReview({
         <button
           type="button"
           onClick={() => onConfirm(text.trim())}
-          disabled={!text.trim()}
+          disabled={!text.trim() || Boolean(revising)}
           className="cs-primary inline-flex items-center gap-2 rounded-cs bg-cs-accent px-6 py-2.5 text-sm font-semibold text-cs-on-accent shadow-[0_3px_14px_var(--cs-ring)] transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Check className="h-4 w-4" />

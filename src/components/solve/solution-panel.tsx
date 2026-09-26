@@ -33,6 +33,7 @@ import {
   type ProgressMap,
   type ProviderRuns,
   type RunVariants,
+  type SolutionVersions,
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
@@ -40,6 +41,7 @@ import { formatClock, useNow, type Progress } from "@/lib/progress";
 import { STOP_BUTTON_CLASS } from "./interpret-progress";
 import MathProse from "./math-prose";
 import { ProviderLogo } from "./provider-logo";
+import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { RunActions } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
 import { PROVIDER_OPTIONS } from "./upload-form";
@@ -67,11 +69,22 @@ function viewSource(artifact: ProviderArtifact, view: ViewKey) {
 function solverMark(
   judgeRun: JudgeRun,
   provider: ProviderKey,
+  versions: SolutionVersions,
 ): "correct" | "wrong" | null {
   if (judgeRun.status !== "done") return null;
   const index = judgeRun.solvers.indexOf(provider);
-  if (index < 0) return null;
+  if (index < 0 || changedSinceVerdict(judgeRun, provider, versions)) return null;
   return judgeRun.judgement.correct.includes(index) ? "correct" : "wrong";
+}
+
+/**
+ * Whether the solution on the page is a newer version than the one the
+ * verdict graded - re-generated or retried since. Unknown (a verdict picked
+ * back up after a reload) counts as unchanged.
+ */
+function changedSinceVerdict(judgeRun: JudgeRun, provider: ProviderKey, versions: SolutionVersions) {
+  if (judgeRun.status !== "done" || !judgeRun.versions) return false;
+  return (versions[provider] ?? 0) > (judgeRun.versions[provider] ?? 0);
 }
 
 /** "Gemini's solution is correct", "Gemini and Muse Spark are correct", ... */
@@ -237,13 +250,16 @@ export default function SolutionPanel({
   judgeProgress,
   variants,
   interpretation,
+  solutionVersions,
   providerStatus,
   canRerun,
   locked,
   onSolveProvider,
   onStopProvider,
+  onRefineProvider,
   onCrossCheck,
   onStopJudge,
+  onRefineVerdict,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -253,6 +269,8 @@ export default function SolutionPanel({
   variants: RunVariants;
   /** The confirmed interpretation the run was solved with, if it had one. */
   interpretation: ConfirmedInterpretation | null;
+  /** Which version of each solution is on the page, to tell one changed since the verdict. */
+  solutionVersions: SolutionVersions;
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   /** Whether the run's images are still at hand, for a retry, another solver or a cross-check. */
   canRerun: boolean;
@@ -260,8 +278,12 @@ export default function SolutionPanel({
   locked: boolean;
   onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
   onStopProvider: (provider: ProviderKey) => void;
+  /** Re-generates one finished solution with the user's instructions. */
+  onRefineProvider: (provider: ProviderKey, instructions: string) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
   onStopJudge: () => void;
+  /** Re-generates the verdict with the user's instructions. */
+  onRefineVerdict: (instructions: string) => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -357,7 +379,7 @@ export default function SolutionPanel({
           <div className="flex overflow-x-auto">
             {visibleProviders.map((provider) => {
               const run = runs[provider.key];
-              const mark = solverMark(judgeRun, provider.key);
+              const mark = solverMark(judgeRun, provider.key, solutionVersions);
               return (
                 <button
                   key={provider.key}
@@ -429,6 +451,14 @@ export default function SolutionPanel({
               <div className="font-display text-2xl font-semibold text-cs-ink">
                 {activeArtifact.title}
               </div>
+              {activeRun.status === "done" && activeRun.revisedWith ? (
+                <RevisedWith instructions={activeRun.revisedWith} />
+              ) : null}
+              {activeRun.status === "done" && activeRun.notice ? (
+                <div className="mt-3">
+                  <RevisionNotice message={activeRun.notice} />
+                </div>
+              ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -466,6 +496,26 @@ export default function SolutionPanel({
             </div>
 
             <SolutionArticle source={viewSource(activeArtifact, activeView)} />
+
+            <div className="border-t border-cs-line-soft px-4 py-4 sm:px-7">
+              <RevisePanel
+                title={`Not right? Give ${activeLabel} instructions and re-generate`}
+                placeholder="e.g. The inclined jet is 30° from the vertical, not the horizontal. Take the inlet pressure as gauge. Show the continuity step."
+                hint={`Sends the question images, your notes${
+                  interpretation ? ", the confirmed reading" : ""
+                }, this solution and your instructions back to ${activeLabel}, which writes a new version. This one stays if that fails.`}
+                disabledReason={
+                  !canRerun
+                    ? "Needs this run's images, which this browser no longer has."
+                    : locked
+                      ? "Waits until the new upload is ready."
+                      : judgeBusy
+                        ? "Waits for the cross-check to finish."
+                        : undefined
+                }
+                onSubmit={(instructions) => onRefineProvider(activeProvider, instructions)}
+              />
+            </div>
           </>
         ) : (
           <div className="px-7 py-8">
@@ -547,9 +597,21 @@ export default function SolutionPanel({
             judgeRun={judgeRun}
             runs={runs}
             variants={variants}
+            solutionVersions={solutionVersions}
             progress={judgeProgress ?? undefined}
             now={now}
             onStop={onStopJudge}
+            refineBlocked={
+              !canRerun
+                ? "Needs this run's images, which this browser no longer has."
+                : locked
+                  ? "Waits until the new upload is ready."
+                  : visibleProviders.some((provider) => isRunActive(runs[provider.key]))
+                    ? "Waits for every solver to finish."
+                    : undefined
+            }
+            interpretation={Boolean(interpretation)}
+            onRefine={onRefineVerdict}
           />
         </div>
       ) : null}
@@ -612,6 +674,10 @@ function JudgementCard({
   progress,
   now,
   onStop,
+  solutionVersions,
+  refineBlocked,
+  interpretation,
+  onRefine,
 }: {
   judgeRun: JudgeRun;
   /** The solvers now, to tell which finished after this verdict was given. */
@@ -620,6 +686,12 @@ function JudgementCard({
   progress?: Progress;
   now: number;
   onStop: () => void;
+  solutionVersions: SolutionVersions;
+  /** Why the verdict cannot be re-generated right now, if it cannot. */
+  refineBlocked?: string;
+  /** Whether the run had a confirmed reading, which the judge also gets. */
+  interpretation: boolean;
+  onRefine: (instructions: string) => void;
 }) {
   if (judgeRun.status === "idle") return null;
   const judgeLabel = providerDisplayName(judgeRun.judge, variants.judge);
@@ -677,6 +749,9 @@ function JudgementCard({
   const notGraded = PROVIDER_KEYS.filter(
     (provider) => runs[provider].status === "done" && !solvers.includes(provider),
   );
+  // Re-generated (or retried) since the verdict: the verdict is about the
+  // version before.
+  const changed = solvers.filter((provider) => changedSinceVerdict(judgeRun, provider, solutionVersions));
   const skipped = judgeRun.skipped.filter((provider) => runs[provider].status !== "done");
   const headlineTone =
     judgement.correct.length === 0
@@ -746,6 +821,19 @@ function JudgementCard({
           {notGraded.length === 1 ? "it" : "them"}.
         </p>
       ) : null}
+      {changed.length ? (
+        <p className="mt-1 text-xs font-medium text-[#a85a12]">
+          {changed.map(nameOf).join(", ")} {changed.length === 1 ? "has" : "have"} a new
+          version since this verdict, which graded the one before. Re-generate the verdict below,
+          or run the cross-check again above, to grade the new one.
+        </p>
+      ) : null}
+      {judgeRun.revisedWith ? <RevisedWith instructions={judgeRun.revisedWith} /> : null}
+      {judgeRun.notice ? (
+        <div className="mt-2">
+          <RevisionNotice message={judgeRun.notice} />
+        </div>
+      ) : null}
 
       {judgement.final_answer ? (
         <div className="mt-3">
@@ -798,6 +886,19 @@ function JudgementCard({
           ) : null}
         </div>
       </details>
+
+      <div className="mt-4">
+        <RevisePanel
+          title={`Disagree? Give ${judgeLabel} instructions and re-generate the verdict`}
+          placeholder="e.g. Solution B takes the pressure as absolute - re-check its y-momentum. Explain the sign of F_y."
+          hint={`Sends the question images, your notes${
+            interpretation ? ", the confirmed reading" : ""
+          }, the solutions graded here as they are now, this verdict and your instructions back to ${judgeLabel}. This verdict stays if that fails.`}
+          buttonLabel="Re-generate verdict"
+          disabledReason={refineBlocked}
+          onSubmit={onRefine}
+        />
+      </div>
 
       <p className="mt-4 text-xs text-cs-ink-3">
         The judge is a model too — treat this as a second opinion, not an answer key. Open

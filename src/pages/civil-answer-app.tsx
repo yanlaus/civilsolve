@@ -41,6 +41,8 @@ type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
   variants: Partial<Record<ProviderKey, ModelVariant>>;
+  /** The reconciler, which also re-generates the reading when asked. */
+  verifierLabel: string;
 };
 
 export default function CivilAnswerAppPage() {
@@ -52,6 +54,7 @@ export default function CivilAnswerAppPage() {
     judgeProgress,
     variants: runVariants,
     interpretation: confirmedInterpretation,
+    solutionVersions,
     canRerun,
     start,
     cancel,
@@ -59,8 +62,10 @@ export default function CivilAnswerAppPage() {
     dismiss,
     solveProvider,
     stopProvider,
+    refineProvider,
     crossCheck,
     stopJudge,
+    refineVerdict,
   } = useSolve();
   const { providerStatus } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
@@ -78,6 +83,8 @@ export default function CivilAnswerAppPage() {
     start: startInterpret,
     reset: resetInterpret,
     stopModel: stopReader,
+    revise: reviseReading,
+    stopRevise: stopReadingRevision,
   } = useInterpret();
   const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
@@ -209,7 +216,12 @@ export default function CivilAnswerAppPage() {
       }
 
       if (verify) {
-        setPendingSolve({ providers, body, variants });
+        setPendingSolve({
+          providers,
+          body,
+          variants,
+          verifierLabel: providerDisplayName(verify.verifier.provider, verify.verifier.variant),
+        });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
@@ -279,9 +291,19 @@ export default function CivilAnswerAppPage() {
 
         {pipeline.status === "review" ? (
           <InterpretationReview
+            // A re-generated reading starts the review afresh from itself.
+            key={pipeline.version}
             interpretation={pipeline.interpretation}
             initialText={pipeline.text}
             note={pipeline.note}
+            reviser={
+              pendingSolve?.verifierLabel ?? "the reconciler"
+            }
+            revising={pipeline.revising}
+            reviseError={pipeline.reviseError}
+            revisedWith={pipeline.revisedWith}
+            onRevise={reviseReading}
+            onStopRevise={stopReadingRevision}
             solvers={
               pendingSolve
                 ? pendingSolve.providers.map((key) => providerDisplayName(key, pendingSolve.variants[key]))
@@ -329,13 +351,16 @@ export default function CivilAnswerAppPage() {
             judgeProgress={judgeProgress}
             variants={runVariants}
             interpretation={confirmedInterpretation}
+            solutionVersions={solutionVersions}
             providerStatus={providerStatus}
             canRerun={canRerun}
             locked={isInterpreting || Boolean(prepStatus)}
             onSolveProvider={solveProvider}
             onStopProvider={stopProvider}
+            onRefineProvider={refineProvider}
             onCrossCheck={crossCheck}
             onStopJudge={stopJudge}
+            onRefineVerdict={refineVerdict}
           />
         </Suspense>
       </div>
