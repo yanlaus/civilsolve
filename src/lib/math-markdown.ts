@@ -6,7 +6,7 @@ import DOMPurify from "dompurify";
 import katex from "katex";
 import { marked } from "marked";
 import "katex/dist/katex.min.css";
-import { sanitizeText } from "../../shared/solution";
+import { fixEscapedNewlines, sanitizeText } from "../../shared/solution";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -319,8 +319,10 @@ function restoreMathHtml(value: string, mathHtml: string[]) {
  */
 export function renderMarkdown(value: string, options: RenderOptions = {}) {
   try {
+    // Doubly escaped line breaks are fixed here as well as when a result is
+    // parsed, for results stored before the parsers learnt to (24 hours).
     const { protectedText, protectedChunks } = protectCodeSpans(
-      normalizeMathMarkdown(sanitizeText(value), options),
+      normalizeMathMarkdown(sanitizeText(fixEscapedNewlines(value)), options),
     );
     const { markdown, mathHtml } = replaceMathWithPlaceholders(protectedText);
     const html = marked.parse(restoreCodeSpans(markdown, protectedChunks)) as string;

@@ -6,6 +6,7 @@
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
 import {
   normalizeJsonCandidate,
+  cleanModelText,
   sanitizeText,
   stripThinkTags,
   type ParseOptions,
@@ -115,13 +116,13 @@ function readAssessments(value: unknown, count: number): string[] {
   const out: string[] = Array.from({ length: count }, () => "");
   if (Array.isArray(value)) {
     value.slice(0, count).forEach((entry, index) => {
-      if (typeof entry === "string") out[index] = sanitizeText(entry);
+      if (typeof entry === "string") out[index] = cleanModelText(entry);
     });
   } else if (value && typeof value === "object") {
     // {A: "...", B: "..."} or {solution_a: "..."} from a schema-less rung.
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       const index = letterIndex(key.replace(/_/g, " "), count);
-      if (index !== null && typeof entry === "string") out[index] = sanitizeText(entry);
+      if (index !== null && typeof entry === "string") out[index] = cleanModelText(entry);
     }
   }
   return out;
@@ -175,7 +176,7 @@ export function parseJudgement(
 
   const record = parsed as Record<string, unknown>;
   const read = (key: string) =>
-    typeof record[key] === "string" ? sanitizeText(record[key] as string) : "";
+    typeof record[key] === "string" ? cleanModelText(record[key] as string) : "";
 
   const correct = readCorrect(record.correct_solutions ?? record.correct ?? record.verdict, count);
   const result: JudgementResult = {

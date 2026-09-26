@@ -13,14 +13,20 @@ export function isEffortKey(value: string): value is EffortKey {
   return (EFFORT_KEYS as string[]).includes(value);
 }
 
-export const SOLVE_INSTRUCTIONS =
-  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Use English for every user-facing field unless the user explicitly requests another language.";
+/**
+ * How a line break and a LaTeX backslash go into a JSON string. Models
+ * writing LaTeX double every backslash, and now and then the newline's too
+ * (`\\n`), which shows up on the page as a literal "\n" with the lines run
+ * together (fixEscapedNewlines in solution.ts repairs what still gets through).
+ */
+const JSON_ESCAPES =
+  "In the JSON strings, write a line break as \\n (one backslash) and each LaTeX backslash as \\\\ (two).";
 
-export const INTERPRET_INSTRUCTIONS =
-  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. Do NOT solve the problem — only interpret it. Use English, except in a `traditional_chinese` field where one is asked for.";
+export const SOLVE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} Use English for every user-facing field unless the user explicitly requests another language.`;
 
-export const JUDGE_INSTRUCTIONS =
-  "Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You are grading candidate solutions against the attached assignment; verify, do not trust. Use English, except in the `traditional_chinese` field.";
+export const INTERPRET_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} Do NOT solve the problem — only interpret it. Use English, except in a \`traditional_chinese\` field where one is asked for.`;
+
+export const JUDGE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are grading candidate solutions against the attached assignment; verify, do not trust. Use English, except in the \`traditional_chinese\` field.`;
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -132,6 +138,7 @@ export function buildTutorPrompt(
     "- Required quantity",
     "- Formula -> substitution -> result",
     "- Final answer with units",
+    "- In `final_answer`, each answer on a line of its own, as a `- ` bullet (one per part or quantity), never run together in one paragraph",
     "",
     "For web-facing text fields (`interpreted_problem`, `assumptions`, `step_by_step`, and `final_answer`), format formulas with Markdown math delimiters:",
     "- Use `$...$` for short inline symbols and equations.",
