@@ -11,20 +11,17 @@ import {
   Flame,
   Loader2,
   PenSquare,
-  Scale,
   Upload,
   X,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
 import { ProviderLogo } from "./provider-logo";
-import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   CHINA_PROVIDERS,
   choiceKey,
   DEFAULT_INTERPRETERS,
-  DEFAULT_JUDGE,
   DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
   HIGHER_CREDIT_PROVIDERS,
@@ -68,8 +65,6 @@ export type SolveSubmission = {
   effort: EffortKey;
   /** Null when the user leaves the interpretation pass switched off. */
   verify: InterpretConfig | null;
-  /** The judge for the answer cross-check; null when it is switched off. */
-  judge: ModelChoice | null;
   /** The model picked for each selected solver that offers several (Gemini Flash or Pro). */
   variants: Partial<Record<ProviderKey, ModelVariant>>;
 };
@@ -103,6 +98,7 @@ function formatSize(bytes: number) {
 export function UploadForm({
   providerStatus,
   busy,
+  busyLabel = "Generating solutions...",
   solving,
   status,
   error,
@@ -112,6 +108,8 @@ export function UploadForm({
   /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   busy: boolean;
+  /** What the busy button says: reading the question is not solving it yet. */
+  busyLabel?: string;
   /** True only while provider requests are in flight (image prep excluded). */
   solving: boolean;
   status: string;
@@ -127,8 +125,6 @@ export function UploadForm({
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
-  const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
-  const [judge, setJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
   const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(() =>
@@ -235,11 +231,7 @@ export function UploadForm({
       ? `${floorLabels} needs at least ${effortFloor} thinking and ${ceilingLabels} cannot go above ${effortCeiling} — pick one or the other.`
       : selectedProviders.length === 0
         ? "Pick at least one AI provider to solve with."
-        : crossCheckEnabled && selectedProviders.length < 2
-          ? "Pick at least two solvers for the cross-check to compare."
-          : crossCheckEnabled && selectedProviders.length > MAX_JUDGED_SOLUTIONS
-            ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
-            : "";
+        : "";
 
   // Every page that will be sent: one per image, the chosen pages of each PDF.
   // A paper longer than the request can carry makes the user choose pages
@@ -418,7 +410,6 @@ export function UploadForm({
       notes,
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
-      judge: crossCheckEnabled ? judge : null,
       variants: Object.fromEntries(
         selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
       ),
@@ -641,9 +632,7 @@ export function UploadForm({
           <Calculator className="h-4 w-4 text-cs-accent" />
           AI Providers
           <span className="font-sans text-sm font-normal text-cs-ink-3">
-            {crossCheckEnabled
-              ? `(solvers - pick two to ${MAX_JUDGED_SOLUTIONS})`
-              : "(pick one or more - they solve together)"}
+            (pick one or more - they solve together)
           </span>
         </p>
         {/* Three by three - nine solvers - on every screen, at the owner's request. */}
@@ -888,61 +877,8 @@ export function UploadForm({
         ) : null}
       </section>
 
-      <section>
-        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
-          <Scale className="h-4 w-4 text-cs-accent" />
-          Answer Cross-check
-          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
-        </p>
-
-        <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
-          <input
-            type="checkbox"
-            checked={crossCheckEnabled}
-            onChange={(event) => setCrossCheckEnabled(event.target.checked)}
-            className="mt-1 h-4 w-4 accent-cs-accent"
-          />
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-cs-ink">
-              Have a judge grade every solution
-            </span>
-            <span className="mt-1 block text-xs text-cs-ink-3">
-              The selected solvers work at the same time, then the judge re-derives the
-              numbers from the images and says which solutions are right — or corrects them
-              all. Catches a plausible-looking wrong answer, at the cost of one extra model
-              call. Needs two or more solvers ticked above. Combine with the interpretation
-              check for the most robust result.
-            </span>
-          </span>
-        </label>
-
-        {crossCheckEnabled ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs text-cs-ink-3">
-              Judge
-              <select
-                value={choiceKey(judge)}
-                onChange={(event) => {
-                  const picked = parseChoice(event.target.value);
-                  if (picked) setJudge(picked);
-                }}
-                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
-              >
-                {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
-                  <option key={choiceKey(choice)} value={choiceKey(choice)}>
-                    {providerDisplayName(choice.provider, choice.variant)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="text-[0.7rem] text-cs-ink-3 sm:col-span-2">
-              Solving: {selectedProviders.map((key) => providerDisplayName(key, variants[key])).join(", ") || "nobody yet"}.
-              The judge thinks at <strong>high</strong> and never learns which model wrote
-              which solution.
-            </p>
-          </div>
-        ) : null}
-      </section>
+      {/* The answer cross-check is not chosen here any more: it runs from the
+          solutions, once they are in (run-actions.tsx), over the ones picked. */}
 
       {bannerError ? (
         <div className="rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger">
@@ -963,7 +899,7 @@ export function UploadForm({
           className="cs-primary inline-flex min-h-12 items-center justify-center gap-2 rounded-cs bg-cs-accent px-8 py-3 text-base font-semibold text-cs-on-accent shadow-[0_3px_14px_var(--cs-ring)] transition hover:-translate-y-0.5 hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50 sm:px-12"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-          {busy ? "Generating solutions..." : "Solve Problems"}
+          {busy ? busyLabel : "Solve Problems"}
         </button>
         {solving ? (
           <button
