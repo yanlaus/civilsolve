@@ -3,8 +3,9 @@ import { Check, CheckCircle2, Download, Languages, Loader2, RotateCw, Scale, X }
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
   PROVIDER_KEYS,
-  PROVIDER_LABELS,
-  UNSTABLE_PROVIDERS,
+  providerDisplayName,
+  type ModelChoice,
+  type ModelVariant,
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
@@ -16,6 +17,7 @@ import {
   type JudgeRun,
   type ProgressMap,
   type ProviderRuns,
+  type RunVariants,
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
@@ -140,6 +142,7 @@ export default function SolutionPanel({
   judgeRun,
   progress,
   judgeProgress,
+  variants,
   providerStatus,
   canRerun,
   locked,
@@ -150,24 +153,25 @@ export default function SolutionPanel({
   judgeRun: JudgeRun;
   progress: ProgressMap;
   judgeProgress: Progress | null;
+  /** The model each solver and the judge ran, where a provider offers several. */
+  variants: RunVariants;
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   /** Whether the run's images are still at hand, for a retry, another solver or a cross-check. */
   canRerun: boolean;
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
-  onSolveProvider: (provider: ProviderKey) => void;
-  onCrossCheck: (judge: ProviderKey, providers: ProviderKey[]) => void;
+  onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
+  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[]) => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
-  // Picker order, except that an unstable provider (Gemini) goes last: the
-  // page opens on the first finished tab, and that should be a dependable one.
+  // Picker order: the order the solvers were ticked in, and the judge's A, B...
   const visibleProviders = PROVIDER_OPTIONS.filter(
     (provider) => runs[provider.key].status !== "idle",
-  ).sort(
-    (a, b) => Number(UNSTABLE_PROVIDERS.has(a.key)) - Number(UNSTABLE_PROVIDERS.has(b.key)),
   );
+  // "Gemini (3.1 Pro)" when the run picked one of a provider's models.
+  const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
   const firstDone = visibleProviders.find(
     (provider) => runs[provider.key].status === "done",
   )?.key;
@@ -182,9 +186,9 @@ export default function SolutionPanel({
     setActiveProvider(key);
   };
   // A retried or added solver's tab is where its progress shows.
-  const solveWith = (key: ProviderKey) => {
+  const solveWith = (key: ProviderKey, variant?: ModelVariant) => {
     pickProvider(key);
-    onSolveProvider(key);
+    onSolveProvider(key, variant);
   };
   const judgeBusy = isJudgeActive(judgeRun);
 
@@ -209,7 +213,7 @@ export default function SolutionPanel({
 
   const activeRun = runs[activeProvider];
   const activeArtifact = activeRun.status === "done" ? activeRun.solution : null;
-  const activeLabel = PROVIDER_OPTIONS.find((p) => p.key === activeProvider)?.label ?? "";
+  const activeLabel = nameOf(activeProvider);
   const activeProgress = progress[activeProvider];
   // Ticks every second while anything is still running, for the clocks.
   const now = useNow(
@@ -250,6 +254,7 @@ export default function SolutionPanel({
         <JudgementCard
           judgeRun={judgeRun}
           runs={runs}
+          variants={variants}
           progress={judgeProgress ?? undefined}
           now={now}
         />
@@ -274,7 +279,7 @@ export default function SolutionPanel({
                 >
                   <div className="flex items-center gap-1.5">
                     <ProviderLogo provider={provider.key} className="h-4 w-4 shrink-0" />
-                    {provider.label}
+                    {nameOf(provider.key)}
                     {mark === "correct" ? (
                       <Check className="h-3.5 w-3.5 text-cs-success" aria-label="Judged correct" />
                     ) : mark === "wrong" ? (
@@ -421,6 +426,7 @@ export default function SolutionPanel({
       <RunActions
         runs={runs}
         judgeRun={judgeRun}
+        variants={variants}
         providerStatus={providerStatus}
         canRerun={canRerun}
         locked={locked}
@@ -492,17 +498,20 @@ function Assessment({
 function JudgementCard({
   judgeRun,
   runs,
+  variants,
   progress,
   now,
 }: {
   judgeRun: JudgeRun;
   /** The solvers now, to tell which finished after this verdict was given. */
   runs: ProviderRuns;
+  variants: RunVariants;
   progress?: Progress;
   now: number;
 }) {
   if (judgeRun.status === "idle") return null;
-  const judgeLabel = PROVIDER_LABELS[judgeRun.judge];
+  const judgeLabel = providerDisplayName(judgeRun.judge, variants.judge);
+  const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
 
   if (judgeRun.status === "error") {
     return (
@@ -545,7 +554,7 @@ function JudgementCard({
   }
 
   const { judgement, solvers } = judgeRun;
-  const labels = solvers.map((provider) => PROVIDER_LABELS[provider]);
+  const labels = solvers.map(nameOf);
   // A solver retried or added after the verdict: not graded by it, and no
   // longer "returned no solution" once it has one.
   const notGraded = PROVIDER_KEYS.filter(
@@ -580,13 +589,13 @@ function JudgementCard({
       </p>
       {skipped.length ? (
         <p className="mt-1 text-xs text-cs-ink-3">
-          Not graded: {skipped.map((provider) => PROVIDER_LABELS[provider]).join(", ")} returned
+          Not graded: {skipped.map(nameOf).join(", ")} returned
           no solution.
         </p>
       ) : null}
       {notGraded.length ? (
         <p className="mt-1 text-xs font-medium text-[#a85a12]">
-          Not in this verdict: {notGraded.map((provider) => PROVIDER_LABELS[provider]).join(", ")}{" "}
+          Not in this verdict: {notGraded.map(nameOf).join(", ")}{" "}
           finished after it. Run the cross-check again below to include{" "}
           {notGraded.length === 1 ? "it" : "them"}.
         </p>
@@ -605,7 +614,7 @@ function JudgementCard({
         {solvers.map((provider, index) => (
           <Assessment
             key={provider}
-            label={PROVIDER_LABELS[provider]}
+            label={nameOf(provider)}
             letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
             text={judgement.assessments[index] ?? ""}
             correct={judgement.correct.includes(index)}

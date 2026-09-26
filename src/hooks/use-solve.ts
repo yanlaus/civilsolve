@@ -18,7 +18,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import { MAX_JUDGED_SOLUTIONS, type JudgementResult } from "../../shared/judgement";
-import { PROVIDER_KEYS, PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
+import {
+  PROVIDER_KEYS,
+  PROVIDER_LABELS,
+  type ModelChoice,
+  type ModelVariant,
+  type ProviderKey,
+} from "../../shared/providers";
 import { artifactToText, type ProviderArtifact } from "../../shared/solution";
 import {
   estimateBodyBytes,
@@ -59,6 +65,20 @@ export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
 /** Each running or finished solver's timeline (lib/progress.ts). */
 export type ProgressMap = Partial<Record<ProviderKey, Progress>>;
+
+/**
+ * The model picked for each provider in the run that offers several (Gemini
+ * Flash or Pro), for the solvers and for the judge - so tabs and the verdict
+ * can say which one answered.
+ */
+export type RunVariants = {
+  solvers: Partial<Record<ProviderKey, ModelVariant>>;
+  judge?: ModelVariant;
+};
+
+function variantsOf(run: SavedRun): RunVariants {
+  return { solvers: { ...(run.variants ?? {}) }, judge: run.judge?.variant };
+}
 
 /**
  * The cross-check judge's progress. `solvers` records which provider was
@@ -120,6 +140,7 @@ export function useSolve() {
   const [judgeRun, setJudgeRun] = useState<JudgeRun>({ status: "idle" });
   const [progress, setProgress] = useState<ProgressMap>({});
   const [judgeProgress, setJudgeProgress] = useState<Progress | null>(null);
+  const [variants, setVariants] = useState<RunVariants>({ solvers: {} });
   /** Whether the run's request body is at hand, so it can be sent again. */
   const [canRerun, setCanRerun] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -205,6 +226,7 @@ export function useSolve() {
     setJudgeRun({ status: "idle" });
     setProgress({});
     setJudgeProgress(null);
+    setVariants({ solvers: {} });
   }, [stopCurrent, setBody]);
 
   /**
@@ -236,6 +258,9 @@ export function useSolve() {
         run.solveJobs[provider] = id;
         persist();
       };
+      // The one field that differs per provider: which of its models to run.
+      const variant = run.variants?.[provider];
+      const sent = body && variant ? { ...body, variant } : body;
       const tracker = trackProgress((next) => {
         if (!signal.aborted) setProgress((current) => ({ ...current, [provider]: next }));
       });
@@ -244,7 +269,7 @@ export function useSolve() {
         // in the background - re-attaches to this provider's job once the
         // page is visible again (see withResume).
         await withResume(
-          () => streamProvider(provider, body, signal, update, handle, onJob, tracker),
+          () => streamProvider(provider, sent, signal, update, handle, onJob, tracker),
           handle,
           signal,
           (message) => {
@@ -304,6 +329,7 @@ export function useSolve() {
       persist();
       setProgress({});
       setJudgeProgress(null);
+      setVariants(variantsOf(run));
 
       void (async () => {
         // A copy: a solver added while these run is started on its own.
@@ -318,17 +344,30 @@ export function useSolve() {
   );
 
   const start = useCallback(
-    (providers: ProviderKey[], body: SolveRequestBody, judge: ProviderKey | null = null) => {
+    (
+      providers: ProviderKey[],
+      body: SolveRequestBody,
+      judge: ModelChoice | null = null,
+      picked: Partial<Record<ProviderKey, ModelVariant>> = {},
+    ) => {
       setRuns(waitingRuns(providers, "Submitting..."));
       setJudgeRun(
         judge
-          ? { status: "waiting", judge, message: "Waiting for the solutions..." }
+          ? { status: "waiting", judge: judge.provider, message: "Waiting for the solutions..." }
           : { status: "idle" },
       );
       bodySavedRef.current = null;
       setBody(body);
       execute(
-        { savedAt: Date.now(), providers, solveJobs: {}, judge: judge ? { provider: judge } : null },
+        {
+          savedAt: Date.now(),
+          providers,
+          solveJobs: {},
+          judge: judge ? { provider: judge.provider, variant: judge.variant } : null,
+          variants: Object.fromEntries(
+            providers.filter((provider) => picked[provider]).map((provider) => [provider, picked[provider]]),
+          ),
+        },
         body,
       );
     },
@@ -369,13 +408,18 @@ export function useSolve() {
    * The others are left as they are.
    */
   const solveProvider = useCallback(
-    (provider: ProviderKey) => {
+    (provider: ProviderKey, variant?: ModelVariant) => {
       const run = runRef.current;
       const body = bodyRef.current;
       if (!run || !body) return;
       const signal = currentSignal();
       if (!run.providers.includes(provider)) {
         run.providers = PROVIDER_KEYS.filter((key) => key === provider || run.providers.includes(key));
+      }
+      // A retry keeps the model it had; a solver added picks its own.
+      if (variant) {
+        run.variants = { ...run.variants, [provider]: variant };
+        setVariants(variantsOf(run));
       }
       delete run.solveJobs[provider];
       solutionsRef.current.delete(provider);
@@ -392,14 +436,15 @@ export function useSolve() {
    * that failed, or whose verdict predates a solver added since.
    */
   const crossCheck = useCallback(
-    (judge: ProviderKey, providers: ProviderKey[]) => {
+    (judge: ModelChoice, providers: ProviderKey[]) => {
       const run = runRef.current;
       const body = bodyRef.current;
       if (!run || !body) return;
       const signal = currentSignal();
-      run.judge = { provider: judge };
+      run.judge = { provider: judge.provider, variant: judge.variant };
+      setVariants(variantsOf(run));
       persist();
-      setJudgeRun({ status: "waiting", judge, message: "Submitting..." });
+      setJudgeRun({ status: "waiting", judge: judge.provider, message: "Submitting..." });
       void judgeOne({ run, signal, solutions: solutionsRef.current }, body, providers);
     },
     [currentSignal, persist, judgeOne],
@@ -410,6 +455,7 @@ export function useSolve() {
     judgeRun,
     progress,
     judgeProgress,
+    variants,
     canRerun,
     start,
     cancel,
@@ -593,6 +639,7 @@ async function runJudge({
       images: body.images,
       notes: body.notes,
       ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+      ...(saved.variant ? { variant: saved.variant } : {}),
       solutions: solvers.map((provider) =>
         artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
       ),
