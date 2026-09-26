@@ -202,11 +202,12 @@ function buildInterpret(
       routeOverride: variantOverride(provider, variant, env) ?? interpretOverride(provider, env),
       // Readers default to "medium" - they transcribe rather than derive, but
       // a whole exam paper is a lot of diagram to read carefully - and the
-      // user can change it. The judge defaults to the strongest level the
-      // route supports: it adjudicates two readings against the image, and a
-      // misread there poisons every solve that follows. The form sends the
-      // readers' level explicitly; this default is for callers that do not.
-      effort: requestedEffort ?? (mode === "verify" ? "max" : "medium"),
+      // user can change it. The reconciler defaults to "high": at "max" the
+      // ChatGPT reconciler thought for 204-324 s on B.8 and timed out the
+      // owner's pass, while "high" took 69-75 s and kept every key fact of
+      // the diagram in both runs (26 September 2026). The form sends both
+      // levels explicitly; these defaults are for callers that do not.
+      effort: requestedEffort ?? (mode === "verify" ? "high" : "medium"),
       task: {
         session: crypto.randomUUID(),
         prompt: buildPrompt,

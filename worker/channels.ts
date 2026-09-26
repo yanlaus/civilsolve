@@ -239,6 +239,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // at those two levels and anything lower is raised to "high". "max" maps
       // to reasoning.effort "xhigh", which the gateway accepts.
       minEffort: "high",
+      // At "max" it thinks for minutes: reconciling a Kimi and a Gemini Flash
+      // reading of B.8 took 223-381 s (204-324 s of it thinking, 15-20k
+      // reasoning tokens), past the 280 s default, and the owner's pass timed
+      // out (26 September 2026). The reconciler now defaults to "high"
+      // (69-75 s), but "max" stays offered, so it gets the long limit.
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
     poe: {
       ...POE_SPEC,

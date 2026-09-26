@@ -77,8 +77,10 @@ export type InterpretConfig = {
   interpreterA: ModelChoice;
   interpreterB: ModelChoice;
   verifier: ModelChoice;
-  /** Reasoning level for the two readers. The judge always uses the server default (max). */
+  /** Reasoning level for the two readers. */
   readerEffort: EffortKey;
+  /** Reasoning level for the reconciler: "high" by default (see worker/tasks.ts). */
+  verifierEffort: EffortKey;
 };
 
 const UNREACHABLE =
@@ -296,6 +298,7 @@ export function useInterpret() {
           mode: "verify",
           images,
           notes,
+          effort: config.verifierEffort,
           interpretations: [
             interpretationToText(settledA.value),
             interpretationToText(settledB.value),
