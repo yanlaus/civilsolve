@@ -205,8 +205,8 @@ function buildInterpret(
       // user can change it. The reconciler defaults to "high": at "max" the
       // ChatGPT reconciler thought for 204-324 s on B.8 and timed out the
       // owner's pass, while "high" took 69-75 s and kept every key fact of
-      // the diagram in both runs (26 September 2026). The form sends both
-      // levels explicitly; these defaults are for callers that do not.
+      // the diagram in both runs (26 September 2026). The form sends each
+      // model's level explicitly; these defaults are for callers that do not.
       effort: requestedEffort ?? (mode === "verify" ? "high" : "medium"),
       task: {
         session: crypto.randomUUID(),

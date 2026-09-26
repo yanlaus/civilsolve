@@ -77,9 +77,10 @@ export type InterpretConfig = {
   interpreterA: ModelChoice;
   interpreterB: ModelChoice;
   verifier: ModelChoice;
-  /** Reasoning level for the two readers. */
-  readerEffort: EffortKey;
-  /** Reasoning level for the reconciler: "high" by default (see worker/tasks.ts). */
+  /** Each model's reasoning level, picked under it on the form. */
+  effortA: EffortKey;
+  effortB: EffortKey;
+  /** The reconciler's: "high" by default (see worker/tasks.ts). */
   verifierEffort: EffortKey;
 };
 
@@ -239,15 +240,10 @@ export function useInterpret() {
       // the other until 25 September, which made the pass take the sum of
       // both readers instead of the slower one.
       beginStep("Reading the question", 1, [labelA, labelB], true);
-      const readerBody: InterpretRequestBody = {
-        mode: "interpret",
-        images,
-        notes,
-        effort: config.readerEffort,
-      };
+      const readerBody: InterpretRequestBody = { mode: "interpret", images, notes };
       const [settledA, settledB] = await Promise.allSettled([
-        call(config.interpreterA, readerBody),
-        call(config.interpreterB, readerBody),
+        call(config.interpreterA, { ...readerBody, effort: config.effortA }),
+        call(config.interpreterB, { ...readerBody, effort: config.effortB }),
       ]);
       if (abort.signal.aborted) return;
 

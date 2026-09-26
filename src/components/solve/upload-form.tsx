@@ -81,6 +81,14 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
 
+/** The interpretation pass's three models: first reader, second reader, reconciler. */
+type PassRole = "a" | "b" | "v";
+
+const PASS_DEFAULT_EFFORT: Record<PassRole, EffortKey> = { a: "medium", b: "medium", v: "high" };
+
+const PASS_SELECT_CLASS =
+  "mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent";
+
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
   { key: "low", label: "Low" },
@@ -125,10 +133,12 @@ export function UploadForm({
   const [interpreterA, setInterpreterA] = useState<ModelChoice>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
-  const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
-  // The reconciler thinks at "high" unless the user asks for more: at "max"
-  // ChatGPT took 4-6 minutes on B.8 and was no more accurate.
-  const [verifierEffortPick, setVerifierEffortPick] = useState<EffortKey>("high");
+  // Each model of the pass thinks at its own level, picked under it. The
+  // readers default to "medium"; the reconciler to "high" - at "max" ChatGPT
+  // took 4-6 minutes on B.8 and was no more accurate.
+  const [passEffortPicks, setPassEffortPicks] = useState<Record<PassRole, EffortKey>>(
+    PASS_DEFAULT_EFFORT,
+  );
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
   const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(() =>
@@ -198,20 +208,33 @@ export function UploadForm({
   const labelsFor = (matches: (key: ProviderKey) => boolean) =>
     selectedProviders.filter(matches).map((key) => PROVIDER_LABELS[key]).join(" and ");
   const floorLabels = labelsFor((key) => providerFloor(key) === floorIndex);
-  // The reconciler's level, kept inside its route's band like the judge's
-  // (run-actions.tsx): out-of-band levels are disabled, and a pick outside
-  // the band moves to its nearest edge.
-  const verifierFloor = Math.max(0, providerFloor(verifier.provider));
-  const verifierCeiling = Math.min(EFFORT_KEYS.length - 1, providerCeiling(verifier.provider));
-  const verifierInBand = (key: EffortKey) => {
-    const index = EFFORT_KEYS.indexOf(key);
-    return index >= verifierFloor && index <= verifierCeiling;
+  // Each pass model's level is kept inside its route's band, like the
+  // judge's (run-actions.tsx): out-of-band levels are disabled, and a pick
+  // outside the band moves to its nearest edge (Kimi floors at "medium",
+  // ChatGPT at "high").
+  const effortBand = (provider: ProviderKey) => {
+    const floor = Math.max(0, providerFloor(provider));
+    const ceiling = Math.min(EFFORT_KEYS.length - 1, providerCeiling(provider));
+    const inBand = (key: EffortKey) => {
+      const index = EFFORT_KEYS.indexOf(key);
+      return index >= floor && index <= ceiling;
+    };
+    const clamp = (pick: EffortKey): EffortKey =>
+      inBand(pick) ? pick : EFFORT_KEYS[Math.min(Math.max(EFFORT_KEYS.indexOf(pick), floor), ceiling)];
+    return { inBand, clamp };
   };
-  const verifierEffort: EffortKey = verifierInBand(verifierEffortPick)
-    ? verifierEffortPick
-    : EFFORT_KEYS[
-        Math.min(Math.max(EFFORT_KEYS.indexOf(verifierEffortPick), verifierFloor), verifierCeiling)
-      ];
+  const passRoles: Array<{
+    key: PassRole;
+    label: string;
+    value: ModelChoice;
+    set: (choice: ModelChoice) => void;
+  }> = [
+    { key: "a", label: "First reader", value: interpreterA, set: setInterpreterA },
+    { key: "b", label: "Second reader", value: interpreterB, set: setInterpreterB },
+    { key: "v", label: "Reconciler", value: verifier, set: setVerifier },
+  ];
+  const passEffort = (role: PassRole, choice: ModelChoice) =>
+    effortBand(choice.provider).clamp(passEffortPicks[role]);
   const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
 
   // A floor above a ceiling leaves no level that suits every solver. Nothing
@@ -428,7 +451,14 @@ export function UploadForm({
       notes,
       effort,
       verify: verifyEnabled
-        ? { interpreterA, interpreterB, verifier, readerEffort, verifierEffort }
+        ? {
+            interpreterA,
+            interpreterB,
+            verifier,
+            effortA: passEffort("a", interpreterA),
+            effortB: passEffort("b", interpreterB),
+            verifierEffort: passEffort("v", verifier),
+          }
         : null,
       variants: Object.fromEntries(
         selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
@@ -852,65 +882,63 @@ export function UploadForm({
         </label>
 
         {verifyEnabled ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { label: "First reader", value: interpreterA, set: setInterpreterA },
-              { label: "Second reader", value: interpreterB, set: setInterpreterB },
-              { label: "Reconciler", value: verifier, set: setVerifier },
-            ].map((field) => (
-              <label key={field.label} className="block text-xs text-cs-ink-3">
-                {field.label}
-                <select
-                  value={choiceKey(field.value)}
-                  onChange={(event) => {
-                    const picked = parseChoice(event.target.value);
-                    if (picked) field.set(picked);
-                  }}
-                  className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
-                >
-                  {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
-                    <option key={choiceKey(choice)} value={choiceKey(choice)}>
-                      {providerDisplayName(choice.provider, choice.variant)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-            <label className="block text-xs text-cs-ink-3">
-              Readers&apos; thinking
-              <select
-                value={readerEffort}
-                onChange={(event) => setReaderEffort(event.target.value as EffortKey)}
-                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
-              >
-                {EFFORT_OPTIONS.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-xs text-cs-ink-3">
-              Reconciler&apos;s thinking
-              <select
-                value={verifierEffort}
-                onChange={(event) => setVerifierEffortPick(event.target.value as EffortKey)}
-                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
-              >
-                {EFFORT_OPTIONS.map((option) => (
-                  <option key={option.key} value={option.key} disabled={!verifierInBand(option.key)}>
-                    {option.label}
-                    {option.key === "high" ? " (default)" : ""}
-                    {verifierInBand(option.key) ? "" : " - not offered"}
-                  </option>
-                ))}
-              </select>
-              {verifierEffort === "max" ? (
-                <span className="mt-1 block text-[0.7rem] text-[#a85a12]">
-                  Max can take 4-6 minutes before you can review the reading.
-                </span>
-              ) : null}
-            </label>
+          // One column per model: which model, and under it how hard it
+          // thinks.
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            {passRoles.map((role) => {
+              const band = effortBand(role.value.provider);
+              const effort = passEffort(role.key, role.value);
+              return (
+                <div key={role.key} className="min-w-0 space-y-2">
+                  <label className="block text-xs text-cs-ink-3">
+                    {role.label}
+                    <select
+                      value={choiceKey(role.value)}
+                      onChange={(event) => {
+                        const picked = parseChoice(event.target.value);
+                        if (picked) role.set(picked);
+                      }}
+                      className={PASS_SELECT_CLASS}
+                    >
+                      {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                        <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                          {providerDisplayName(choice.provider, choice.variant)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-cs-ink-3">
+                    Thinking
+                    <select
+                      value={effort}
+                      aria-label={`${role.label}'s thinking`}
+                      onChange={(event) =>
+                        setPassEffortPicks((current) => ({
+                          ...current,
+                          [role.key]: event.target.value as EffortKey,
+                        }))
+                      }
+                      className={PASS_SELECT_CLASS}
+                    >
+                      {EFFORT_OPTIONS.map((option) => (
+                        <option key={option.key} value={option.key} disabled={!band.inBand(option.key)}>
+                          {option.label}
+                          {option.key === PASS_DEFAULT_EFFORT[role.key] ? " (default)" : ""}
+                          {band.inBand(option.key) ? "" : " - not offered"}
+                        </option>
+                      ))}
+                    </select>
+                    {effort === "max" ? (
+                      <span className="mt-1 block text-[0.7rem] text-[#a85a12]">
+                        {role.key === "v"
+                          ? "Max can take 4-6 minutes before you can review the reading."
+                          : "Max is slower, and the reconciler waits for both readers."}
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </section>
