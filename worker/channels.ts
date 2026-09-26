@@ -15,6 +15,8 @@ import {
   CHANNEL_LABELS,
   isChannelKey,
   PROVIDER_LABELS,
+  PROVIDER_VARIANTS,
+  type ModelVariant,
   type ChannelKey,
   type ProviderKey,
   type ProviderStatus,
@@ -77,6 +79,8 @@ export type WorkerEnv = {
   OPENCODE_KIMI_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
+  /** The model behind Gemini's "Pro" pick (PROVIDER_VARIANTS). */
+  GOOGLE_GEMINI_PRO_MODEL?: string;
   INTERPRET_CHATGPT_MODEL?: string;
   INTERPRET_GEMINI_MODEL?: string;
   INTERPRET_CLAUDE_MODEL?: string;
@@ -249,22 +253,27 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       defaultModel: "gemini-3.1-pro",
       effort: CLAMPED_EFFORT,
     },
-    // Gemini's default channel since 21 September 2026: free-tier Flash, the
-    // cheapest CPU route of any. "poe" serves gemini-3.1-pro (Pro, paid) if
-    // the Google key is ever lost.
+    // Gemini's default channel. Google Vertex AI since 26 September 2026, on
+    // the owner's Google Cloud project and its prepaid credit (billed per
+    // call, unlike the free AI Studio tier it replaced: that key answered 503
+    // "high demand" on both Flash models more often than not). The request is
+    // the same Gemini API; only the base differs - AI Studio's
+    // generativelanguage.googleapis.com/v1beta refuses this key outright
+    // (403 API_KEY_SERVICE_BLOCKED) - and the key still goes in
+    // x-goog-api-key. "poe" serves gemini-3.1-pro if the key is ever lost.
     google: {
       dialect: "gemini",
       keyVar: "GOOGLE_API_KEY",
       modelVar: "GOOGLE_GEMINI_MODEL",
-      // Real ids come from GET /v1beta/models. The owner's key is free-tier:
-      // Flash models work, "gemini-3.1-pro-preview" (the Pro tier is
-      // preview-suffixed; "gemini-3.1-pro" does not resolve) answers 429. A
-      // chain, primary first: 3.8-flash reads best but answered 503 "high
-      // demand" on four of six solves the day this was set; 3.5-flash was 3/3.
+      // The "Flash" pick: a chain, primary first. Both answer on Vertex; the
+      // Pro pick is GOOGLE_GEMINI_PRO_MODEL (variantOverride). On Vertex the
+      // Pro tier is "gemini-3.1-pro-preview"; "gemini-3.1-pro" is a 404.
       defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
       urlVar: "GOOGLE_BASE_URL",
-      defaultUrl: "https://generativelanguage.googleapis.com/v1beta",
+      defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
       effort: GEMINI_BUDGET,
+      // B.8 at "high" on Vertex: Pro 136 s and 189 s, Flash 160 s.
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
   deepseek: {
@@ -670,9 +679,49 @@ export function interpretOverride(
 }
 
 /** Health payload for one provider. Never exposes key values. */
+/**
+ * The models behind a provider's picks (PROVIDER_VARIANTS), other than the
+ * route's own model: Gemini's "pro" runs GOOGLE_GEMINI_PRO_MODEL on Google.
+ * "flash" is the Google route's own chain, so it needs no entry.
+ */
+const VARIANT_ROUTES: Partial<
+  Record<ProviderKey, Partial<Record<ModelVariant, { channel: ChannelKey; modelVar: keyof WorkerEnv; defaultModel: string }>>>
+> = {
+  gemini: {
+    pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-3.1-pro-preview" },
+  },
+};
+
+/**
+ * The route a task runs on when the user picked one of a provider's models:
+ * the variant's own model, or nothing for the default pick. A task passes
+ * this as its routeOverride; for the interpretation pass it wins over
+ * interpretOverride, since the user chose the model.
+ */
+export function variantOverride(
+  provider: ProviderKey,
+  variant: ModelVariant | undefined,
+  env: WorkerEnv,
+): RouteOverride | undefined {
+  const spec = variant ? VARIANT_ROUTES[provider]?.[variant] : undefined;
+  if (!spec) return undefined;
+  return { channel: spec.channel, model: readVar(env, spec.modelVar) || spec.defaultModel };
+}
+
 export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStatus {
   const route = resolveRoute(provider, env);
+  const variants = PROVIDER_VARIANTS[provider];
   return {
+    ...(variants
+      ? {
+          variants: Object.fromEntries(
+            variants.map(({ key }) => [
+              key,
+              resolveRoute(provider, env, variantOverride(provider, key, env)).model,
+            ]),
+          ),
+        }
+      : {}),
     channel: route.channel,
     model: route.model,
     configured: route.configured && !route.problem,

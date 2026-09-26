@@ -12,7 +12,6 @@ import {
   Loader2,
   PenSquare,
   Scale,
-  TriangleAlert,
   Upload,
   X,
 } from "lucide-react";
@@ -23,16 +22,22 @@ import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   CHANNEL_LABELS,
   CHINA_PROVIDERS,
+  choiceKey,
   DEFAULT_INTERPRETERS,
   DEFAULT_JUDGE,
   DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
   HIGHER_CREDIT_PROVIDERS,
   LOWER_CREDIT_PROVIDERS,
+  MODEL_CHOICES,
+  parseChoice,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
+  PROVIDER_VARIANTS,
+  providerDisplayName,
   SOLVER_KEYS,
-  UNSTABLE_PROVIDERS,
+  type ModelChoice,
+  type ModelVariant,
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
@@ -64,16 +69,18 @@ export type SolveSubmission = {
   /** Null when the user leaves the interpretation pass switched off. */
   verify: InterpretConfig | null;
   /** The judge for the answer cross-check; null when it is switched off. */
-  judge: ProviderKey | null;
+  judge: ModelChoice | null;
+  /** The model picked for each selected solver that offers several (Gemini Flash or Pro). */
+  variants: Partial<Record<ProviderKey, ModelVariant>>;
 };
 
 const MAX_FILES = 10;
 const MAX_LECTURE_FILES = 6;
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
-// Every provider: the reader, reconciler and judge lists (and the solution
-// tabs). The solver cards show SOLVER_OPTIONS, which leaves out the
-// review-only providers - Kimi reads and judges but does not solve.
+// Every provider, for the solution tabs. The solver cards show
+// SOLVER_OPTIONS, which leaves out any review-only provider; the reader,
+// reconciler and judge lists show MODEL_CHOICES, one entry per model.
 export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
@@ -116,12 +123,19 @@ export function UploadForm({
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
   const [verifyEnabled, setVerifyEnabled] = useState(false);
-  const [interpreterA, setInterpreterA] = useState<ProviderKey>(DEFAULT_INTERPRETERS[0]);
-  const [interpreterB, setInterpreterB] = useState<ProviderKey>(DEFAULT_INTERPRETERS[1]);
-  const [verifier, setVerifier] = useState<ProviderKey>(DEFAULT_VERIFIER);
+  const [interpreterA, setInterpreterA] = useState<ModelChoice>(DEFAULT_INTERPRETERS[0]);
+  const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
+  const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
   const [crossCheckEnabled, setCrossCheckEnabled] = useState(false);
-  const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
+  const [judge, setJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
+  // The model on each solver card that offers several - its first, by default
+  // (Gemini: Flash).
+  const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(() =>
+    Object.fromEntries(
+      Object.entries(PROVIDER_VARIANTS).map(([provider, list]) => [provider, list![0].key]),
+    ),
+  );
   const [effort, setEffort] = useState<EffortKey>("high");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(DEFAULT_SOLVERS);
   const [fileError, setFileError] = useState("");
@@ -212,7 +226,7 @@ export function UploadForm({
 
   // Two readers that are the same model would just agree with themselves.
   const verifyConfigError =
-    verifyEnabled && interpreterA === interpreterB
+    verifyEnabled && choiceKey(interpreterA) === choiceKey(interpreterB)
       ? "Pick two different models to read the question independently."
       : "";
 
@@ -405,6 +419,9 @@ export function UploadForm({
       effort,
       verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
       judge: crossCheckEnabled ? judge : null,
+      variants: Object.fromEntries(
+        selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
+      ),
     });
   }
 
@@ -629,7 +646,8 @@ export function UploadForm({
               : "(pick one or more - they solve together)"}
           </span>
         </p>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Three by three - nine solvers - on every screen, at the owner's request. */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           {SOLVER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
@@ -637,20 +655,21 @@ export function UploadForm({
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
             const china = CHINA_PROVIDERS.has(provider.key);
-            const unstable = UNSTABLE_PROVIDERS.has(provider.key);
-            const hasBadge = higherCredit || lowerCredit || china || unstable;
+            const hasBadge = higherCredit || lowerCredit || china;
+            const models = PROVIDER_VARIANTS[provider.key];
+            const variant = variants[provider.key];
             // Brand, account, model - nothing else. Effort floors are shown
             // under Thinking Effort, and a model chain announces itself in the
             // status line when it actually switches.
             const note = status
               ? status.configured
-                ? `${CHANNEL_LABELS[status.channel]} · ${status.model}`
+                ? `${CHANNEL_LABELS[status.channel]} · ${(variant && status.variants?.[variant]) || status.model}`
                 : `${CHANNEL_LABELS[status.channel]} key not configured`
               : "checking...";
             return (
               <label
                 key={provider.key}
-                className={`flex min-w-0 flex-col gap-2 rounded-cs border-2 bg-cs-surface p-3.5 transition ${
+                className={`flex min-w-0 flex-col gap-2 rounded-cs border-2 bg-cs-surface p-2.5 transition sm:p-3.5 ${
                   available ? "cursor-pointer" : "cursor-not-allowed opacity-55"
                 } ${
                   checked
@@ -659,8 +678,8 @@ export function UploadForm({
                 }`}
               >
                 <span className="flex items-start justify-between gap-2">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-cs border border-cs-line-soft bg-white">
-                    <ProviderLogo provider={provider.key} className="h-6 w-6" />
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-cs border border-cs-line-soft bg-white sm:h-10 sm:w-10">
+                    <ProviderLogo provider={provider.key} className="h-5 w-5 sm:h-6 sm:w-6" />
                   </span>
                   <input
                     type="checkbox"
@@ -673,6 +692,31 @@ export function UploadForm({
                   />
                 </span>
                 <span className="text-sm font-semibold text-cs-ink">{provider.label}</span>
+                {models ? (
+                  // Buttons inside the card's <label> do not toggle its checkbox.
+                  <span className="flex w-fit overflow-hidden rounded-full border border-cs-line text-[0.7rem] font-semibold">
+                    {models.map((model) => (
+                      <button
+                        key={model.key}
+                        type="button"
+                        aria-pressed={variant === model.key}
+                        title={`${provider.label} ${model.label}`}
+                        disabled={!available}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          setVariants((current) => ({ ...current, [provider.key]: model.key }));
+                        }}
+                        className={`px-2 py-0.5 transition ${
+                          variant === model.key
+                            ? "bg-cs-accent text-cs-on-accent"
+                            : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
+                        }`}
+                      >
+                        {model.key === "flash" ? "Flash" : "Pro"}
+                      </button>
+                    ))}
+                  </span>
+                ) : null}
                 {hasBadge ? (
                   <span className="flex flex-wrap gap-1">
                     {higherCredit ? (
@@ -691,15 +735,6 @@ export function UploadForm({
                       >
                         <Feather className="h-3 w-3" aria-hidden="true" />
                         Less credit
-                      </span>
-                    ) : null}
-                    {unstable ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#ecdcae] bg-[#fdf8e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a6a12]"
-                        title={`${provider.label} costs nothing but often fails to answer - its tab is shown last.`}
-                      >
-                        <TriangleAlert className="h-3 w-3" aria-hidden="true" />
-                        Free but unstable
                       </span>
                     ) : null}
                     {china ? (
@@ -817,13 +852,16 @@ export function UploadForm({
               <label key={field.label} className="block text-xs text-cs-ink-3">
                 {field.label}
                 <select
-                  value={field.value}
-                  onChange={(event) => field.set(event.target.value as ProviderKey)}
+                  value={choiceKey(field.value)}
+                  onChange={(event) => {
+                    const picked = parseChoice(event.target.value);
+                    if (picked) field.set(picked);
+                  }}
                   className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
                 >
-                  {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
+                  {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                    <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                      {providerDisplayName(choice.provider, choice.variant)}
                     </option>
                   ))}
                 </select>
@@ -883,19 +921,22 @@ export function UploadForm({
             <label className="block text-xs text-cs-ink-3">
               Judge
               <select
-                value={judge}
-                onChange={(event) => setJudge(event.target.value as ProviderKey)}
+                value={choiceKey(judge)}
+                onChange={(event) => {
+                  const picked = parseChoice(event.target.value);
+                  if (picked) setJudge(picked);
+                }}
                 className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
               >
-                {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
+                {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                  <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                    {providerDisplayName(choice.provider, choice.variant)}
                   </option>
                 ))}
               </select>
             </label>
             <p className="text-[0.7rem] text-cs-ink-3 sm:col-span-2">
-              Solving: {selectedProviders.map((key) => PROVIDER_LABELS[key]).join(", ") || "nobody yet"}.
+              Solving: {selectedProviders.map((key) => providerDisplayName(key, variants[key])).join(", ") || "nobody yet"}.
               The judge thinks at <strong>high</strong> and never learns which model wrote
               which solution.
             </p>

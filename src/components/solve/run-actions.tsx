@@ -10,14 +10,25 @@ import { useState } from "react";
 import { Plus, Scale } from "lucide-react";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import {
+  choiceKey,
   DEFAULT_JUDGE,
+  MODEL_CHOICES,
+  parseChoice,
   PROVIDER_KEYS,
-  PROVIDER_LABELS,
+  providerDisplayName,
   SOLVER_KEYS,
+  type ModelChoice,
+  type ModelVariant,
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
-import { isJudgeActive, isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
+import {
+  isJudgeActive,
+  isRunActive,
+  type JudgeRun,
+  type ProviderRuns,
+  type RunVariants,
+} from "@/hooks/use-solve";
 
 const SELECT_CLASS =
   "mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent disabled:opacity-50";
@@ -28,6 +39,7 @@ const HINT_CLASS = "mt-2 text-[0.7rem] text-cs-ink-3";
 export function RunActions({
   runs,
   judgeRun,
+  variants,
   providerStatus,
   canRerun,
   locked,
@@ -36,21 +48,31 @@ export function RunActions({
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
+  /** The model each solver and the judge ran, where a provider offers several. */
+  variants: RunVariants;
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   /** Whether the run's images are still at hand to send again. */
   canRerun: boolean;
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
-  onSolveProvider: (provider: ProviderKey) => void;
-  onCrossCheck: (judge: ProviderKey, providers: ProviderKey[]) => void;
+  onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
+  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[]) => void;
 }) {
   const configured = (key: ProviderKey) =>
     providerStatus ? providerStatus[key]?.configured !== false : true;
 
-  // Add a solver: every configured one not already in this run.
-  const addable = SOLVER_KEYS.filter((key) => runs[key].status === "idle" && configured(key));
-  const [addPick, setAddPick] = useState<ProviderKey | null>(null);
-  const toAdd = addPick && addable.includes(addPick) ? addPick : addable[0];
+  // Add a solver: every configured one not already in this run - one entry
+  // per model where a provider offers several (Gemini Flash, Gemini Pro).
+  const addable = MODEL_CHOICES.filter(
+    (choice) =>
+      SOLVER_KEYS.includes(choice.provider) &&
+      runs[choice.provider].status === "idle" &&
+      configured(choice.provider),
+  );
+  const [addPick, setAddPick] = useState<string | null>(null);
+  const toAdd =
+    addable.find((choice) => choiceKey(choice) === addPick) ?? (addable[0] as ModelChoice | undefined);
+  const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
 
   // Cross-check: the finished solutions, in picker order (the judge's A, B...).
   const finished = PROVIDER_KEYS.filter((key) => runs[key].status === "done");
@@ -58,10 +80,11 @@ export function RunActions({
   const chosen = (picked ?? finished.slice(0, MAX_JUDGED_SOLUTIONS)).filter((key) =>
     finished.includes(key),
   );
-  const judges = PROVIDER_KEYS.filter(configured);
-  const [judgePick, setJudgePick] = useState<ProviderKey | null>(null);
-  const judge =
-    judgePick ?? (judgeRun.status !== "idle" ? judgeRun.judge : DEFAULT_JUDGE);
+  const judges = MODEL_CHOICES.filter((choice) => configured(choice.provider));
+  const [judgePick, setJudgePick] = useState<ModelChoice | null>(null);
+  const judge: ModelChoice =
+    judgePick ??
+    (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : DEFAULT_JUDGE);
 
   const solving = PROVIDER_KEYS.some((key) => isRunActive(runs[key]));
   const judging = isJudgeActive(judgeRun);
@@ -108,14 +131,14 @@ export function RunActions({
             <label className="mt-2 block text-xs text-cs-ink-3">
               Provider
               <select
-                value={toAdd}
+                value={toAdd ? choiceKey(toAdd) : ""}
                 disabled={locked || judging}
-                onChange={(event) => setAddPick(event.target.value as ProviderKey)}
+                onChange={(event) => setAddPick(event.target.value)}
                 className={SELECT_CLASS}
               >
-                {addable.map((key) => (
-                  <option key={key} value={key}>
-                    {PROVIDER_LABELS[key]}
+                {addable.map((choice) => (
+                  <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                    {providerDisplayName(choice.provider, choice.variant)}
                   </option>
                 ))}
               </select>
@@ -124,9 +147,9 @@ export function RunActions({
               type="button"
               className={`${BUTTON_CLASS} mt-3`}
               disabled={locked || judging || !toAdd}
-              onClick={() => toAdd && onSolveProvider(toAdd)}
+              onClick={() => toAdd && onSolveProvider(toAdd.provider, toAdd.variant)}
             >
-              Solve with {PROVIDER_LABELS[toAdd]}
+              Solve with {toAdd ? providerDisplayName(toAdd.provider, toAdd.variant) : ""}
             </button>
             <p className={HINT_CLASS}>
               {judging
@@ -158,7 +181,7 @@ export function RunActions({
                   onChange={() => togglePicked(key)}
                   className="h-4 w-4 accent-cs-accent"
                 />
-                {PROVIDER_LABELS[key]}
+                {nameOf(key)}
               </label>
             ))}
           </div>
@@ -166,14 +189,17 @@ export function RunActions({
         <label className="mt-2 block text-xs text-cs-ink-3">
           Judge
           <select
-            value={judge}
+            value={choiceKey(judge)}
             disabled={locked || judging}
-            onChange={(event) => setJudgePick(event.target.value as ProviderKey)}
+            onChange={(event) => {
+              const picked = parseChoice(event.target.value);
+              if (picked) setJudgePick(picked);
+            }}
             className={SELECT_CLASS}
           >
-            {judges.map((key) => (
-              <option key={key} value={key}>
-                {PROVIDER_LABELS[key]}
+            {judges.map((choice) => (
+              <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                {providerDisplayName(choice.provider, choice.variant)}
               </option>
             ))}
           </select>

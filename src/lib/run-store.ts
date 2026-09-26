@@ -9,7 +9,7 @@
 // storage can be unavailable (private browsing, blocked site data) and the
 // page works without it.
 
-import { isProviderKey, type ProviderKey } from "../../shared/providers";
+import { isProviderKey, type ModelVariant, type ProviderKey } from "../../shared/providers";
 
 const KEY = "civilsolve:last-run";
 
@@ -18,6 +18,8 @@ export const RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export type SavedJudge = {
   provider: ProviderKey;
+  /** Which of the judge's models, when it offers several (Gemini Flash or Pro). */
+  variant?: ModelVariant;
   /** Set once the cross-check was sent; until then it cannot be resumed. */
   jobId?: string;
   /** Solution A, B, ... in order, and the solvers left out - for the verdict card. */
@@ -31,6 +33,8 @@ export type SavedRun = {
   providers: ProviderKey[];
   solveJobs: Partial<Record<ProviderKey, string>>;
   judge: SavedJudge | null;
+  /** The model picked for each solver that offers several (Gemini Flash or Pro). */
+  variants?: Partial<Record<ProviderKey, ModelVariant>>;
 };
 
 export function loadRun(): SavedRun | null {

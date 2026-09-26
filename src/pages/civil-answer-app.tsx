@@ -11,7 +11,7 @@ import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { formatClock, useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
-import type { ProviderKey } from "../../shared/providers";
+import type { ModelChoice, ModelVariant, ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
   formatBytes,
@@ -38,7 +38,8 @@ function UnicornCrest() {
 type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
-  judge: ProviderKey | null;
+  judge: ModelChoice | null;
+  variants: Partial<Record<ProviderKey, ModelVariant>>;
 };
 
 export default function CivilAnswerAppPage() {
@@ -48,6 +49,7 @@ export default function CivilAnswerAppPage() {
     judgeRun,
     progress,
     judgeProgress,
+    variants: runVariants,
     canRerun,
     start,
     cancel,
@@ -141,6 +143,7 @@ export default function CivilAnswerAppPage() {
     effort,
     verify,
     judge,
+    variants,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
@@ -183,13 +186,13 @@ export default function CivilAnswerAppPage() {
       }
 
       if (verify) {
-        setPendingSolve({ providers, body, judge });
+        setPendingSolve({ providers, body, judge, variants });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
       }
 
-      start(providers, body, judge);
+      start(providers, body, judge, variants);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -201,10 +204,10 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve) return;
-    const { providers, body, judge } = pendingSolve;
+    const { providers, body, judge, variants } = pendingSolve;
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, judge);
+    start(providers, { ...body, interpretation: confirmedText }, judge, variants);
   }
 
   return (
@@ -283,6 +286,7 @@ export default function CivilAnswerAppPage() {
             judgeRun={judgeRun}
             progress={progress}
             judgeProgress={judgeProgress}
+            variants={runVariants}
             providerStatus={providerStatus}
             canRerun={canRerun}
             locked={isInterpreting || Boolean(prepStatus)}

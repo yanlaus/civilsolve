@@ -5,6 +5,7 @@
 import type { InterpretationResult } from "./interpretation";
 import type { JudgementResult } from "./judgement";
 import type { EffortKey } from "./prompt";
+import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
 
 export type SolveRequestBody = {
@@ -16,6 +17,8 @@ export type SolveRequestBody = {
   /** Lecture notes, sent for method reference only — never solved. */
   referenceText?: string;
   referenceImages?: string[];
+  /** Which of the provider's models, when it offers several (Gemini: flash or pro). */
+  variant?: ModelVariant;
 };
 
 export type InterpretRequestBody = {
@@ -26,6 +29,8 @@ export type InterpretRequestBody = {
   interpretations?: [string, string];
   /** Reasoning level. Defaults to "medium" for readers and "max" for the judge. */
   effort?: EffortKey;
+  /** Which of the provider's models, when it offers several. */
+  variant?: ModelVariant;
 };
 
 /**
@@ -42,6 +47,8 @@ export type JudgeRequestBody = {
   solutions: string[];
   /** Reasoning level. Defaults to "high" - the most reliable level measured. */
   effort?: EffortKey;
+  /** Which of the provider's models, when it offers several. */
+  variant?: ModelVariant;
 };
 
 /**

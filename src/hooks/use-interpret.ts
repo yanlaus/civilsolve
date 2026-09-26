@@ -8,7 +8,12 @@ import {
   interpretationToText,
   type InterpretationResult,
 } from "../../shared/interpretation";
-import { PROVIDER_LABELS, type ProviderKey } from "../../shared/providers";
+import {
+  PROVIDER_LABELS,
+  providerDisplayName,
+  type ModelChoice,
+  type ProviderKey,
+} from "../../shared/providers";
 import type { InterpretRequestBody } from "../../shared/stream-protocol";
 import {
   cancelJob,
@@ -42,9 +47,9 @@ export type InterpretPipeline =
   | { status: "error"; message: string };
 
 export type InterpretConfig = {
-  interpreterA: ProviderKey;
-  interpreterB: ProviderKey;
-  verifier: ProviderKey;
+  interpreterA: ModelChoice;
+  interpreterB: ModelChoice;
+  verifier: ModelChoice;
   /** Reasoning level for the two readers. The judge always uses the server default (max). */
   readerEffort: EffortKey;
 };
@@ -85,9 +90,10 @@ export function useInterpret() {
       const abort = new AbortController();
       abortRef.current = abort;
 
-      const labelA = PROVIDER_LABELS[config.interpreterA];
-      const labelB = PROVIDER_LABELS[config.interpreterB];
-      const labelV = PROVIDER_LABELS[config.verifier];
+      const nameOf = (choice: ModelChoice) => providerDisplayName(choice.provider, choice.variant);
+      const labelA = nameOf(config.interpreterA);
+      const labelB = nameOf(config.interpreterB);
+      const labelV = nameOf(config.verifier);
 
       // One step shown in the status line: a stage, and a detail per model
       // running in it ("DeepSeek: writing... 1,200 characters").
@@ -102,10 +108,7 @@ export function useInterpret() {
         current = { status: "running", stage, startedAt: Date.now() };
         setPipeline(current);
       };
-      const report = (label: string, raw: string | undefined) => {
-        // "Kimi (via OpenCode Go) hit a temporary issue..." under "Kimi:"
-        // reads better without the name twice.
-        const detail = raw?.replace(new RegExp(`^${label}(?: \\(via [^)]*\\))?(?::\\s*|\\s+)`), "");
+      const report = (label: string, detail: string | undefined) => {
         if (detail) details.set(label, detail);
         else details.delete(label);
         const detailText = [...details].map(([who, what]) => `${who}: ${what}`).join(" · ");
@@ -119,16 +122,21 @@ export function useInterpret() {
       // call in progress nor a reading that already arrived is thrown away.
       // The pass is not recovered after a full page reload - it pauses for
       // review, which only makes sense in the page that ran it.
-      const call = (provider: ProviderKey, body: InterpretRequestBody) => {
-        const label = PROVIDER_LABELS[provider];
+      const call = (choice: ModelChoice, body: InterpretRequestBody) => {
+        const { provider, variant } = choice;
+        const label = nameOf(choice);
+        // "Kimi (via OpenCode Go) hit a temporary issue..." under "Kimi:"
+        // reads better without the name twice.
+        const plain = new RegExp(String.raw`^${PROVIDER_LABELS[provider]}(?: \(via [^)]*\))?(?::\s*|\s+)`);
+        const say = (message: string | undefined) => report(label, message?.replace(plain, ""));
         const handle = jobHandle();
         jobsRef.current.push(handle);
+        const sent = variant ? { ...body, variant } : body;
         return withResume(
-          () =>
-            runInterpretRequest(provider, body, abort.signal, handle, (detail) => report(label, detail)),
+          () => runInterpretRequest(provider, sent, abort.signal, handle, say),
           handle,
           abort.signal,
-          (message) => report(label, message),
+          say,
         ).then((result) => {
           report(label, "done");
           return result;
@@ -141,7 +149,7 @@ export function useInterpret() {
       // the other until 25 September, which made the pass take the sum of
       // both readers instead of the slower one.
       beginStep(
-        config.interpreterA === config.interpreterB
+        labelA === labelB
           ? `Reading the question with ${labelA}...`
           : `Reading the question with ${labelA} and ${labelB}...`,
       );

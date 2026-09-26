@@ -25,8 +25,10 @@ OPENCODE_API_KEY=
 # unset), and ChatGPT when CHATGPT_CHANNEL=poe.
 POE_API_KEY=
 
-# Google AI Studio (https://aistudio.google.com/apikey) - Gemini's default
-# channel (free-tier Flash).
+# Google Cloud (console -> APIs & Services -> Credentials) - Gemini's
+# default channel, on Vertex AI: a key allowed to call the Vertex AI API.
+# Billed per call to the project. An AI Studio key needs
+# GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta instead.
 GOOGLE_API_KEY=
 
 # MiniMax (https://platform.minimaxi.com) - first in MiniMax's default channel

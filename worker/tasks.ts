@@ -24,7 +24,15 @@ import {
   SOLVE_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
-import { isProviderKey, isSolverKey, PROVIDER_LABELS, type ProviderKey } from "../shared/providers";
+import {
+  isProviderKey,
+  isSolverKey,
+  isVariantOf,
+  PROVIDER_LABELS,
+  PROVIDER_VARIANTS,
+  type ModelVariant,
+  type ProviderKey,
+} from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import {
   DATA_URL_PATTERN,
@@ -35,7 +43,7 @@ import {
   MAX_REFERENCE_TEXT,
   MAX_SOLUTION_TEXT,
 } from "../shared/stream-protocol";
-import { interpretOverride, type WorkerEnv } from "./channels";
+import { interpretOverride, variantOverride, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
 export type TaskKind = "solve" | "interpret" | "judge";
@@ -90,12 +98,29 @@ export function buildTask(
       status: 400,
     };
   }
-  if (kind === "solve") return buildSolve(providerName, body, env);
-  if (kind === "interpret") return buildInterpret(providerName, body, env);
-  return buildJudge(providerName, body, env);
+  // Which of the provider's models to run, when it offers several (Gemini:
+  // "flash" or "pro"). Absent means its default.
+  const variant = body.variant;
+  if (variant !== undefined && !isVariantOf(providerName, variant)) {
+    const offered = PROVIDER_VARIANTS[providerName]?.map((entry) => entry.key).join(", ");
+    return {
+      error: offered
+        ? `${PROVIDER_LABELS[providerName]} offers these models: ${offered}.`
+        : `${PROVIDER_LABELS[providerName]} offers only one model.`,
+      status: 400,
+    };
+  }
+  if (kind === "solve") return buildSolve(providerName, body, env, variant);
+  if (kind === "interpret") return buildInterpret(providerName, body, env, variant);
+  return buildJudge(providerName, body, env, variant);
 }
 
-function buildSolve(provider: ProviderKey, body: Record<string, unknown>, env: WorkerEnv): BuiltTask {
+function buildSolve(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
   const assignment = readAssignment(body);
   if ("error" in assignment) return { error: assignment.error, status: 400 };
 
@@ -113,6 +138,7 @@ function buildSolve(provider: ProviderKey, body: Record<string, unknown>, env: W
       provider,
       env,
       effort,
+      routeOverride: variantOverride(provider, variant, env),
       task: {
         session: crypto.randomUUID(),
         prompt: ({ enforceShape, effort: effective }) =>
@@ -139,6 +165,7 @@ function buildInterpret(
   provider: ProviderKey,
   body: Record<string, unknown>,
   env: WorkerEnv,
+  variant?: ModelVariant,
 ): BuiltTask {
   const assignment = readAssignment(body);
   if ("error" in assignment) return { error: assignment.error, status: 400 };
@@ -170,8 +197,9 @@ function buildInterpret(
     params: {
       provider,
       env,
-      // The interpretation pass pins some providers to routes chosen for it (see interpretOverride).
-      routeOverride: interpretOverride(provider, env),
+      // The interpretation pass pins some providers to routes chosen for it
+      // (see interpretOverride) - unless the user picked a model themselves.
+      routeOverride: variantOverride(provider, variant, env) ?? interpretOverride(provider, env),
       // Readers default to "medium" - they transcribe rather than derive, but
       // a whole exam paper is a lot of diagram to read carefully - and the
       // user can change it. The judge defaults to the strongest level the
@@ -202,7 +230,12 @@ function buildInterpret(
 // images. Runs on the provider's normal solve route - no override - so the
 // judge is whatever the user picked, at the effort the most reliable solves
 // used.
-function buildJudge(provider: ProviderKey, body: Record<string, unknown>, env: WorkerEnv): BuiltTask {
+function buildJudge(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
   const assignment = readAssignment(body);
   if ("error" in assignment) return { error: assignment.error, status: 400 };
 
@@ -229,6 +262,7 @@ function buildJudge(provider: ProviderKey, body: Record<string, unknown>, env: W
       provider,
       env,
       effort,
+      routeOverride: variantOverride(provider, variant, env),
       task: {
         session: crypto.randomUUID(),
         prompt: ({ enforceShape }) =>
