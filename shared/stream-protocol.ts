@@ -75,7 +75,7 @@ export type JobEvent = {
 export type SolveEvent =
   | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
-  | { type: "done"; solution: ProviderArtifact; at?: number }
+  | { type: "done"; solution: ProviderArtifact; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
 export type InterpretEvent =

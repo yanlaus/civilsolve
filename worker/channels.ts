@@ -128,11 +128,17 @@ const CLAMPED_EFFORT: EffortSpec = {
   values: { low: "low", medium: "medium", high: "high", max: "high" },
 };
 
-// Gemini thinking budgets, in tokens. "none" is deliberately absent: Pro-tier
-// models reject a 0 budget, so "None" falls back to the model default.
-const GEMINI_BUDGET: EffortSpec = {
-  kind: "budget",
-  values: { low: 2048, medium: 8192, high: 16384, max: 32768 },
+// Gemini 3 thinking levels (thinkingConfig.thinkingLevel). They replaced
+// token budgets on 26 September 2026: streamed, gemini-3.5-flash on Vertex AI
+// answered "Thinking budget is not supported for this model" to 4 of 8
+// identical requests with a budget, and to none of 8 with a level - the
+// failures landed on a backend that takes only levels, and the worker then
+// dropped thinking altogether. 3.8 Flash and 3.1 Pro take levels too. There
+// is no level above "high". "none" is absent, as it was for budgets: Pro
+// cannot switch thinking off, so "None" means the model's own default.
+const GEMINI_LEVEL: EffortSpec = {
+  kind: "enum",
+  values: { low: "low", medium: "medium", high: "high", max: "high" },
 };
 
 /**
@@ -271,7 +277,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
       urlVar: "GOOGLE_BASE_URL",
       defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
-      effort: GEMINI_BUDGET,
+      effort: GEMINI_LEVEL,
       // B.8 at "high" on Vertex: Pro 136 s and 189 s, Flash 160 s.
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
@@ -860,8 +866,13 @@ export function buildRequest(
     } else if (caps.schema === "loose") {
       generationConfig.responseMimeType = "application/json";
     }
+    // A level (Gemini 3) or a token budget (older models), whichever the
+    // route's effort spec speaks.
+    const level = caps.reasoning ? enumEffort(route, effort) : undefined;
     const budget = caps.reasoning ? budgetEffort(route, effort) : undefined;
-    if (budget !== undefined) {
+    if (level !== undefined) {
+      generationConfig.thinkingConfig = { thinkingLevel: level };
+    } else if (budget !== undefined) {
       generationConfig.thinkingConfig = { thinkingBudget: budget };
     }
 

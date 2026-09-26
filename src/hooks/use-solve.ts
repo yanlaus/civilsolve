@@ -57,7 +57,8 @@ export type ProviderRun =
   | { status: "idle" }
   | { status: "waiting"; message: string }
   | { status: "streaming"; charsReceived: number }
-  | { status: "done"; solution: ProviderArtifact }
+  /** `model`: the model that answered - after a switch down a chain, not the one picked. */
+  | { status: "done"; solution: ProviderArtifact; model?: string }
   /** `timedOut`: the task ran out of time and returned nothing (an orange dot, not red). */
   | { status: "error"; message: string; timedOut?: boolean };
 
@@ -540,6 +541,7 @@ async function streamProvider(
       update(provider, {
         status: "done",
         solution: payload.solution as ProviderArtifact,
+        ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}),
       });
     } else if (event.name === "error" && typeof payload.message === "string") {
       outcome = "error";
