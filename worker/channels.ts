@@ -202,6 +202,12 @@ type RouteSpec = {
    * downgrade ladder in run.ts is what drops the schema when it is refused.
    */
   structured?: boolean;
+  /**
+   * The schema rung a request starts on, when "strict" is known to be
+   * refused: the ladder would only spend a round trip - and show the user a
+   * "rejected the strict JSON schema" line - finding that out again.
+   */
+  startSchema?: Capabilities["schema"];
 };
 
 const POE_SPEC = {
@@ -305,6 +311,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // characters - every field present and empty (25 September 2026), the
       // same blank-template failure Kimi showed before it got the contract.
       structured: false,
+      // Plain JSON mode from the start. The strict schema was refused on
+      // nearly every DeepSeek call, and every solve and reading opened with
+      // "rejected the strict JSON schema. Retrying without it..." - which
+      // read as DeepSeek being down (the owner, 26 September 2026) and cost a
+      // round trip to relearn. JSON mode is where every one of those calls
+      // succeeded, with the field contract in the prompt.
+      startSchema: "loose",
     },
   },
   grok: {
@@ -512,6 +525,8 @@ export type Route = {
   streaming: boolean;
   /** False when the upstream cannot be forced to emit structured output. */
   structured: boolean;
+  /** The schema rung to start on (RouteSpec.startSchema); "strict" when unset. */
+  startSchema: Capabilities["schema"];
   /** "Claude (via Poe)" - used in every user-facing message. */
   label: string;
   configured: boolean;
@@ -590,6 +605,7 @@ export function resolveRoute(
       effort: { kind: "none" },
       streaming: false,
       structured: false,
+      startSchema: "strict",
       label: PROVIDER_LABELS[provider],
       configured: false,
       problem:
@@ -625,6 +641,7 @@ export function resolveRoute(
     timeoutMs: spec.timeoutMs,
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
+    startSchema: spec.startSchema ?? "strict",
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
     configured: Boolean(apiKey),
     problem:

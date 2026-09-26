@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Plus, Scale } from "lucide-react";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
+import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
   DEFAULT_JUDGE,
@@ -56,7 +57,7 @@ export function RunActions({
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
   onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
-  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[]) => void;
+  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
 }) {
   const configured = (key: ProviderKey) =>
     providerStatus ? providerStatus[key]?.configured !== false : true;
@@ -85,6 +86,24 @@ export function RunActions({
   const judge: ModelChoice =
     judgePick ??
     (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : DEFAULT_JUDGE);
+
+  // How hard the judge thinks: high by default, the most reliable level
+  // measured for grading. A judge's route may not offer every level (ChatGPT
+  // runs at high or max); those are disabled, and a pick outside the band
+  // moves to its nearest edge rather than being silently raised by the server.
+  const [effortPick, setEffortPick] = useState<EffortKey>("high");
+  const judgeStatus = providerStatus?.[judge.provider];
+  const floor = judgeStatus?.forcedEffort ?? judgeStatus?.minEffort;
+  const ceiling = judgeStatus?.forcedEffort ?? judgeStatus?.maxEffort;
+  const floorIndex = floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : 0;
+  const ceilingIndex = ceiling ? EFFORT_KEYS.indexOf(ceiling as EffortKey) : EFFORT_KEYS.length - 1;
+  const inBand = (key: EffortKey) => {
+    const index = EFFORT_KEYS.indexOf(key);
+    return index >= floorIndex && index <= ceilingIndex;
+  };
+  const judgeEffort: EffortKey = inBand(effortPick)
+    ? effortPick
+    : EFFORT_KEYS[Math.min(Math.max(EFFORT_KEYS.indexOf(effortPick), floorIndex), ceilingIndex)];
 
   const solving = PROVIDER_KEYS.some((key) => isRunActive(runs[key]));
   const judging = isJudgeActive(judgeRun);
@@ -204,11 +223,28 @@ export function RunActions({
             ))}
           </select>
         </label>
+        <label className="mt-2 block text-xs text-cs-ink-3">
+          Judge&apos;s thinking
+          <select
+            value={judgeEffort}
+            disabled={locked || judging}
+            onChange={(event) => setEffortPick(event.target.value as EffortKey)}
+            className={SELECT_CLASS}
+          >
+            {EFFORT_KEYS.map((key) => (
+              <option key={key} value={key} disabled={!inBand(key)}>
+                {key.charAt(0).toUpperCase() + key.slice(1)}
+                {key === "high" ? " (default)" : ""}
+                {inBand(key) ? "" : " - not offered by this judge"}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           className={`${BUTTON_CLASS} mt-3`}
           disabled={locked || judging || Boolean(crossCheckBlocked)}
-          onClick={() => onCrossCheck(judge, chosen)}
+          onClick={() => onCrossCheck(judge, chosen, judgeEffort)}
         >
           {judging ? "Cross-checking..." : hasVerdict ? "Run the cross-check again" : "Run the cross-check"}
         </button>

@@ -9,6 +9,7 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
+import type { EffortKey } from "../../../shared/prompt";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { formatDuration } from "../../../shared/stream-protocol";
 import {
@@ -161,7 +162,7 @@ export default function SolutionPanel({
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
   onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
-  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[]) => void;
+  onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -581,6 +582,7 @@ function JudgementCard({
           Cross-check verdict
           <span className="font-sans text-sm font-normal text-cs-ink-3">
             judged by {judgeLabel}
+            {variants.judgeEffort ? ` at ${variants.judgeEffort} thinking` : ""}
             {tookLabel(progress) ? ` in ${tookLabel(progress)}` : ""}
           </span>
         </p>

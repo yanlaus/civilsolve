@@ -9,6 +9,7 @@
 // storage can be unavailable (private browsing, blocked site data) and the
 // page works without it.
 
+import type { EffortKey } from "../../shared/prompt";
 import { isProviderKey, type ModelVariant, type ProviderKey } from "../../shared/providers";
 
 const KEY = "civilsolve:last-run";
@@ -20,6 +21,8 @@ export type SavedJudge = {
   provider: ProviderKey;
   /** Which of the judge's models, when it offers several (Gemini Flash or Pro). */
   variant?: ModelVariant;
+  /** How hard the judge thinks; the server's default ("high") when unset. */
+  effort?: EffortKey;
   /** Set once the cross-check was sent; until then it cannot be resumed. */
   jobId?: string;
   /** Solution A, B, ... in order, and the solvers left out - for the verdict card. */

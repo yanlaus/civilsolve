@@ -262,7 +262,7 @@ function paramRejection(error: UpstreamError): DropTarget | null {
 const MAX_DOWNGRADES = 3;
 
 function startingCapabilities(route: Route, effort: EffortKey): Capabilities {
-  return { reasoning: supportsEffort(route, effort), schema: "strict" };
+  return { reasoning: supportsEffort(route, effort), schema: route.startSchema };
 }
 
 function canDrop(caps: Capabilities, drop: DropTarget) {
