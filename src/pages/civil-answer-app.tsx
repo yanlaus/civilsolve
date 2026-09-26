@@ -51,13 +51,16 @@ export default function CivilAnswerAppPage() {
     progress,
     judgeProgress,
     variants: runVariants,
+    interpretation: confirmedInterpretation,
     canRerun,
     start,
     cancel,
     restore,
     dismiss,
     solveProvider,
+    stopProvider,
     crossCheck,
+    stopJudge,
   } = useSolve();
   const { providerStatus } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
@@ -70,7 +73,12 @@ export default function CivilAnswerAppPage() {
     restoreAttempted.current = true;
     if (restore()) setRecovered(true);
   }, [restore]);
-  const { pipeline, start: startInterpret, reset: resetInterpret } = useInterpret();
+  const {
+    pipeline,
+    start: startInterpret,
+    reset: resetInterpret,
+    stopModel: stopReader,
+  } = useInterpret();
   const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
   const [error, setError] = useState("");
@@ -120,6 +128,8 @@ export default function CivilAnswerAppPage() {
         steps={pipeline.steps}
         models={pipeline.models}
         elapsedMs={now - pipeline.startedAt}
+        onStop={stopInterpretation}
+        onStopModel={stopReader}
       />
     ) : (
       ""
@@ -136,6 +146,13 @@ export default function CivilAnswerAppPage() {
     resetInterpret();
     setPendingSolve(null);
     cancel();
+  }
+
+  // The interpretation pass's own Stop. Nothing was solved yet, so this is
+  // the page back where it was before Solve, the upload still in the form.
+  function stopInterpretation() {
+    resetInterpret();
+    setPendingSolve(null);
   }
 
   async function handleSolve({
@@ -209,11 +226,17 @@ export default function CivilAnswerAppPage() {
   }
 
   function confirmInterpretation(confirmedText: string) {
-    if (!pendingSolve) return;
+    if (!pendingSolve || pipeline.status !== "review") return;
     const { providers, body, variants } = pendingSolve;
+    // Kept above the solutions: the Chinese and who read it go with the run.
+    const extras = {
+      chinese: pipeline.interpretation.traditional_chinese?.trim() || undefined,
+      credit: pipeline.credit,
+      note: pipeline.note,
+    };
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, null, variants);
+    start(providers, { ...body, interpretation: confirmedText }, null, variants, extras);
   }
 
   return (
@@ -305,11 +328,14 @@ export default function CivilAnswerAppPage() {
             progress={progress}
             judgeProgress={judgeProgress}
             variants={runVariants}
+            interpretation={confirmedInterpretation}
             providerStatus={providerStatus}
             canRerun={canRerun}
             locked={isInterpreting || Boolean(prepStatus)}
             onSolveProvider={solveProvider}
+            onStopProvider={stopProvider}
             onCrossCheck={crossCheck}
+            onStopJudge={stopJudge}
           />
         </Suspense>
       </div>

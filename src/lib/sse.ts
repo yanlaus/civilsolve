@@ -93,6 +93,23 @@ export class StreamInterruptedError extends Error {}
  */
 export class JobLostError extends Error {}
 
+/**
+ * The user stopped this task (JobHandle.stopped): nothing more is wanted from
+ * it, so nothing retries it and nothing reports it as a failure.
+ */
+export class StoppedError extends Error {}
+
+/**
+ * A controller for one task inside a run: it aborts on its own Stop, and
+ * with the run's signal when the whole run is stopped.
+ */
+export function childController(parent: AbortSignal): AbortController {
+  const child = new AbortController();
+  if (parent.aborted) child.abort();
+  else parent.addEventListener("abort", () => child.abort(), { once: true });
+  return child;
+}
+
 // How each engine words a request whose connection went away: Safari "Load
 // failed" / "The network connection was lost.", Chrome "Failed to fetch" /
 // "network error", Firefox "NetworkError when attempting to fetch resource.",
@@ -211,7 +228,7 @@ export async function withResume<T>(
     try {
       return await attempt();
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted || handle.stopped) throw error;
       if (error instanceof JobLostError) {
         if (restarts >= MAX_RESTARTS) throw error;
         restarts += 1;
@@ -318,6 +335,12 @@ export type JobHandle = {
   id: string | null;
   connections: number;
   timing?: { startedAt?: number; clockOffset: number };
+  /**
+   * Set by Stop (cancelJob). A job whose id has not arrived yet - its
+   * request is still on the way - is cancelled the moment its `job` event
+   * names it, rather than left running on the server.
+   */
+  stopped?: boolean;
 };
 
 export function jobHandle(id: string | null = null): JobHandle {
@@ -350,6 +373,11 @@ export function takeJobEvent(
   } catch {
     // A malformed job event only costs the ability to re-attach.
   }
+  if (handle.stopped && handle.id) {
+    // Stopped before the server had named the job: cancel it now.
+    cancelJob(handle);
+    throw new StoppedError("Stopped.");
+  }
   return true;
 }
 
@@ -368,6 +396,7 @@ export async function openTaskStream(
   body: unknown,
   signal: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
+  if (handle.stopped) throw new StoppedError("Stopped.");
   if (handle.id) {
     const response = await fetch(`/api/jobs/${handle.id}`, { signal });
     if (response.status === 404) {
@@ -386,9 +415,22 @@ export async function openTaskStream(
 
 /**
  * Stops a job's model call on the server. Fire-and-forget, and `keepalive`
- * so it still goes out when the page is being closed.
+ * so it still goes out when the page is being closed. A job not named yet
+ * is cancelled by takeJobEvent once it is.
  */
 export function cancelJob(handle: JobHandle) {
+  handle.stopped = true;
   if (!handle.id) return;
   void fetch(`/api/jobs/${handle.id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+}
+
+/**
+ * One task's Stop button: cancels its job on the server and ends this page's
+ * stream of it. Until the server has named the job the stream stays open, so
+ * its `job` event can still be read and the job cancelled (takeJobEvent);
+ * the caller has already shown the task as stopped.
+ */
+export function stopTask(handle: JobHandle, abort: AbortController) {
+  cancelJob(handle);
+  if (handle.id) abort.abort();
 }

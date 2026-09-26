@@ -1,6 +1,8 @@
 // Diagram-interpretation pipeline state machine: the two readers read the
 // question at the same time, a third model reconciles their readings, then
 // the result pauses in "review" for the user to edit/confirm before solving.
+// Each reader can be stopped on its own (the other's reading then goes to
+// review alone), and the whole pass with reset().
 
 import { useCallback, useRef, useState } from "react";
 import type { EffortKey } from "../../shared/prompt";
@@ -17,10 +19,13 @@ import {
 import type { InterpretRequestBody } from "../../shared/stream-protocol";
 import {
   cancelJob,
+  childController,
   isConnectionLost,
   jobHandle,
   openTaskStream,
   readSseEvents,
+  stopTask,
+  StoppedError,
   StreamInterruptedError,
   takeJobEvent,
   withResume,
@@ -31,7 +36,13 @@ import {
 export type ModelProgress = {
   label: string;
   status: string;
-  state: "working" | "done" | "failed";
+  state: "working" | "done" | "failed" | "stopped";
+  /**
+   * Whether this model has a Stop of its own: a reader does - its partner's
+   * reading is then reviewed alone - the reconciler does not; stopping it is
+   * stopping the pass.
+   */
+  stoppable?: boolean;
 };
 
 export type InterpretPipeline =
@@ -57,6 +68,8 @@ export type InterpretPipeline =
       text: string;
       /** Set when one reader failed and the other's reading is shown without a cross-check. */
       note?: string;
+      /** Who read it: "DeepSeek (Flash) and Muse Spark, reconciled by ChatGPT". */
+      credit: string;
     }
   | { status: "error"; message: string };
 
@@ -72,29 +85,54 @@ const UNREACHABLE =
   "Could not reach the server for 2 minutes during the interpretation pass. Check the connection and run it again.";
 
 function failureOf(error: unknown) {
-  return isConnectionLost(error)
-    ? UNREACHABLE
-    : error instanceof Error
-      ? error.message
-      : "The interpretation pipeline failed.";
+  return error instanceof StoppedError
+    ? "you stopped it"
+    : isConnectionLost(error)
+      ? UNREACHABLE
+      : error instanceof Error
+        ? error.message
+        : "The interpretation pipeline failed.";
 }
+
+/** A model call in flight, so its Stop button can end it. */
+type RunningCall = { handle: JobHandle; abort: AbortController };
 
 export function useInterpret() {
   const [pipeline, setPipeline] = useState<InterpretPipeline>({ status: "idle" });
   const abortRef = useRef<AbortController | null>(null);
-  /** The jobs running now, so Cancel can stop their model calls on the server. */
-  const jobsRef = useRef<JobHandle[]>([]);
+  /**
+   * The model calls running now, by label (a list: both readers may be the
+   * same model, and share a line), so Stop can end them on the server.
+   */
+  const callsRef = useRef(new Map<string, RunningCall[]>());
+  /** The running pass's line updater, for a Stop pressed from outside it. */
+  const reportRef = useRef<
+    ((label: string, detail: string, state: ModelProgress["state"]) => void) | null
+  >(null);
 
   const stopJobs = () => {
-    for (const handle of jobsRef.current) cancelJob(handle);
-    jobsRef.current = [];
+    for (const calls of callsRef.current.values()) {
+      for (const { handle } of calls) cancelJob(handle);
+    }
+    callsRef.current = new Map();
   };
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     stopJobs();
+    reportRef.current = null;
     setPipeline({ status: "idle" });
+  }, []);
+
+  /**
+   * One reader's Stop: ends its model call and marks its line at once. The
+   * pass carries on with the other reader, whose reading is then reviewed
+   * alone; with both stopped there is nothing to review.
+   */
+  const stopModel = useCallback((label: string) => {
+    for (const { handle, abort } of callsRef.current.get(label) ?? []) stopTask(handle, abort);
+    reportRef.current?.(label, "stopped", "stopped");
   }, []);
 
   const start = useCallback(
@@ -119,13 +157,18 @@ export function useInterpret() {
         models: [],
         startedAt: Date.now(),
       };
-      const beginStep = (stage: string, step: number, labels: string[]) => {
+      const beginStep = (stage: string, step: number, labels: string[], stoppable: boolean) => {
         current = {
           status: "running",
           stage,
           step,
           steps: 2,
-          models: [...new Set(labels)].map((label) => ({ label, status: "starting...", state: "working" })),
+          models: [...new Set(labels)].map((label) => ({
+            label,
+            status: "starting...",
+            state: "working",
+            stoppable,
+          })),
           startedAt: Date.now(),
         };
         setPipeline(current);
@@ -140,10 +183,13 @@ export function useInterpret() {
           ...current,
           models: current.models.map((model) =>
             // A model that is through keeps its last word.
-            model.label === label && model.state === "working" ? { label, status: detail, state } : model,
+            model.label === label && model.state === "working" ? { ...model, status: detail, state } : model,
           ),
         };
         setPipeline(current);
+      };
+      reportRef.current = (label, detail, state) => {
+        if (!abort.signal.aborted) report(label, detail, state);
       };
 
       // Each model call runs in a server-side job of its own. If its
@@ -160,19 +206,25 @@ export function useInterpret() {
         const plain = new RegExp(String.raw`^${PROVIDER_LABELS[provider]}(?: \(via [^)]*\))?(?::\s*|\s+)`);
         const say = (message: string | undefined) => report(label, message?.replace(plain, ""));
         const handle = jobHandle();
-        jobsRef.current.push(handle);
+        // Its own controller, so its Stop leaves the other calls running.
+        const own = childController(abort.signal);
+        callsRef.current.set(label, [...(callsRef.current.get(label) ?? []), { handle, abort: own }]);
         const sent = variant ? { ...body, variant } : body;
         return withResume(
-          () => runInterpretRequest(provider, sent, abort.signal, handle, say),
+          () => runInterpretRequest(provider, sent, own.signal, handle, say),
           handle,
-          abort.signal,
+          own.signal,
           say,
         ).then(
           (result) => {
+            // A reading that landed as Stop was pressed is not wanted either.
+            if (handle.stopped) throw new StoppedError(`${label} was stopped.`);
             report(label, "done", "done");
             return result;
           },
           (error: unknown) => {
+            // Whatever a stopped call ended with, it ended because of Stop.
+            if (handle.stopped) throw new StoppedError(`${label} was stopped.`);
             report(label, failureOf(error).replace(plain, ""), "failed");
             throw error;
           },
@@ -184,7 +236,7 @@ export function useInterpret() {
       // two concurrent streams no longer trip a CPU limit. They ran one after
       // the other until 25 September, which made the pass take the sum of
       // both readers instead of the slower one.
-      beginStep("Reading the question", 1, [labelA, labelB]);
+      beginStep("Reading the question", 1, [labelA, labelB], true);
       const readerBody: InterpretRequestBody = {
         mode: "interpret",
         images,
@@ -198,9 +250,16 @@ export function useInterpret() {
       if (abort.signal.aborted) return;
 
       if (settledA.status === "rejected" && settledB.status === "rejected") {
+        callsRef.current = new Map();
+        reportRef.current = null;
+        if (settledA.reason instanceof StoppedError && settledB.reason instanceof StoppedError) {
+          // Both stopped: that is the pass stopped, not a failure to report.
+          setPipeline({ status: "idle" });
+          return;
+        }
         setPipeline({
           status: "error",
-          message: `Neither reader could read the question. ${labelA}: ${failureOf(settledA.reason)} ${labelB}: ${failureOf(settledB.reason)}`,
+          message: `Neither reader could read the question. ${labelA}: ${failureOf(settledA.reason)}. ${labelB}: ${failureOf(settledB.reason)}.`,
         });
         return;
       }
@@ -216,17 +275,23 @@ export function useInterpret() {
               ? [{ label: labelB, reading: settledB.value }, { label: labelA, reason: settledA.reason }]
               : [null, null];
         if (!kept || !lost) return;
+        callsRef.current = new Map();
+        reportRef.current = null;
         setPipeline({
           status: "review",
           interpretation: kept.reading,
           text: interpretationToText(kept.reading),
-          note: `${lost.label} could not read the question (${failureOf(lost.reason)}), so this is ${kept.label}'s reading alone - not cross-checked by ${labelV}. Check it with extra care.`,
+          note:
+            lost.reason instanceof StoppedError
+              ? `You stopped ${lost.label}, so this is ${kept.label}'s reading alone - not cross-checked by ${labelV}. Check it with extra care.`
+              : `${lost.label} could not read the question (${failureOf(lost.reason)}), so this is ${kept.label}'s reading alone - not cross-checked by ${labelV}. Check it with extra care.`,
+          credit: `${kept.label} alone`,
         });
         return;
       }
 
       try {
-        beginStep("Reconciling the two readings", 2, [labelV]);
+        beginStep("Reconciling the two readings", 2, [labelV], false);
         const verified = await call(config.verifier, {
           mode: "verify",
           images,
@@ -241,18 +306,23 @@ export function useInterpret() {
           status: "review",
           interpretation: verified,
           text: interpretationToText(verified),
+          credit:
+            labelA === labelB
+              ? `${labelA} twice, reconciled by ${labelV}`
+              : `${labelA} and ${labelB}, reconciled by ${labelV}`,
         });
       } catch (error) {
         if (abort.signal.aborted) return;
         setPipeline({ status: "error", message: failureOf(error) });
       } finally {
-        jobsRef.current = [];
+        callsRef.current = new Map();
+        reportRef.current = null;
       }
     },
     [],
   );
 
-  return { pipeline, start, reset };
+  return { pipeline, start, reset, stopModel };
 }
 
 async function runInterpretRequest(

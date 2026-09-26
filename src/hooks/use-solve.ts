@@ -14,7 +14,11 @@
 // kept too: in memory, and in this browser's IndexedDB (lib/upload-store.ts)
 // so it survives a reload. With it a failed solver can be retried, another
 // solver added, and the cross-check run (or run again) after the fact,
-// without uploading again.
+// without uploading again. So is the confirmed interpretation, which the
+// page keeps above the solutions.
+//
+// Every solver and the judge can be stopped on its own (stopProvider,
+// stopJudge), the rest carrying on; cancel() stops them all.
 
 import { useCallback, useRef, useState } from "react";
 import { MAX_JUDGED_SOLUTIONS, type JudgementResult } from "../../shared/judgement";
@@ -38,21 +42,26 @@ import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progre
 import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
   cancelJob,
+  childController,
   isConnectionLost,
   jobHandle,
   openTaskStream,
   readSseEvents,
+  stopTask,
   StreamInterruptedError,
   takeJobEvent,
   withResume,
   type JobHandle,
 } from "@/lib/sse";
-import { clearBody, loadBody, saveBody } from "@/lib/upload-store";
+import { clearBody, loadBody, saveBody, type InterpretationExtras } from "@/lib/upload-store";
 
 // Shown once withResume has tried for RECONNECT_WINDOW_MS. The job itself
 // kept running on the server, and its id is saved, so a reload re-attaches.
 const UNREACHABLE =
   "Could not reach the server for 2 minutes. The model keeps working there - reload this page to pick up";
+
+/** What the server's job ends with once it was cancelled (worker/run.ts). */
+const SERVER_CANCELLED = "Cancelled.";
 
 export type ProviderRun =
   | { status: "idle" }
@@ -60,8 +69,23 @@ export type ProviderRun =
   | { status: "streaming"; charsReceived: number }
   /** `model`: the model that answered - after a switch down a chain, not the one picked. */
   | { status: "done"; solution: ProviderArtifact; model?: string }
-  /** `timedOut`: the task ran out of time and returned nothing (an orange dot, not red). */
-  | { status: "error"; message: string; timedOut?: boolean };
+  /**
+   * `timedOut`: the task ran out of time and returned nothing (an orange dot,
+   * not red). `stopped`: the user stopped it (grey) - nothing went wrong.
+   */
+  | { status: "error"; message: string; timedOut?: boolean; stopped?: boolean };
+
+const STOPPED_RUN: ProviderRun = { status: "error", message: "You stopped this solver.", stopped: true };
+
+/**
+ * The confirmed interpretation the run was solved with, kept on the page
+ * above the solutions: `text` is the English the solvers got (the body's
+ * `interpretation`), the rest is for display only.
+ */
+export type ConfirmedInterpretation = InterpretationExtras & { text: string };
+
+/** A solver or judge in flight: what its Stop needs to end it. */
+type RunningTask = { handle: JobHandle; abort: AbortController; tracker: ProgressTracker };
 
 export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
@@ -104,7 +128,9 @@ export type JudgeRun =
       skipped: ProviderKey[];
       judgement: JudgementResult;
     }
-  | { status: "error"; judge: ProviderKey; message: string; timedOut?: boolean };
+  | { status: "error"; judge: ProviderKey; message: string; timedOut?: boolean; stopped?: boolean };
+
+const JUDGE_STOPPED = "You stopped the cross-check.";
 
 const IDLE_RUNS = Object.fromEntries(
   PROVIDER_KEYS.map((key) => [key, { status: "idle" } as ProviderRun]),
@@ -149,13 +175,19 @@ export function useSolve() {
   const [progress, setProgress] = useState<ProgressMap>({});
   const [judgeProgress, setJudgeProgress] = useState<Progress | null>(null);
   const [variants, setVariants] = useState<RunVariants>({ solvers: {} });
+  const [interpretation, setInterpretation] = useState<ConfirmedInterpretation | null>(null);
   /** Whether the run's request body is at hand, so it can be sent again. */
   const [canRerun, setCanRerun] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   /** Every job of the current run, so Stop can cancel them on the server. */
   const handlesRef = useRef<JobHandle[]>([]);
+  /** Each solver in flight, and the judge, for their own Stop buttons. */
+  const tasksRef = useRef(new Map<ProviderKey, RunningTask>());
+  const judgeTaskRef = useRef<RunningTask | null>(null);
   const runRef = useRef<SavedRun | null>(null);
   const bodyRef = useRef<SolveRequestBody | null>(null);
+  /** The interpretation's display extras, saved with the body. */
+  const extrasRef = useRef<InterpretationExtras | undefined>(undefined);
   /** The run (by savedAt) whose body is already in IndexedDB. */
   const bodySavedRef = useRef<number | null>(null);
   const solutionsRef = useRef(new Map<ProviderKey, ProviderArtifact>());
@@ -183,7 +215,7 @@ export function useSolve() {
     const body = bodyRef.current;
     if (body && bodySavedRef.current !== run.savedAt) {
       bodySavedRef.current = run.savedAt;
-      void saveBody(run.savedAt, body);
+      void saveBody(run.savedAt, body, extrasRef.current);
     }
   }, []);
 
@@ -193,6 +225,8 @@ export function useSolve() {
     abortRef.current = null;
     for (const handle of handlesRef.current) cancelJob(handle);
     handlesRef.current = [];
+    tasksRef.current = new Map();
+    judgeTaskRef.current = null;
   }, []);
 
   /**
@@ -201,6 +235,9 @@ export function useSolve() {
    * memory, so a cancelled solver can still be retried from here.
    */
   const cancel = useCallback(() => {
+    // Their clocks stop where they were, for "stopped after 1:20".
+    for (const task of tasksRef.current.values()) task.tracker.end();
+    judgeTaskRef.current?.tracker.end();
     stopCurrent();
     clearRun();
     void clearBody();
@@ -208,18 +245,45 @@ export function useSolve() {
     setRuns((current) => {
       const next = { ...current };
       for (const key of Object.keys(next) as ProviderKey[]) {
-        if (isRunActive(next[key])) {
-          next[key] = { status: "error", message: "Cancelled." };
-        }
+        if (isRunActive(next[key])) next[key] = STOPPED_RUN;
       }
       return next;
     });
     setJudgeRun((current) =>
       isJudgeActive(current)
-        ? { status: "error", judge: current.judge, message: "Cancelled." }
+        ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
         : current,
     );
   }, [stopCurrent]);
+
+  /**
+   * One solver's Stop: its job ends on the server, its tab says it was
+   * stopped (and offers to run it again), and the other solvers carry on.
+   */
+  const stopProvider = useCallback((provider: ProviderKey) => {
+    const task = tasksRef.current.get(provider);
+    if (!task) return;
+    tasksRef.current.delete(provider);
+    task.tracker.end();
+    stopTask(task.handle, task.abort);
+    setRuns((current) =>
+      isRunActive(current[provider]) ? { ...current, [provider]: STOPPED_RUN } : current,
+    );
+  }, []);
+
+  /** The cross-check's Stop: the solutions stay, and it can be run again. */
+  const stopJudge = useCallback(() => {
+    const task = judgeTaskRef.current;
+    if (!task) return;
+    judgeTaskRef.current = null;
+    task.tracker.end();
+    stopTask(task.handle, task.abort);
+    setJudgeRun((current) =>
+      isJudgeActive(current)
+        ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
+        : current,
+    );
+  }, []);
 
   /** Clears the page and forgets the saved run and its images (after a recovery, say). */
   const dismiss = useCallback(() => {
@@ -235,6 +299,8 @@ export function useSolve() {
     setProgress({});
     setJudgeProgress(null);
     setVariants({ solvers: {} });
+    extrasRef.current = undefined;
+    setInterpretation(null);
   }, [stopCurrent, setBody]);
 
   /**
@@ -246,13 +312,18 @@ export function useSolve() {
   const solveOne = useCallback(
     async (context: RunContext, provider: ProviderKey, body: SolveRequestBody | null) => {
       const { run, signal, solutions } = context;
+      const known = run.solveJobs[provider];
+      const handle = jobHandle(known ?? null);
+      // Its own controller, so its Stop leaves the other solvers running.
+      const own = childController(signal);
+      // Nothing more is shown for a solver once it was stopped.
+      const live = () => !own.signal.aborted && !handle.stopped;
       const update = (_provider: ProviderKey, next: ProviderRun) => {
-        if (signal.aborted) return;
+        if (!live()) return;
         if (next.status === "done") solutions.set(provider, next.solution);
         setRuns((current) => ({ ...current, [provider]: next }));
       };
 
-      const known = run.solveJobs[provider];
       if (body === null && !known) {
         update(provider, {
           status: "error",
@@ -260,9 +331,11 @@ export function useSolve() {
         });
         return;
       }
-      const handle = jobHandle(known ?? null);
       handlesRef.current.push(handle);
       const onJob = (id: string) => {
+        // A job stopped before it was named, and named only after the
+        // solver was run again, must not take the new job's place.
+        if (handle.stopped && run.solveJobs[provider]) return;
         run.solveJobs[provider] = id;
         persist();
       };
@@ -270,23 +343,25 @@ export function useSolve() {
       const variant = run.variants?.[provider];
       const sent = body && variant ? { ...body, variant } : body;
       const tracker = trackProgress((next) => {
-        if (!signal.aborted) setProgress((current) => ({ ...current, [provider]: next }));
+        if (live()) setProgress((current) => ({ ...current, [provider]: next }));
       });
+      const task: RunningTask = { handle, abort: own, tracker };
+      tasksRef.current.set(provider, task);
       try {
         // A dropped connection - on a phone, usually the browser being put
         // in the background - re-attaches to this provider's job once the
         // page is visible again (see withResume).
         await withResume(
-          () => streamProvider(provider, sent, signal, update, handle, onJob, tracker),
+          () => streamProvider(provider, sent, own.signal, update, handle, onJob, tracker),
           handle,
-          signal,
+          own.signal,
           (message) => {
             tracker.note(message);
             update(provider, { status: "waiting", message });
           },
         );
       } catch (error) {
-        if (signal.aborted) return;
+        if (!live()) return;
         tracker.end();
         update(provider, {
           status: "error",
@@ -296,6 +371,8 @@ export function useSolve() {
               ? error.message
               : "The solve request failed.",
         });
+      } finally {
+        if (tasksRef.current.get(provider) === task) tasksRef.current.delete(provider);
       }
     },
     [persist],
@@ -310,6 +387,9 @@ export function useSolve() {
         chosen,
         canSendLater: bodyRef.current !== null,
         handles: handlesRef.current,
+        register: (task) => {
+          judgeTaskRef.current = task;
+        },
         persist,
         setJudgeRun: (next) => {
           if (!context.signal.aborted) setJudgeRun(next);
@@ -357,8 +437,11 @@ export function useSolve() {
       body: SolveRequestBody,
       judge: ModelChoice | null = null,
       picked: Partial<Record<ProviderKey, ModelVariant>> = {},
+      extras?: InterpretationExtras,
     ) => {
       setRuns(waitingRuns(providers, "Submitting..."));
+      extrasRef.current = body.interpretation ? extras : undefined;
+      setInterpretation(body.interpretation ? { ...extras, text: body.interpretation } : null);
       setJudgeRun(
         judge
           ? { status: "waiting", judge: judge.provider, message: "Waiting for the solutions..." }
@@ -401,9 +484,14 @@ export function useSolve() {
         : { status: "idle" },
     );
     const generation = ++generationRef.current;
-    void loadBody(run.savedAt).then((body) => {
+    void loadBody(run.savedAt).then((stored) => {
       if (generationRef.current !== generation) return;
+      const body = stored?.body ?? null;
       bodySavedRef.current = body ? run.savedAt : null;
+      extrasRef.current = stored?.extras;
+      setInterpretation(
+        body?.interpretation ? { ...stored?.extras, text: body.interpretation } : null,
+      );
       setBody(body);
       execute(run, null);
     });
@@ -464,13 +552,16 @@ export function useSolve() {
     progress,
     judgeProgress,
     variants,
+    interpretation,
     canRerun,
     start,
     cancel,
     restore,
     dismiss,
     solveProvider,
+    stopProvider,
     crossCheck,
+    stopJudge,
   };
 }
 
@@ -553,11 +644,17 @@ async function streamProvider(
     } else if (event.name === "error" && typeof payload.message === "string") {
       outcome = "error";
       tracker.end(payload.at);
-      update(provider, {
-        status: "error",
-        message: payload.message,
-        ...(payload.timedOut === true ? { timedOut: true } : {}),
-      });
+      // A job stopped from this page or another (Stop, then a reload).
+      update(
+        provider,
+        payload.message === SERVER_CANCELLED
+          ? STOPPED_RUN
+          : {
+              status: "error",
+              message: payload.message,
+              ...(payload.timedOut === true ? { timedOut: true } : {}),
+            },
+      );
     }
   }
 
@@ -579,6 +676,8 @@ type JudgeParams = RunContext & {
   /** Whether the page could send the check itself later (its images are at hand). */
   canSendLater: boolean;
   handles: JobHandle[];
+  /** Makes the judge's Stop button able to end this check. */
+  register: (task: RunningTask) => void;
   persist: () => void;
   setJudgeRun: (run: JudgeRun) => void;
   setJudgeProgress: (progress: Progress) => void;
@@ -604,14 +703,21 @@ async function runJudge({
   chosen,
   canSendLater,
   handles,
+  register,
   persist,
-  setJudgeRun,
+  setJudgeRun: publishJudgeRun,
   setJudgeProgress,
 }: JudgeParams) {
   const saved = run.judge;
   if (!saved) return;
   const judge = saved.provider;
   const handle = jobHandle(saved.jobId ?? null);
+  // Its own controller, so its Stop leaves the solvers alone.
+  const own = childController(signal);
+  const live = () => !own.signal.aborted && !handle.stopped;
+  const setJudgeRun = (next: JudgeRun) => {
+    if (live()) publishJudgeRun(next);
+  };
 
   let solvers: ProviderKey[];
   let skipped: ProviderKey[];
@@ -673,11 +779,14 @@ async function runJudge({
     saved.jobId = id;
     persist();
   };
-  const tracker = trackProgress(setJudgeProgress);
+  const tracker = trackProgress((next) => {
+    if (live()) setJudgeProgress(next);
+  });
+  register({ handle, abort: own, tracker });
 
   const attempt = async () => {
     let charsReceived = 0;
-    const stream = await openTaskStream(handle, `/api/judge/${judge}`, judgeBody, signal);
+    const stream = await openTaskStream(handle, `/api/judge/${judge}`, judgeBody, own.signal);
     let terminal = false;
 
     for await (const event of readSseEvents(stream)) {
@@ -719,7 +828,9 @@ async function runJudge({
         setJudgeRun({
           status: "error",
           judge,
-          message: payload.message,
+          ...(payload.message === SERVER_CANCELLED
+            ? { message: JUDGE_STOPPED, stopped: true }
+            : { message: payload.message }),
           ...(payload.timedOut === true ? { timedOut: true } : {}),
         });
       }
@@ -731,12 +842,12 @@ async function runJudge({
   };
 
   try {
-    await withResume(attempt, handle, signal, (message) => {
+    await withResume(attempt, handle, own.signal, (message) => {
       tracker.note(message);
       setJudgeRun({ status: "waiting", judge, message });
     });
   } catch (error) {
-    if (signal.aborted) return;
+    if (!live()) return;
     tracker.end();
     setJudgeRun({
       status: "error",

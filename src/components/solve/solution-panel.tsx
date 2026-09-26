@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Download, Languages, Loader2, RotateCw, Scale, X } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Download,
+  Languages,
+  Loader2,
+  RotateCw,
+  Scale,
+  Square,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
   PROVIDER_KEYS,
@@ -15,6 +28,7 @@ import { formatDuration } from "../../../shared/stream-protocol";
 import {
   isJudgeActive,
   isRunActive,
+  type ConfirmedInterpretation,
   type JudgeRun,
   type ProgressMap,
   type ProviderRuns,
@@ -23,6 +37,8 @@ import {
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { formatClock, useNow, type Progress } from "@/lib/progress";
+import { STOP_BUTTON_CLASS } from "./interpret-progress";
+import MathProse from "./math-prose";
 import { ProviderLogo } from "./provider-logo";
 import { RunActions } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
@@ -78,6 +94,9 @@ const TIMEOUT_BOX =
   "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12]";
 const ERROR_BOX =
   "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger";
+// Stopped by the user: grey - neither a failure nor a timeout.
+const STOPPED_DOT = "bg-cs-ink-3";
+const STOPPED_BOX = "border-cs-line bg-cs-muted text-cs-ink-2";
 
 /**
  * Every status line so far, with when it came, so a long wait shows its
@@ -109,7 +128,20 @@ function EventLog({ progress, current }: { progress?: Progress; current?: string
  * taken so far, and what happened on the way. The timeout is deliberately not
  * shown - only the time spent (the owner's choice, 25 September 2026).
  */
-function ProgressBox({ line, progress, now }: { line: string; progress?: Progress; now: number }) {
+function ProgressBox({
+  line,
+  progress,
+  now,
+  onStop,
+  stopTitle,
+}: {
+  line: string;
+  progress?: Progress;
+  now: number;
+  /** This task's own Stop; the others carry on. */
+  onStop?: () => void;
+  stopTitle?: string;
+}) {
   const elapsed = progress ? now - progress.startedAt : 0;
   return (
     <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
@@ -120,6 +152,12 @@ function ProgressBox({ line, progress, now }: { line: string; progress?: Progres
           <span className="shrink-0 font-semibold tabular-nums" title="Time since the request was sent">
             {formatClock(elapsed)}
           </span>
+        ) : null}
+        {onStop ? (
+          <button type="button" onClick={onStop} title={stopTitle} className={STOP_BUTTON_CLASS}>
+            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+            Stop
+          </button>
         ) : null}
       </div>
       <EventLog progress={progress} current={line} />
@@ -138,17 +176,74 @@ function tookLabel(progress?: Progress) {
   return took >= 1000 ? formatDuration(took) : "";
 }
 
+/**
+ * The confirmed interpretation, kept above the solutions for as long as they
+ * are on the page - it used to vanish on Confirm & Solve (the owner asked for
+ * it to stay, 26 September 2026). Rendered like a solution; the Traditional
+ * Chinese is a fold away.
+ */
+function InterpretationCard({ interpretation }: { interpretation: ConfirmedInterpretation }) {
+  const { text, chinese, credit, note } = interpretation;
+  return (
+    <details
+      open
+      className="cs-panel group mb-8 overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden"
+    >
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-5 py-4 sm:px-7">
+        <span className="flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <BookOpen className="h-4 w-4 text-cs-accent" aria-hidden="true" />
+          Interpreted question
+        </span>
+        <span className="min-w-0 flex-1 text-xs text-cs-ink-3">
+          confirmed by you{credit ? ` · read by ${credit}` : ""} · what the solvers were given
+        </span>
+        <ChevronDown
+          className="h-4 w-4 shrink-0 text-cs-ink-3 transition group-open:rotate-180"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="border-t border-cs-line-soft px-5 pb-5 pt-3 sm:px-7">
+        {note ? (
+          <div className="mb-3 flex gap-2 rounded-cs border border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] px-4 py-2 text-xs text-[#a85a12]">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{note}</span>
+          </div>
+        ) : null}
+        <MathProse source={text} />
+        {chinese ? (
+          <details className="group/zh mt-3 rounded-cs border border-cs-line-soft bg-cs-muted">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+              <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+              繁體中文 · Traditional Chinese
+              <ChevronDown
+                className="ml-auto h-3.5 w-3.5 transition group-open/zh:rotate-180"
+                aria-hidden="true"
+              />
+            </summary>
+            <div className="border-t border-cs-line-soft px-4 py-2">
+              <MathProse source={chinese} chinese />
+            </div>
+          </details>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export default function SolutionPanel({
   runs,
   judgeRun,
   progress,
   judgeProgress,
   variants,
+  interpretation,
   providerStatus,
   canRerun,
   locked,
   onSolveProvider,
+  onStopProvider,
   onCrossCheck,
+  onStopJudge,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -156,13 +251,17 @@ export default function SolutionPanel({
   judgeProgress: Progress | null;
   /** The model each solver and the judge ran, where a provider offers several. */
   variants: RunVariants;
+  /** The confirmed interpretation the run was solved with, if it had one. */
+  interpretation: ConfirmedInterpretation | null;
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   /** Whether the run's images are still at hand, for a retry, another solver or a cross-check. */
   canRerun: boolean;
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
   onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
+  onStopProvider: (provider: ProviderKey) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  onStopJudge: () => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -244,6 +343,8 @@ export default function SolutionPanel({
 
   return (
     <section className="mt-10">
+      {interpretation ? <InterpretationCard interpretation={interpretation} /> : null}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-cs-ink">
           <CheckCircle2 className="h-5 w-5 text-cs-success" />
@@ -288,16 +389,20 @@ export default function SolutionPanel({
                     <span
                       title={
                         run.status === "error"
-                          ? run.timedOut
-                            ? "Timed out - no solution"
-                            : "Failed - no solution"
+                          ? run.stopped
+                            ? "Stopped - no solution"
+                            : run.timedOut
+                              ? "Timed out - no solution"
+                              : "Failed - no solution"
                           : "Finished"
                       }
                       className={`absolute right-3 top-3 h-2.5 w-2.5 rounded-full ${
                         run.status === "error"
-                          ? run.timedOut
-                            ? TIMEOUT_DOT
-                            : "bg-cs-danger"
+                          ? run.stopped
+                            ? STOPPED_DOT
+                            : run.timedOut
+                              ? TIMEOUT_DOT
+                              : "bg-cs-danger"
                           : "bg-cs-success"
                       }`}
                     />
@@ -367,11 +472,15 @@ export default function SolutionPanel({
             {activeRun.status === "error" ? (
               <div
                 className={`rounded-cs border px-4 py-3 text-sm ${
-                  activeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
+                  activeRun.stopped ? STOPPED_BOX : activeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
                 }`}
               >
                 <div className="font-semibold">
-                  {activeRun.timedOut ? "Timed out - no solution returned" : "No solution returned"}
+                  {activeRun.stopped
+                    ? "Stopped - no solution"
+                    : activeRun.timedOut
+                      ? "Timed out - no solution returned"
+                      : "No solution returned"}
                   {tookLabel(activeProgress) ? (
                     <span className="font-normal"> after {tookLabel(activeProgress)}</span>
                   ) : null}
@@ -387,7 +496,7 @@ export default function SolutionPanel({
                       className="inline-flex items-center gap-2 rounded-[10px] border-2 border-current px-3 py-1.5 text-sm font-semibold transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <RotateCw className="h-4 w-4" aria-hidden="true" />
-                      Retry {activeLabel}
+                      {activeRun.stopped ? `Run ${activeLabel} again` : `Retry ${activeLabel}`}
                     </button>
                     {judgeBusy ? (
                       <span className="text-xs opacity-80">Waits for the cross-check to finish.</span>
@@ -410,6 +519,8 @@ export default function SolutionPanel({
                       ? activeRun.message
                       : "Waiting..."
                 }
+                onStop={isRunActive(activeRun) ? () => onStopProvider(activeProvider) : undefined}
+                stopTitle={`Stop ${activeLabel} - the other solvers carry on`}
               />
             )}
           </div>
@@ -438,6 +549,7 @@ export default function SolutionPanel({
             variants={variants}
             progress={judgeProgress ?? undefined}
             now={now}
+            onStop={onStopJudge}
           />
         </div>
       ) : null}
@@ -460,16 +572,6 @@ const CONFIDENCE_CLASS = {
   low: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger",
 } as const;
 
-/** Compact rendered markdown for the verdict's fields (math included). */
-function Prose({ source }: { source: string }) {
-  const html = useMemo(() => renderMarkdown(source), [source]);
-  return (
-    <div
-      className="solution-content prose prose-sm prose-stone max-w-none min-w-0 overflow-x-hidden leading-7"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
 
 function Assessment({
   label,
@@ -492,7 +594,7 @@ function Assessment({
         )}
         Solution {letter} · {label}
       </div>
-      {text ? <Prose source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
+      {text ? <MathProse source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
     </div>
   );
 }
@@ -509,6 +611,7 @@ function JudgementCard({
   variants,
   progress,
   now,
+  onStop,
 }: {
   judgeRun: JudgeRun;
   /** The solvers now, to tell which finished after this verdict was given. */
@@ -516,6 +619,7 @@ function JudgementCard({
   variants: RunVariants;
   progress?: Progress;
   now: number;
+  onStop: () => void;
 }) {
   if (judgeRun.status === "idle") return null;
   const judgeLabel = providerDisplayName(judgeRun.judge, variants.judge);
@@ -525,17 +629,20 @@ function JudgementCard({
     return (
       <div
         className={`mb-4 rounded-cs border px-4 py-3 text-sm print:hidden ${
-          judgeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
+          judgeRun.stopped ? STOPPED_BOX : judgeRun.timedOut ? TIMEOUT_BOX : ERROR_BOX
         }`}
       >
         <div className="flex items-center gap-3">
           <Scale className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>
             <span className="font-semibold">
-              Cross-check ({judgeLabel}){judgeRun.timedOut ? " timed out" : ""}
+              Cross-check ({judgeLabel})
+              {judgeRun.stopped ? " stopped" : judgeRun.timedOut ? " timed out" : ""}
               {tookLabel(progress) ? ` after ${tookLabel(progress)}` : ""}:{" "}
             </span>
-            {judgeRun.message}
+            {judgeRun.stopped
+              ? "No verdict. Run the cross-check again above when you want one."
+              : judgeRun.message}
           </span>
         </div>
         <EventLog progress={progress} />
@@ -556,6 +663,8 @@ function JudgementCard({
               ? `writing the verdict... ${judgeRun.charsReceived.toLocaleString()} characters received.`
               : judgeRun.message
           }`}
+          onStop={onStop}
+          stopTitle="Stop the cross-check - the solutions stay"
         />
       </div>
     );
@@ -643,7 +752,7 @@ function JudgementCard({
           <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
             Verified final answer
           </div>
-          <Prose source={judgement.final_answer} />
+          <MathProse source={judgement.final_answer} />
         </div>
       ) : null}
 
@@ -674,20 +783,17 @@ function JudgementCard({
               <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
                 Why
               </div>
-              <Prose source={judgement.comparison} />
+              <MathProse source={judgement.comparison} />
             </div>
           ) : null}
 
           {judgement.traditional_chinese ? (
-            <div
-              lang="zh-Hant-HK"
-              className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3"
-            >
+            <div className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3">
               <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
                 <Languages className="h-3.5 w-3.5" aria-hidden="true" />
                 繁體中文 · Traditional Chinese
               </div>
-              <Prose source={judgement.traditional_chinese} />
+              <MathProse source={judgement.traditional_chinese} chinese />
             </div>
           ) : null}
         </div>
