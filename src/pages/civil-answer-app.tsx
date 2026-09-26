@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Calculator, History, Loader2, X } from "lucide-react";
+import { InterpretProgress } from "@/components/solve/interpret-progress";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -9,7 +10,7 @@ import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
-import { formatClock, useNow } from "@/lib/progress";
+import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
@@ -107,20 +108,22 @@ export default function CivilAnswerAppPage() {
   // A long solve on a phone: keep the screen from locking while it runs.
   useWakeLock(isSolving || isInterpreting);
 
-  // The interpretation step in progress, with its latest server status and a
-  // running clock, so a slow reader is visibly still working.
+  // The interpretation step in progress: the step, a running clock, and a
+  // line per model, so a slow reader is visibly still working.
   const now = useNow(isInterpreting);
-  const interpretStatus =
-    pipeline.status === "running"
-      ? [
-          pipeline.stage,
-          pipeline.detail,
-          `${formatClock(now - pipeline.startedAt)} elapsed`,
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      : "";
-  const statusMessage = prepStatus || interpretStatus;
+  const statusMessage =
+    prepStatus ||
+    (pipeline.status === "running" ? (
+      <InterpretProgress
+        stage={pipeline.stage}
+        step={pipeline.step}
+        steps={pipeline.steps}
+        models={pipeline.models}
+        elapsedMs={now - pipeline.startedAt}
+      />
+    ) : (
+      ""
+    ));
   const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
 
   function clearRecovered() {

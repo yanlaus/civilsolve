@@ -27,13 +27,27 @@ import {
   type JobHandle,
 } from "@/lib/sse";
 
+/** One model's line in the progress box: who, what it is doing, and whether it is through. */
+export type ModelProgress = {
+  label: string;
+  status: string;
+  state: "working" | "done" | "failed";
+};
+
 export type InterpretPipeline =
   | { status: "idle" }
   | {
       status: "running";
+      /** What this step does: "Reading the question", "Reconciling the two readings". */
       stage: string;
-      /** What each model of this step is doing: its latest status, or how much it has written. */
-      detail?: string;
+      step: number;
+      steps: number;
+      /**
+       * Each model of this step on a line of its own. They were one string
+       * joined with " · " until 26 September 2026, which with two readers
+       * working at once was hard to follow.
+       */
+      models: ModelProgress[];
       /** When this step started, on this page's clock. */
       startedAt: number;
     }
@@ -95,24 +109,40 @@ export function useInterpret() {
       const labelB = nameOf(config.interpreterB);
       const labelV = nameOf(config.verifier);
 
-      // One step shown in the status line: a stage, and a detail per model
-      // running in it ("DeepSeek: writing... 1,200 characters").
+      // One step at a time in the progress box: what the step does, and a
+      // line per model in it ("DeepSeek - writing... 1,200 characters").
       let current: InterpretPipeline & { status: "running" } = {
         status: "running",
         stage: "",
+        step: 1,
+        steps: 2,
+        models: [],
         startedAt: Date.now(),
       };
-      const details = new Map<string, string>();
-      const beginStep = (stage: string) => {
-        details.clear();
-        current = { status: "running", stage, startedAt: Date.now() };
+      const beginStep = (stage: string, step: number, labels: string[]) => {
+        current = {
+          status: "running",
+          stage,
+          step,
+          steps: 2,
+          models: [...new Set(labels)].map((label) => ({ label, status: "starting...", state: "working" })),
+          startedAt: Date.now(),
+        };
         setPipeline(current);
       };
-      const report = (label: string, detail: string | undefined) => {
-        if (detail) details.set(label, detail);
-        else details.delete(label);
-        const detailText = [...details].map(([who, what]) => `${who}: ${what}`).join(" · ");
-        current = { ...current, detail: detailText || undefined };
+      const report = (
+        label: string,
+        detail: string | undefined,
+        state: ModelProgress["state"] = "working",
+      ) => {
+        if (!detail) return;
+        current = {
+          ...current,
+          models: current.models.map((model) =>
+            // A model that is through keeps its last word.
+            model.label === label && model.state === "working" ? { label, status: detail, state } : model,
+          ),
+        };
         setPipeline(current);
       };
 
@@ -137,10 +167,16 @@ export function useInterpret() {
           handle,
           abort.signal,
           say,
-        ).then((result) => {
-          report(label, "done");
-          return result;
-        });
+        ).then(
+          (result) => {
+            report(label, "done", "done");
+            return result;
+          },
+          (error: unknown) => {
+            report(label, failureOf(error).replace(plain, ""), "failed");
+            throw error;
+          },
+        );
       };
 
       // The readers read at the same time: neither needs the other's
@@ -148,11 +184,7 @@ export function useInterpret() {
       // two concurrent streams no longer trip a CPU limit. They ran one after
       // the other until 25 September, which made the pass take the sum of
       // both readers instead of the slower one.
-      beginStep(
-        labelA === labelB
-          ? `Reading the question with ${labelA}...`
-          : `Reading the question with ${labelA} and ${labelB}...`,
-      );
+      beginStep("Reading the question", 1, [labelA, labelB]);
       const readerBody: InterpretRequestBody = {
         mode: "interpret",
         images,
@@ -194,7 +226,7 @@ export function useInterpret() {
       }
 
       try {
-        beginStep(`Cross-checking both readings with ${labelV}...`);
+        beginStep("Reconciling the two readings", 2, [labelV]);
         const verified = await call(config.verifier, {
           mode: "verify",
           images,

@@ -112,7 +112,8 @@ export function UploadForm({
   busyLabel?: string;
   /** True only while provider requests are in flight (image prep excluded). */
   solving: boolean;
-  status: string;
+  /** A line of text, or the interpretation pass's progress box. */
+  status: React.ReactNode;
   error: string;
   onSolve: (submission: SolveSubmission) => void;
   onCancel: () => void;

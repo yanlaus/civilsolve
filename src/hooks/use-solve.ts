@@ -25,6 +25,7 @@ import {
   type ModelVariant,
   type ProviderKey,
 } from "../../shared/providers";
+import type { EffortKey } from "../../shared/prompt";
 import { artifactToText, type ProviderArtifact } from "../../shared/solution";
 import {
   estimateBodyBytes,
@@ -75,10 +76,16 @@ export type ProgressMap = Partial<Record<ProviderKey, Progress>>;
 export type RunVariants = {
   solvers: Partial<Record<ProviderKey, ModelVariant>>;
   judge?: ModelVariant;
+  /** The thinking level the judge was asked for. */
+  judgeEffort?: EffortKey;
 };
 
 function variantsOf(run: SavedRun): RunVariants {
-  return { solvers: { ...(run.variants ?? {}) }, judge: run.judge?.variant };
+  return {
+    solvers: { ...(run.variants ?? {}) },
+    judge: run.judge?.variant,
+    judgeEffort: run.judge?.effort,
+  };
 }
 
 /**
@@ -437,12 +444,12 @@ export function useSolve() {
    * that failed, or whose verdict predates a solver added since.
    */
   const crossCheck = useCallback(
-    (judge: ModelChoice, providers: ProviderKey[]) => {
+    (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey = "high") => {
       const run = runRef.current;
       const body = bodyRef.current;
       if (!run || !body) return;
       const signal = currentSignal();
-      run.judge = { provider: judge.provider, variant: judge.variant };
+      run.judge = { provider: judge.provider, variant: judge.variant, effort };
       setVariants(variantsOf(run));
       persist();
       setJudgeRun({ status: "waiting", judge: judge.provider, message: "Submitting..." });
@@ -642,6 +649,7 @@ async function runJudge({
       notes: body.notes,
       ...(body.interpretation ? { interpretation: body.interpretation } : {}),
       ...(saved.variant ? { variant: saved.variant } : {}),
+      ...(saved.effort ? { effort: saved.effort } : {}),
       solutions: solvers.map((provider) =>
         artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
       ),
