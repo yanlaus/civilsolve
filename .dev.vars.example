@@ -32,6 +32,12 @@ GOOGLE_API_KEY=
 # instead, and this key is then unused.
 MINIMAX_API_KEY=
 
+# --- Sign-in ------------------------------------------------------------------
+# Nothing to set locally. The deployed API only answers users signed in with
+# Cloudflare Access (ACCESS_TEAM_DOMAIN / ACCESS_AUD in wrangler.jsonc, see
+# README.md "Sign-in and rate limiting"); requests to localhost skip that
+# check, so `npm run dev` and `npm run preview` work without it.
+
 # --- Optional local overrides ----------------------------------------------
 # Anything in wrangler.jsonc "vars" can be overridden here for local runs,
 # for example:

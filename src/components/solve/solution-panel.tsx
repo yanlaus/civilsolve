@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Download, Languages, Loader2, Scale, X } from "lucide-react";
+import { Check, CheckCircle2, Download, Languages, Loader2, RotateCw, Scale, X } from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   UNSTABLE_PROVIDERS,
   type ProviderKey,
+  type ProviderStatus,
 } from "../../../shared/providers";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { formatDuration } from "../../../shared/stream-protocol";
@@ -19,6 +20,7 @@ import {
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { formatClock, useNow, type Progress } from "@/lib/progress";
+import { RunActions } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
@@ -137,11 +139,23 @@ export default function SolutionPanel({
   judgeRun,
   progress,
   judgeProgress,
+  providerStatus,
+  canRerun,
+  locked,
+  onSolveProvider,
+  onCrossCheck,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
   progress: ProgressMap;
   judgeProgress: Progress | null;
+  providerStatus: Record<ProviderKey, ProviderStatus> | null;
+  /** Whether the run's images are still at hand, for a retry, another solver or a cross-check. */
+  canRerun: boolean;
+  /** True while the page prepares or reads a new upload. */
+  locked: boolean;
+  onSolveProvider: (provider: ProviderKey) => void;
+  onCrossCheck: (judge: ProviderKey, providers: ProviderKey[]) => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -166,6 +180,12 @@ export default function SolutionPanel({
     userPicked.current = true;
     setActiveProvider(key);
   };
+  // A retried or added solver's tab is where its progress shows.
+  const solveWith = (key: ProviderKey) => {
+    pickProvider(key);
+    onSolveProvider(key);
+  };
+  const judgeBusy = isJudgeActive(judgeRun);
 
   // Auto-activate the first finished provider once, or keep a sensible tab
   // active while the current one has nothing to show yet.
@@ -226,7 +246,12 @@ export default function SolutionPanel({
       </div>
 
       {judgeRun.status !== "idle" ? (
-        <JudgementCard judgeRun={judgeRun} progress={judgeProgress ?? undefined} now={now} />
+        <JudgementCard
+          judgeRun={judgeRun}
+          runs={runs}
+          progress={judgeProgress ?? undefined}
+          now={now}
+        />
       ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-[#e8e3db] bg-white shadow-[0_4px_16px_rgba(27,22,16,0.08)] print:hidden dark:border-[#1e2a40] dark:bg-[#151d2e]">
@@ -353,6 +378,26 @@ export default function SolutionPanel({
                 </div>
                 <div className="mt-1">{activeRun.message}</div>
                 <EventLog progress={activeProgress} />
+                {canRerun ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => solveWith(activeProvider)}
+                      disabled={locked || judgeBusy}
+                      className="inline-flex items-center gap-2 rounded-[10px] border-2 border-current px-3 py-1.5 text-sm font-semibold transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCw className="h-4 w-4" aria-hidden="true" />
+                      Retry {activeLabel}
+                    </button>
+                    {judgeBusy ? (
+                      <span className="text-xs opacity-80">Waits for the cross-check to finish.</span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs opacity-80">
+                    To try again, upload the question again - this browser no longer has its images.
+                  </p>
+                )}
               </div>
             ) : (
               <ProgressBox
@@ -370,6 +415,16 @@ export default function SolutionPanel({
           </div>
         )}
       </div>
+
+      <RunActions
+        runs={runs}
+        judgeRun={judgeRun}
+        providerStatus={providerStatus}
+        canRerun={canRerun}
+        locked={locked}
+        onSolveProvider={solveWith}
+        onCrossCheck={onCrossCheck}
+      />
 
       {/* Hidden on screen; the only visible content when printing (Save as PDF). */}
       {printHtml ? (
@@ -434,10 +489,13 @@ function Assessment({
  */
 function JudgementCard({
   judgeRun,
+  runs,
   progress,
   now,
 }: {
   judgeRun: JudgeRun;
+  /** The solvers now, to tell which finished after this verdict was given. */
+  runs: ProviderRuns;
   progress?: Progress;
   now: number;
 }) {
@@ -484,8 +542,14 @@ function JudgementCard({
     );
   }
 
-  const { judgement, solvers, skipped } = judgeRun;
+  const { judgement, solvers } = judgeRun;
   const labels = solvers.map((provider) => PROVIDER_LABELS[provider]);
+  // A solver retried or added after the verdict: not graded by it, and no
+  // longer "returned no solution" once it has one.
+  const notGraded = PROVIDER_KEYS.filter(
+    (provider) => runs[provider].status === "done" && !solvers.includes(provider),
+  );
+  const skipped = judgeRun.skipped.filter((provider) => runs[provider].status !== "done");
   const headlineTone =
     judgement.correct.length === 0
       ? "text-[#c0392b] dark:text-[#f2b8b2]"
@@ -516,6 +580,13 @@ function JudgementCard({
         <p className="mt-1 text-xs text-[#8a7f72] dark:text-[#a8a098]">
           Not graded: {skipped.map((provider) => PROVIDER_LABELS[provider]).join(", ")} returned
           no solution.
+        </p>
+      ) : null}
+      {notGraded.length ? (
+        <p className="mt-1 text-xs font-medium text-[#a85a12] dark:text-[#f0b878]">
+          Not in this verdict: {notGraded.map((provider) => PROVIDER_LABELS[provider]).join(", ")}{" "}
+          finished after it. Run the cross-check again below to include{" "}
+          {notGraded.length === 1 ? "it" : "them"}.
         </p>
       ) : null}
 

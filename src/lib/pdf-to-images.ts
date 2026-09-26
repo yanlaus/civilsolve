@@ -4,7 +4,6 @@
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-const MAX_PDF_PAGES = 8;
 const RENDER_SCALE = 1.5;
 const JPEG_QUALITY = 0.85;
 
@@ -74,16 +73,40 @@ export async function pdfToNotesPayload(
   }
 }
 
-export async function pdfToImageDataUrls(file: File): Promise<string[]> {
+/** How many pages `file` has, so the form can show it and offer a choice. */
+export async function pdfPageCount(file: File): Promise<number> {
+  const data = await file.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({ data });
+  try {
+    const document_ = await loadingTask.promise;
+    return document_.numPages;
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
+/**
+ * Renders the chosen pages (1-based; every page when `selection` is
+ * omitted). Nothing is dropped quietly: the upload form makes the user pick
+ * pages when a paper is longer than the request can carry, and this renders
+ * exactly what was picked. Until 26 September 2026 it cut every PDF at 8
+ * pages without a word, so a 12-page exam lost its last four pages while the
+ * models answered the rest as if that were all.
+ */
+export async function pdfToImageDataUrls(file: File, selection?: number[]): Promise<string[]> {
   const data = await file.arrayBuffer();
   const loadingTask = pdfjs.getDocument({ data });
   const document_ = await loadingTask.promise;
 
   try {
-    const pageCount = Math.min(document_.numPages, MAX_PDF_PAGES);
+    const wanted =
+      selection ?? Array.from({ length: document_.numPages }, (_, index) => index + 1);
     const pages: string[] = [];
 
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    for (const pageNumber of wanted) {
+      if (pageNumber < 1 || pageNumber > document_.numPages) {
+        throw new Error(`${file.name} has no page ${pageNumber}.`);
+      }
       const page = await document_.getPage(pageNumber);
       const viewport = page.getViewport({ scale: RENDER_SCALE });
       const canvas = document.createElement("canvas");

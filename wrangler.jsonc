@@ -11,6 +11,16 @@
   // Non-secret configuration only. API keys are Wrangler secrets in production
   // and live in .dev.vars locally - never put a key in this file.
   "vars": {
+    // Sign-in (worker/access.ts). Cloudflare Access signs users in at the
+    // edge; the Worker verifies the token Access attaches and refuses every
+    // /api/* request without a valid one. Both come from the Zero Trust
+    // dashboard: the team domain ("yourteam.cloudflareaccess.com") and the
+    // Access application's Audience (AUD) tag. Left empty, the deployed API
+    // is closed to everyone - requests to localhost (npm run dev / preview)
+    // are the only exception. Setup steps are in README.md, "Sign-in".
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+
     // Which upstream account serves each provider.
     // poe | opencode | google (see worker/channels.ts for what each provider
     // actually supports).
@@ -104,6 +114,20 @@
     "bindings": [{ "name": "JOBS", "class_name": "TaskJob" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskJob"] }],
+  // Workers Rate Limiting: at most 20 model-calling requests (solve,
+  // interpret, judge) per signed-in user per minute. One run with every
+  // option on is about a dozen - eight solvers, two readers, a reconciler, a
+  // judge - so this only stops a runaway client, never a real run.
+  // Re-attaching to a job and cancelling one are not counted. The period
+  // can only be 10 or 60 s; the namespace_id is any number unique to this
+  // limiter in the account.
+  "ratelimits": [
+    {
+      "name": "TASK_LIMITER",
+      "namespace_id": "2609",
+      "simple": { "limit": 20, "period": 60 }
+    }
+  ],
   "observability": {
     "enabled": true
   }

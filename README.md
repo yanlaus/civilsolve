@@ -29,7 +29,7 @@ A single **Cloudflare Worker** (free tier) serves everything:
 
 The solve flow is **streaming over Server-Sent Events**, with each task running in a short-lived **job**:
 
-1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js (max 8 pages).
+1. The browser converts uploads to JPEG data URLs client-side (`src/lib/attachments.ts`): images are downscaled on a canvas (max 2048px), PDFs are rasterized page-by-page with pdf.js - every page, or the pages the user chose (see "Upload support").
 2. It fires one `POST /api/solve/:provider` request per ticked provider, all at once.
 3. The Worker validates the request, then hands it to a **`TaskJob` Durable Object** of its own (`worker/jobs.ts`). The job resolves the provider's **channel**, calls that channel's API with **native vision input** (no OCR) and a strict JSON schema, and streams progress back; the stream's first event names the job.
 4. The provider's tab renders progressively — spinner, then live progress, then the finished solution.
@@ -38,7 +38,9 @@ The solve flow is **streaming over Server-Sent Events**, with each task running 
 
 **Every tab shows its progress while it runs:** the latest status, a running clock (time since the request reached the server - the timeout itself is not shown, by the owner's choice), and every earlier status with the time it came - each retry, model switch, timeout of a model in a chain and reconnect - so a long wait is never one unchanging line. A finished tab says how long it took ("answered in 2 min 15 s"). A task that ran out of time gets an **orange** dot and an orange "Timed out - no solution returned" box, apart from the red of a real failure; the cross-check card and the interpretation step show the same clock. Opening a failed or timed-out tab keeps it open: the page only picks a tab for you until you pick one yourself.
 
-**What is stored:** each job's final event - the solution, reading or verdict as text, or its error - and its kind, provider and start time, for **24 hours** after it finishes, then deleted by an alarm. The uploaded images are never written to storage. The job id (a random UUID) is the only key; the browser keeps it in localStorage, and whoever has it can read that answer until it expires.
+**After a run, without uploading again:** a failed, timed-out or cancelled tab has a **Retry** button, and a panel under the solutions offers **Add a solver** (any configured provider not yet in the run) and **Run the cross-check** (again) over the finished solutions you tick, with the judge you pick. All three reuse the run's images, notes, thinking level and confirmed reading. A verdict given before a solver was added or retried says which solutions it did not grade. While an automatic cross-check is still pending they wait for it, and the cross-check waits for every solver still running.
+
+**What is stored:** each job's final event - the solution, reading or verdict as text, or its error - and its kind, provider and start time, for **24 hours** after it finishes, then deleted by an alarm. The uploaded images are never written to server storage. The job id (a random UUID) is the only key; the browser keeps it in localStorage, and whoever has it can read that answer until it expires. The browser also keeps the last run's request body - the prepared page images, notes and confirmed reading - in its own **IndexedDB** (`src/lib/upload-store.ts`), so Retry, Add a solver and the cross-check still work after a reload. That copy never leaves the device; it is replaced by the next run, deleted by **Clear** and **Stop** (the page keeps it in memory after Stop, and a Retry stores it again), and dropped after 24 hours.
 
 ### Providers and channels
 
@@ -115,7 +117,8 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: validation, task endpoints, /api/jobs/:id
+│   ├── index.ts            # Hono app: sign-in check, rate limit, validation, task endpoints, /api/jobs/:id
+│   ├── access.ts           # Cloudflare Access token verification (who may call /api/*)
 │   ├── tasks.ts            # Request body -> task, for solve / interpret / judge
 │   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
@@ -133,18 +136,22 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort, both optional passes
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
 │   │   ├── solution-panel.tsx          # Tabs, streaming states, verdict card, exports (lazy)
+│   │   ├── run-actions.tsx             # Add a solver / run the cross-check after a run (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering
 │   ├── hooks/
-│   │   ├── use-solve.ts                # Per-provider state machine, solvers -> judge, restore
+│   │   ├── use-solve.ts                # Per-provider state machine, solvers -> judge, restore, retry
 │   │   ├── use-interpret.ts            # interpret -> verify -> review
+│   │   ├── use-health.ts               # GET /api/health once for the page; sign-in refusals
 │   │   └── use-wake-lock.ts            # Keep the screen on while a run is in flight
 │   └── lib/
 │       ├── sse.ts                      # SSE reader, job handles, re-attach, resume on return
 │       ├── run-store.ts                # Last run's job ids in localStorage (24 h)
+│       ├── upload-store.ts             # Last run's request body (images) in IndexedDB (24 h)
 │       ├── math-markdown.ts            # Math normalization, sanitize, render
 │       ├── attachments.ts              # File -> JPEG data URL conversion
+│       ├── page-range.ts               # "1-3, 5" -> the PDF pages to send
 │       ├── lecture-notes.ts            # Reference payload from notes files
-│       ├── pdf-to-images.ts            # pdf.js rasterization (dynamic import)
+│       ├── pdf-to-images.ts            # pdf.js page count + rasterization (dynamic import)
 │       └── exports.ts                  # Save as PDF (browser print)
 ├── wrangler.jsonc          # Worker config (assets, vars, run_worker_first)
 ├── .dev.vars.example       # Local secrets template (copy to .dev.vars)
@@ -152,6 +159,8 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 ```
 
 ## API
+
+Every `/api/*` route is for signed-in users only (see "Sign-in and rate limiting" below). Without a valid Cloudflare Access token a route answers `401 {"error": ...}`; with sign-in not configured on the server, `503`. `POST /api/solve`, `/api/interpret` and `/api/judge` are also rate limited per user: past the limit they answer `429` with `retry-after: 60`. The page shows each of these messages as the tab's error.
 
 ### `GET /api/health`
 
@@ -279,11 +288,14 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | Binding | Class | Purpose |
 |---|---|---|
 | `JOBS` | `TaskJob` (`worker/jobs.ts`), SQLite-backed, migration `v1` | One Durable Object per task, so it finishes after the page leaves and keeps its answer 24 hours. Available on Workers Free and Paid; each job is billed for the time it is active (≈ 128 MB × run time), comfortably inside the Paid plan's 400,000 GB-s a month. Remove it and tasks run inline again |
+| `TASK_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2609`) | 20 model-calling requests (solve, interpret, judge) per signed-in user per minute. A whole run with every option on is about a dozen, so it only stops a runaway client. Re-attaching and cancelling are not counted. Remove it and nothing is limited |
 
 ### Vars (in `wrangler.jsonc`, non-secret)
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `ACCESS_TEAM_DOMAIN` | *(empty)* | Zero Trust team domain, e.g. `yourteam.cloudflareaccess.com`. Empty: the deployed API refuses everything (see "Sign-in and rate limiting") |
+| `ACCESS_AUD` | *(empty)* | The Access application's Audience (AUD) tag |
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `google` | `google` or `poe` |
@@ -378,6 +390,21 @@ npm run deploy     # vite build && wrangler deploy
 
 The app deploys to `https://civilsolve.<account>.workers.dev`.
 
+### Sign-in and rate limiting
+
+The app spends the owner's provider subscriptions, so only people you allow can use it. **Cloudflare Access** signs them in at Cloudflare's edge, before anything reaches the Worker, and the Worker checks the proof Access attaches to every request (`worker/access.ts`): an RS256 JWT in the `Cf-Access-Jwt-Assertion` header, verified against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`) for its signature, audience, issuer and expiry. A request that reaches the Worker without passing Access - a hostname Access does not cover, such as a preview URL, or an Access application that was removed - is refused with `401`, so no provider key is spent on it. With `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` empty the deployed API refuses everything with `503`: it fails closed. Requests to `localhost` (`npm run dev`, `npm run preview`) are the one exception, since Access never sees them; Cloudflare routes by hostname, so no request to the deployed Worker can pass for one.
+
+Set it up **before** deploying this version:
+
+1. In the Cloudflare dashboard, open **Workers & Pages → civilsolve → Settings → Domains & Routes** and enable **Cloudflare Access** on the `workers.dev` route (and on Preview URLs, if they are on). This creates an Access application for the Worker. For a custom domain, add a self-hosted Access application for that hostname in **Zero Trust → Access → Applications** instead.
+2. In **Zero Trust → Access → Applications**, edit that application's policy to allow exactly the people who may use the app (for example *Emails* `you@example.com`, or *Emails ending in* your school's domain). The One-time PIN login method needs no identity provider. Set the **session duration** to 24 hours or more, so a long solve does not outlive the sign-in.
+3. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`, under Zero Trust → Settings) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`, then `npm run deploy`.
+4. Check: opening the app in a private window should show the Access login; `curl -i https://civilsolve.<account>.workers.dev/api/health` should not return the provider list.
+
+A sign-in that expires in the middle of a run makes Access redirect the page's requests to its login page, which the browser reports as a network error; the page keeps reconnecting for 2 minutes and then asks for a reload, which signs in again and picks the run back up (its job ids are saved).
+
+**Rate limiting** is the `TASK_LIMITER` binding (Workers Rate Limiting, `ratelimits` in `wrangler.jsonc`): 20 solve, interpret and judge requests per signed-in user per minute, counted per Cloudflare location. A whole run with every option on is about a dozen, so this only stops a runaway client or script; past it the request gets `429` and the tab says to wait a minute. The period can only be 10 or 60 seconds. Re-attaching to a job (`GET /api/jobs/:id`) and cancelling one are not counted - they call no model.
+
 The account is on **Workers Paid** ($5/month) since 22 September 2026, which raises CPU per invocation from 10 ms to 30 s (the default; `limits.cpu_ms` in `wrangler.jsonc` goes to 5 min). Measured on production the same day: MiMo streamed B.8 1,424 ms `ok`; DeepSeek streamed B.8 3,201 ms `ok` in 77 s (the free plan killed it at 63 s); DeepSeek as interpretation judge 1,906 ms `ok`. Nothing else in the plan matters here: a solve is at most 5 requests, static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive. Everything below this line was written against the free plan and is kept because it explains why the code is shaped the way it is — the single-choice picker, the sequential interpretation pass, `NO_STREAM` — and what to re-enable if the account ever drops back.
 
 **Piping the provider stream is I/O-wait, but the upload is not.** Each selected provider gets its own copy of the images, and each Worker invocation parses that JSON body and re-serializes it into the upstream request — two full passes over several megabytes, all of it counted as CPU. That is why the body cap is enforced early and why the browser blocks oversized batches before sending. If you raise `MAX_IMAGES` or `MAX_BODY_BYTES` in `shared/stream-protocol.ts`, measure CPU time per invocation before assuming it still fits.
@@ -392,6 +419,8 @@ Deduplicating the N uploads would need either server-side storage or a single fa
 
 Accepted: JPEG, PNG, WebP, GIF, PDF. HEIC/HEIF/TIFF are no longer accepted (the old server normalized them with ImageMagick; browsers cannot decode them on a canvas). iOS converts HEIC to JPEG automatically when picking photos, so iPhone uploads still work.
 
+**PDFs: every page is sent, or the pages you choose.** When a PDF is added, the form reads its page count and shows it on the file's card, with a field for the pages to send (`1-3, 5`, `8-`; empty means every page). Each image counts one page, and one request carries at most 16 (`MAX_IMAGES`); past that the form says how many pages it has and will not solve until you choose. Until 26 September 2026 every PDF was cut to its first 8 pages without a word, so a 12-page paper lost its last four while the models answered the rest as if that were all. Lecture-notes PDFs are handled separately (`pdfToNotesPayload`): text pages are sent as text, and at most 8 image pages.
+
 ## Provider output safety
 
 Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes (every problem kept under its own heading, with steps, givens and formulas accepted as lists or objects - a whole exam paper comes back this way from models that ignore the schema), `<think>` reasoning left in the content, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, and LaTeX-body-preferred display repair. A provider failure only fails that provider's tab.
@@ -401,6 +430,7 @@ Model output is also **untrusted input** — the uploaded images are user-suppli
 ## Maintenance rules
 
 - Keep provider keys server-side only. No key ever reaches the client, and no key ever goes in a URL or query string.
+- Keep every `/api/*` route behind the Access check in `worker/index.ts`, and keep it failing closed when sign-in is not configured.
 - Keep `/api/solve/:provider` streaming — the immediate SSE response is what makes long solves survivable on Workers.
 - Do not turn one provider's failure into a whole-solve failure.
 - Keep `delta` events limited to visible output; never forward reasoning/thinking fragments.
