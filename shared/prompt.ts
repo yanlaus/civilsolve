@@ -86,6 +86,29 @@ const READING_FORMAT = [
   "- No headings, no backticks, no code blocks.",
 ];
 
+/** What a re-generation adds to a prompt: the last version and the user's instructions. */
+export type RevisionExtras = { previous: string; instructions: string };
+
+/**
+ * The user reviewed `what` and asked for changes. Their instructions lead;
+ * the previous version is there to build on, not to copy - the point of a
+ * re-generation is usually that something in it was wrong.
+ */
+function revisionSection(what: string, explainIn: string, revision: RevisionExtras) {
+  return [
+    "",
+    `This is a re-generation. You already wrote the ${what} below; the user reviewed it and asks for changes. Follow the user's instructions. If one contradicts the attached images or the engineering, do what the images and the engineering require and explain why in ${explainIn}.`,
+    "Re-check against the images whatever the instructions question - do not copy the previous version where it may be wrong - and keep what was right.",
+    `Return the complete revised ${what} in every field, not only the changes.`,
+    "",
+    "User's instructions:",
+    revision.instructions,
+    "",
+    `Previous ${what}:`,
+    revision.previous,
+  ];
+}
+
 export type TutorPromptExtras = {
   /** Human-confirmed problem statement from the interpretation pipeline. */
   interpretation?: string;
@@ -95,6 +118,8 @@ export type TutorPromptExtras = {
   hasReferenceImages?: boolean;
   /** Append the literal field list, for channels that cannot enforce a schema. */
   enforceShape?: boolean;
+  /** A re-generation of an earlier solution, with the user's instructions. */
+  revision?: RevisionExtras;
 };
 
 export function buildTutorPrompt(
@@ -162,6 +187,10 @@ export function buildTutorPrompt(
     "- Do not use CJK prose such as 代入, 結果, 已知, or 所求 unless the user explicitly requests a Chinese answer.",
   );
 
+  if (extras.revision) {
+    sections.push(...revisionSection("solution", "`assumptions`", extras.revision));
+  }
+
   if (extras.enforceShape) {
     sections.push(
       ...shapeContract(SOLUTION_FIELDS),
@@ -200,6 +229,54 @@ export function buildInterpretPrompt(
   return sections.join("\n");
 }
 
+/** The reconciler's Traditional Chinese version of the whole reading. */
+const CHINESE_READING =
+  "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, each part opening with a bold label on a line of its own (**題目：**, **圖示：**, **已知：**, **所求：**). Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep the figure's own labels (such as Fig. B.8b) as they are, and write every number with its unit, symbol, variable name and formula exactly as in the English fields, in the same `$...$` math, for example `$W = 0.5\\,\\text{kN}$`, `$P_A$`, `$30^\\circ$`. Every other field stays in English.";
+
+/**
+ * A reading re-generated after review: the reading as the user left it (with
+ * their edits), what they want changed, and - when there were two - the
+ * readings it was reconciled from. Same output as the reconciler's.
+ */
+export function buildReviseReadingPrompt(
+  userNotes: string,
+  current: string,
+  instructions: string,
+  readings: [string, string] | null,
+  options?: { enforceShape?: boolean },
+) {
+  const sections = [
+    "The attached civil engineering assignment images were read, and the reading below came out of it. The user reviewed it - and may have edited it - and asks for changes. Your job is to produce ONE corrected, authoritative reading that follows the user's instructions - do NOT solve the problem.",
+    "Re-inspect the images yourself. Follow the user's instructions; where one contradicts what the images show, keep what the images show and say so. Keep everything in the current reading that is right.",
+    "In the `discrepancies` field, list what you changed from the current reading and why (or state that nothing needed to change).",
+    CHINESE_READING,
+    ...READING_FORMAT,
+    "Return JSON matching the required schema exactly.",
+    "",
+    "User's instructions:",
+    instructions,
+    "",
+    "Current reading:",
+    current,
+  ];
+  if (readings) {
+    sections.push(
+      "",
+      "The two independent readings it was reconciled from, for reference:",
+      "Reading A:",
+      readings[0],
+      "",
+      "Reading B:",
+      readings[1],
+    );
+  }
+  sections.push("", userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]");
+  if (options?.enforceShape) {
+    sections.push(...shapeContract(VERIFIED_INTERPRETATION_FIELDS));
+  }
+  return sections.join("\n");
+}
+
 export function buildVerifyPrompt(
   userNotes: string,
   interpretationA: string,
@@ -213,7 +290,7 @@ export function buildVerifyPrompt(
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
-    "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, each part opening with a bold label on a line of its own (**題目：**, **圖示：**, **已知：**, **所求：**). Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep the figure's own labels (such as Fig. B.8b) as they are, and write every number with its unit, symbol, variable name and formula exactly as in the English fields, in the same `$...$` math, for example `$W = 0.5\\,\\text{kN}$`, `$P_A$`, `$30^\\circ$`. Every other field stays in English.",
+    CHINESE_READING,
     ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
     "",
@@ -237,6 +314,8 @@ export type JudgePromptExtras = {
   /** Human-confirmed problem statement from the interpretation pass. */
   interpretation?: string;
   enforceShape?: boolean;
+  /** A re-generation of an earlier verdict, with the user's instructions. */
+  revision?: RevisionExtras;
 };
 
 /**
@@ -288,6 +367,10 @@ export function buildJudgePrompt(
   solutions.forEach((solution, index) => {
     sections.push("", `Solution ${letters[index]}:`, solution);
   });
+
+  if (extras.revision) {
+    sections.push(...revisionSection("verdict", "`comparison`", extras.revision));
+  }
 
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic

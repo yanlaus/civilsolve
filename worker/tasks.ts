@@ -16,6 +16,7 @@ import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared
 import {
   buildInterpretPrompt,
   buildJudgePrompt,
+  buildReviseReadingPrompt,
   buildTutorPrompt,
   buildVerifyPrompt,
   INTERPRET_INSTRUCTIONS,
@@ -37,6 +38,7 @@ import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import {
   DATA_URL_PATTERN,
   MAX_IMAGES,
+  MAX_INSTRUCTIONS_LENGTH,
   MAX_INTERPRETATION_LENGTH,
   MAX_NOTES_LENGTH,
   MAX_REFERENCE_IMAGES,
@@ -73,6 +75,25 @@ function readImages(value: unknown, max: number, label: string): ImagesResult {
 
 function readText(value: unknown, limit: number) {
   return typeof value === "string" ? value.slice(0, limit).trim() : "";
+}
+
+/**
+ * A re-generation's extra context (`revision`): the last version and the
+ * user's instructions, both required when the field is there. Undefined when
+ * it is not.
+ */
+function readRevision(
+  value: unknown,
+  previousLimit: number,
+): { revision?: { previous: string; instructions: string } } | { error: string } {
+  if (value === undefined || value === null) return {};
+  const record = value as Record<string, unknown>;
+  const previous = readText(record?.previous, previousLimit);
+  const instructions = readText(record?.instructions, MAX_INSTRUCTIONS_LENGTH);
+  if (!previous || !instructions) {
+    return { error: "A re-generation needs the previous version and your instructions." };
+  }
+  return { revision: { previous, instructions } };
 }
 
 /** The assignment images every task needs: 1 to MAX_IMAGES data URLs. */
@@ -132,6 +153,8 @@ function buildSolve(
     typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
   const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
   const referenceText = readText(body.referenceText, MAX_REFERENCE_TEXT);
+  const revised = readRevision(body.revision, MAX_SOLUTION_TEXT);
+  if ("error" in revised) return { error: revised.error, status: 400 };
 
   return {
     params: {
@@ -147,6 +170,7 @@ function buildSolve(
             interpretation: interpretation || undefined,
             referenceText: referenceText || undefined,
             hasReferenceImages: reference.images.length > 0,
+            revision: revised.revision,
           }),
         instructions: SOLVE_INSTRUCTIONS,
         schemaName: "civil_solution",
@@ -171,12 +195,25 @@ function buildInterpret(
   if ("error" in assignment) return { error: assignment.error, status: 400 };
 
   const notes = readText(body.notes, MAX_NOTES_LENGTH);
-  const mode = body.mode === "verify" ? "verify" : "interpret";
+  const mode = body.mode === "verify" || body.mode === "revise" ? body.mode : "interpret";
   const requestedEffort: EffortKey | null =
     typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : null;
 
   let buildPrompt: (options: { enforceShape: boolean }) => string;
-  if (mode === "verify") {
+  if (mode === "revise") {
+    // The reading under review, re-generated with the user's instructions.
+    const current = readText(body.current, MAX_INTERPRETATION_LENGTH);
+    const instructions = readText(body.instructions, MAX_INSTRUCTIONS_LENGTH);
+    if (!current || !instructions) {
+      return { error: "Re-generating a reading needs the reading and your instructions.", status: 400 };
+    }
+    const [a, b] = Array.isArray(body.interpretations) ? body.interpretations : [];
+    const readings: [string, string] | null =
+      typeof a === "string" && typeof b === "string" && a.trim() && b.trim()
+        ? [a.slice(0, MAX_INTERPRETATION_LENGTH), b.slice(0, MAX_INTERPRETATION_LENGTH)]
+        : null;
+    buildPrompt = (options) => buildReviseReadingPrompt(notes, current, instructions, readings, options);
+  } else if (mode === "verify") {
     const interpretations = Array.isArray(body.interpretations) ? body.interpretations : [];
     const [a, b] = interpretations;
     if (typeof a !== "string" || typeof b !== "string" || !a.trim() || !b.trim()) {
@@ -207,15 +244,16 @@ function buildInterpret(
       // owner's pass, while "high" took 69-75 s and kept every key fact of
       // the diagram in both runs (26 September 2026). The form sends each
       // model's level explicitly; these defaults are for callers that do not.
-      effort: requestedEffort ?? (mode === "verify" ? "high" : "medium"),
+      effort: requestedEffort ?? (mode === "interpret" ? "medium" : "high"),
       task: {
         session: crypto.randomUUID(),
         prompt: buildPrompt,
         instructions: INTERPRET_INSTRUCTIONS,
         // The reconciler also writes the reading in Traditional Chinese, for
         // the review step; the readers only need English.
-        schemaName: mode === "verify" ? "civil_verified_interpretation" : "civil_interpretation",
-        schema: (mode === "verify"
+        // A revised reading is a reconciled one: same fields, Chinese included.
+        schemaName: mode === "interpret" ? "civil_interpretation" : "civil_verified_interpretation",
+        schema: (mode !== "interpret"
           ? verifiedInterpretationSchema
           : interpretationSchema) as unknown as Record<string, unknown>,
         images: assignment.images,
@@ -257,6 +295,8 @@ function buildJudge(
   const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
   const effort: EffortKey =
     typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "high";
+  const revised = readRevision(body.revision, MAX_SOLUTION_TEXT);
+  if ("error" in revised) return { error: revised.error, status: 400 };
 
   return {
     params: {
@@ -270,6 +310,7 @@ function buildJudge(
           buildJudgePrompt(notes, solutions, {
             enforceShape,
             interpretation: interpretation || undefined,
+            revision: revised.revision,
           }),
         instructions: JUDGE_INSTRUCTIONS,
         schemaName: "civil_judgement",

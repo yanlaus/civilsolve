@@ -199,3 +199,22 @@ export function parseJudgement(
 
   return result;
 }
+
+/**
+ * A verdict as text, for the judge to build on when the user asks for it
+ * again: which solutions it found correct, its verified answer, each
+ * assessment and its reasoning.
+ */
+export function judgementToText(judgement: JudgementResult, count: number) {
+  const letter = (index: number) => SOLUTION_LETTERS[index] ?? String(index + 1);
+  return [
+    `Correct solutions: ${judgement.correct.map(letter).join(", ") || "none"} (confidence: ${judgement.confidence})`,
+    judgement.final_answer ? `Verified final answer:\n${judgement.final_answer}` : "",
+    ...Array.from({ length: count }, (_, index) =>
+      judgement.assessments[index] ? `Assessment of Solution ${letter(index)}:\n${judgement.assessments[index]}` : "",
+    ),
+    judgement.comparison ? `Why:\n${judgement.comparison}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}

@@ -8,6 +8,16 @@ import type { EffortKey } from "./prompt";
 import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
 
+/**
+ * A re-generation: the version the model wrote last time, as text, and what
+ * the user wants changed after reviewing it. It goes on top of everything the
+ * first request carried, and the model writes a complete new version.
+ */
+export type RevisionRequest = {
+  previous: string;
+  instructions: string;
+};
+
 export type SolveRequestBody = {
   images: string[]; // data:image/...;base64,... (uploads + rasterized PDF pages)
   notes: string;
@@ -19,14 +29,20 @@ export type SolveRequestBody = {
   referenceImages?: string[];
   /** Which of the provider's models, when it offers several (Gemini: flash or pro). */
   variant?: ModelVariant;
+  /** Set when the user asked for this solution again, with instructions. */
+  revision?: RevisionRequest;
 };
 
 export type InterpretRequestBody = {
-  mode: "interpret" | "verify";
+  /** "revise": the user's instructions applied to the reading under review. */
+  mode: "interpret" | "verify" | "revise";
   images: string[];
   notes: string;
-  /** Verify mode: the two candidate interpretations to reconcile. */
+  /** Verify mode: the two candidate interpretations to reconcile. Revise mode: optional, for context. */
   interpretations?: [string, string];
+  /** Revise mode: the reading under review (with the user's edits) and what to change. */
+  current?: string;
+  instructions?: string;
   /** Reasoning level. Defaults to "medium" for readers and "max" for the judge. */
   effort?: EffortKey;
   /** Which of the provider's models, when it offers several. */
@@ -49,6 +65,8 @@ export type JudgeRequestBody = {
   effort?: EffortKey;
   /** Which of the provider's models, when it offers several. */
   variant?: ModelVariant;
+  /** Set when the user asked for the verdict again, with instructions. */
+  revision?: RevisionRequest;
 };
 
 /**
@@ -108,6 +126,8 @@ export const MAX_REFERENCE_TEXT = 20_000;
 export const MAX_INTERPRETATION_LENGTH = 8_000;
 /** Per candidate solution sent to the judge; longer ones are cut, working first. */
 export const MAX_SOLUTION_TEXT = 24_000;
+/** The user's instructions for a re-generation. */
+export const MAX_INSTRUCTIONS_LENGTH = 4_000;
 
 export const DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 
@@ -129,6 +149,7 @@ export function estimateBodyBytes(body: {
   referenceText?: string;
   referenceImages?: string[];
   solutions?: string[];
+  revision?: RevisionRequest;
 }) {
   let total = 128; // envelope and field names
   for (const image of [...body.images, ...(body.referenceImages || [])]) {
@@ -138,7 +159,8 @@ export function estimateBodyBytes(body: {
     body.notes +
     (body.interpretation || "") +
     (body.referenceText || "") +
-    (body.solutions ? body.solutions.join("") : "");
+    (body.solutions ? body.solutions.join("") : "") +
+    (body.revision ? body.revision.previous + body.revision.instructions : "");
   return total + text.length * 3;
 }
 

@@ -19,9 +19,18 @@
 //
 // Every solver and the judge can be stopped on its own (stopProvider,
 // stopJudge), the rest carrying on; cancel() stops them all.
+//
+// A finished solution or verdict can be asked for again with the user's
+// instructions (refineProvider, refineVerdict): the model gets everything the
+// first request had, plus its last version and the instructions. The last
+// version stays on the page if the re-generation fails or is stopped.
 
 import { useCallback, useRef, useState } from "react";
-import { MAX_JUDGED_SOLUTIONS, type JudgementResult } from "../../shared/judgement";
+import {
+  judgementToText,
+  MAX_JUDGED_SOLUTIONS,
+  type JudgementResult,
+} from "../../shared/judgement";
 import {
   PROVIDER_KEYS,
   PROVIDER_LABELS,
@@ -36,6 +45,7 @@ import {
   MAX_BODY_BYTES,
   MAX_SOLUTION_TEXT,
   type JudgeRequestBody,
+  type RevisionRequest,
   type SolveRequestBody,
 } from "../../shared/stream-protocol";
 import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
@@ -67,8 +77,19 @@ export type ProviderRun =
   | { status: "idle" }
   | { status: "waiting"; message: string }
   | { status: "streaming"; charsReceived: number }
-  /** `model`: the model that answered - after a switch down a chain, not the one picked. */
-  | { status: "done"; solution: ProviderArtifact; model?: string }
+  /**
+   * `model`: the model that answered - after a switch down a chain, not the
+   * one picked. `revisedWith`: the user's instructions, when this version was
+   * re-generated with them. `notice`: why a re-generation left this version
+   * in place (it failed, or was stopped).
+   */
+  | {
+      status: "done";
+      solution: ProviderArtifact;
+      model?: string;
+      revisedWith?: string;
+      notice?: string;
+    }
   /**
    * `timedOut`: the task ran out of time and returned nothing (an orange dot,
    * not red). `stopped`: the user stopped it (grey) - nothing went wrong.
@@ -84,8 +105,24 @@ const STOPPED_RUN: ProviderRun = { status: "error", message: "You stopped this s
  */
 export type ConfirmedInterpretation = InterpretationExtras & { text: string };
 
-/** A solver or judge in flight: what its Stop needs to end it. */
-type RunningTask = { handle: JobHandle; abort: AbortController; tracker: ProgressTracker };
+/**
+ * A solver or judge in flight: what its Stop needs to end it. `onStop`, on a
+ * re-generation, puts the previous version back instead of showing "stopped".
+ */
+type RunningTask = {
+  handle: JobHandle;
+  abort: AbortController;
+  tracker: ProgressTracker;
+  onStop?: () => void;
+};
+
+type DoneRun = Extract<ProviderRun, { status: "done" }>;
+
+/** What a re-generation adds to a request, and the version it falls back to. */
+type Refinement<T> = { revision: RevisionRequest; previous: T };
+
+/** Which version of each solver's solution is on the page: 1 for its first answer, +1 per new one. */
+export type SolutionVersions = Partial<Record<ProviderKey, number>>;
 
 export type ProviderRuns = Record<ProviderKey, ProviderRun>;
 
@@ -127,10 +164,21 @@ export type JudgeRun =
       solvers: ProviderKey[];
       skipped: ProviderKey[];
       judgement: JudgementResult;
+      /** The solutions' versions when they were sent: one re-generated since is not in this verdict. */
+      versions?: SolutionVersions;
+      revisedWith?: string;
+      notice?: string;
     }
   | { status: "error"; judge: ProviderKey; message: string; timedOut?: boolean; stopped?: boolean };
 
 const JUDGE_STOPPED = "You stopped the cross-check.";
+
+type DoneJudge = Extract<JudgeRun, { status: "done" }>;
+
+/** A message to go mid-sentence: "... did not work: HTTP 500. This is ..." */
+function withoutFullStop(message: string) {
+  return message.trim().replace(/[.。]+$/, "");
+}
 
 const IDLE_RUNS = Object.fromEntries(
   PROVIDER_KEYS.map((key) => [key, { status: "idle" } as ProviderRun]),
@@ -176,6 +224,11 @@ export function useSolve() {
   const [judgeProgress, setJudgeProgress] = useState<Progress | null>(null);
   const [variants, setVariants] = useState<RunVariants>({ solvers: {} });
   const [interpretation, setInterpretation] = useState<ConfirmedInterpretation | null>(null);
+  const [solutionVersions, setSolutionVersions] = useState<SolutionVersions>({});
+  const versionsRef = useRef<SolutionVersions>({});
+  /** Each solver's finished version, and the verdict's: what a re-generation starts from. */
+  const doneRef = useRef(new Map<ProviderKey, DoneRun>());
+  const judgeDoneRef = useRef<DoneJudge | null>(null);
   /** Whether the run's request body is at hand, so it can be sent again. */
   const [canRerun, setCanRerun] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -238,6 +291,10 @@ export function useSolve() {
     // Their clocks stop where they were, for "stopped after 1:20".
     for (const task of tasksRef.current.values()) task.tracker.end();
     judgeTaskRef.current?.tracker.end();
+    // Re-generations in flight go back to the version they started from.
+    const restores = [...tasksRef.current.values(), judgeTaskRef.current].flatMap((task) =>
+      task?.onStop ? [task.onStop] : [],
+    );
     stopCurrent();
     clearRun();
     void clearBody();
@@ -254,6 +311,7 @@ export function useSolve() {
         ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
         : current,
     );
+    for (const restore of restores) restore();
   }, [stopCurrent]);
 
   /**
@@ -266,9 +324,12 @@ export function useSolve() {
     tasksRef.current.delete(provider);
     task.tracker.end();
     stopTask(task.handle, task.abort);
-    setRuns((current) =>
-      isRunActive(current[provider]) ? { ...current, [provider]: STOPPED_RUN } : current,
-    );
+    if (task.onStop) task.onStop();
+    else {
+      setRuns((current) =>
+        isRunActive(current[provider]) ? { ...current, [provider]: STOPPED_RUN } : current,
+      );
+    }
   }, []);
 
   /** The cross-check's Stop: the solutions stay, and it can be run again. */
@@ -278,11 +339,14 @@ export function useSolve() {
     judgeTaskRef.current = null;
     task.tracker.end();
     stopTask(task.handle, task.abort);
-    setJudgeRun((current) =>
-      isJudgeActive(current)
-        ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
-        : current,
-    );
+    if (task.onStop) task.onStop();
+    else {
+      setJudgeRun((current) =>
+        isJudgeActive(current)
+          ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
+          : current,
+      );
+    }
   }, []);
 
   /** Clears the page and forgets the saved run and its images (after a recovery, say). */
@@ -301,6 +365,10 @@ export function useSolve() {
     setVariants({ solvers: {} });
     extrasRef.current = undefined;
     setInterpretation(null);
+    versionsRef.current = {};
+    setSolutionVersions({});
+    doneRef.current = new Map();
+    judgeDoneRef.current = null;
   }, [stopCurrent, setBody]);
 
   /**
@@ -310,7 +378,12 @@ export function useSolve() {
    * server says so and waits for a Retry.
    */
   const solveOne = useCallback(
-    async (context: RunContext, provider: ProviderKey, body: SolveRequestBody | null) => {
+    async (
+      context: RunContext,
+      provider: ProviderKey,
+      body: SolveRequestBody | null,
+      refinement?: Refinement<DoneRun>,
+    ) => {
       const { run, signal, solutions } = context;
       const known = run.solveJobs[provider];
       const handle = jobHandle(known ?? null);
@@ -318,10 +391,34 @@ export function useSolve() {
       const own = childController(signal);
       // Nothing more is shown for a solver once it was stopped.
       const live = () => !own.signal.aborted && !handle.stopped;
+      // A re-generation that fails leaves the version it started from.
+      const previous = refinement ? { ...refinement.previous, notice: undefined } : null;
+      const show = (next: ProviderRun) => {
+        if (next.status === "done") doneRef.current.set(provider, next);
+        setRuns((current) => ({ ...current, [provider]: next }));
+      };
       const update = (_provider: ProviderKey, next: ProviderRun) => {
         if (!live()) return;
-        if (next.status === "done") solutions.set(provider, next.solution);
-        setRuns((current) => ({ ...current, [provider]: next }));
+        if (next.status === "error" && previous) {
+          show({
+            ...previous,
+            notice: next.stopped
+              ? "The re-generation was stopped. This is the previous version."
+              : `Re-generating did not work: ${withoutFullStop(next.message)}. This is the previous version.`,
+          });
+          return;
+        }
+        if (next.status === "done") {
+          solutions.set(provider, next.solution);
+          versionsRef.current = {
+            ...versionsRef.current,
+            [provider]: (versionsRef.current[provider] ?? 0) + 1,
+          };
+          setSolutionVersions(versionsRef.current);
+          show(refinement ? { ...next, revisedWith: refinement.revision.instructions } : next);
+          return;
+        }
+        show(next);
       };
 
       if (body === null && !known) {
@@ -339,13 +436,38 @@ export function useSolve() {
         run.solveJobs[provider] = id;
         persist();
       };
-      // The one field that differs per provider: which of its models to run.
+      // The fields that differ per provider: which of its models to run, and
+      // for a re-generation, its last version and the user's instructions.
       const variant = run.variants?.[provider];
-      const sent = body && variant ? { ...body, variant } : body;
+      const sent = body
+        ? {
+            ...body,
+            ...(variant ? { variant } : {}),
+            ...(refinement ? { revision: refinement.revision } : {}),
+          }
+        : null;
       const tracker = trackProgress((next) => {
         if (live()) setProgress((current) => ({ ...current, [provider]: next }));
       });
-      const task: RunningTask = { handle, abort: own, tracker };
+      const task: RunningTask = {
+        handle,
+        abort: own,
+        tracker,
+        onStop: previous
+          ? () =>
+              setRuns((current) =>
+                isRunActive(current[provider])
+                  ? {
+                      ...current,
+                      [provider]: {
+                        ...previous,
+                        notice: "You stopped the re-generation. This is the previous version.",
+                      },
+                    }
+                  : current,
+              )
+          : undefined,
+      };
       tasksRef.current.set(provider, task);
       try {
         // A dropped connection - on a phone, usually the browser being put
@@ -380,24 +502,45 @@ export function useSolve() {
 
   /** Sends (or re-attaches to) the run's cross-check; `chosen` picks the solutions. */
   const judgeOne = useCallback(
-    (context: RunContext, body: SolveRequestBody | null, chosen?: ProviderKey[]) =>
-      runJudge({
+    (
+      context: RunContext,
+      body: SolveRequestBody | null,
+      chosen?: ProviderKey[],
+      refinement?: Refinement<DoneJudge>,
+    ) => {
+      const previous = refinement ? { ...refinement.previous, notice: undefined } : null;
+      return runJudge({
         ...context,
         body,
         chosen,
         canSendLater: bodyRef.current !== null,
         handles: handlesRef.current,
+        revision: refinement?.revision,
+        previous,
+        versions: () => ({ ...versionsRef.current }),
         register: (task) => {
-          judgeTaskRef.current = task;
+          judgeTaskRef.current = {
+            ...task,
+            onStop: previous
+              ? () =>
+                  setJudgeRun({
+                    ...previous,
+                    notice: "You stopped the re-generation. This is the previous verdict.",
+                  })
+              : undefined,
+          };
         },
         persist,
         setJudgeRun: (next) => {
-          if (!context.signal.aborted) setJudgeRun(next);
+          if (context.signal.aborted) return;
+          if (next.status === "done") judgeDoneRef.current = next;
+          setJudgeRun(next);
         },
         setJudgeProgress: (next) => {
           if (!context.signal.aborted) setJudgeProgress(next);
         },
-      }),
+      });
+    },
     [persist],
   );
 
@@ -413,6 +556,10 @@ export function useSolve() {
       const signal = currentSignal();
       runRef.current = run;
       solutionsRef.current = new Map();
+      doneRef.current = new Map();
+      judgeDoneRef.current = null;
+      versionsRef.current = {};
+      setSolutionVersions({});
       const context: RunContext = { run, signal, solutions: solutionsRef.current };
       persist();
       setProgress({});
@@ -527,6 +674,64 @@ export function useSolve() {
   );
 
   /**
+   * One finished solution again, with the user's instructions: the same
+   * model gets the run's body - images, notes, lecture notes, confirmed
+   * reading - plus its last version and the instructions, and writes a
+   * complete new version. The last one stays if this fails or is stopped.
+   */
+  const refineProvider = useCallback(
+    (provider: ProviderKey, instructions: string) => {
+      const run = runRef.current;
+      const body = bodyRef.current;
+      const previous = doneRef.current.get(provider);
+      const wanted = instructions.trim();
+      if (!run || !body || !previous || !wanted) return;
+      const signal = currentSignal();
+      delete run.solveJobs[provider];
+      persist();
+      setRuns((current) => ({
+        ...current,
+        [provider]: { status: "waiting", message: "Sending your instructions..." },
+      }));
+      void solveOne({ run, signal, solutions: solutionsRef.current }, provider, body, {
+        revision: {
+          previous: artifactToText(previous.solution, MAX_SOLUTION_TEXT),
+          instructions: wanted,
+        },
+        previous,
+      });
+    },
+    [currentSignal, persist, solveOne],
+  );
+
+  /**
+   * The verdict again, with the user's instructions: the same judge, at the
+   * same level, over the same solvers' solutions as they are now, with its
+   * last verdict and the instructions.
+   */
+  const refineVerdict = useCallback(
+    (instructions: string) => {
+      const run = runRef.current;
+      const body = bodyRef.current;
+      const previous = judgeDoneRef.current;
+      const wanted = instructions.trim();
+      if (!run || !body || !previous || !run.judge || !wanted) return;
+      const signal = currentSignal();
+      run.judge = { provider: run.judge.provider, variant: run.judge.variant, effort: run.judge.effort };
+      persist();
+      setJudgeRun({ status: "waiting", judge: previous.judge, message: "Sending your instructions..." });
+      void judgeOne({ run, signal, solutions: solutionsRef.current }, body, previous.solvers, {
+        revision: {
+          previous: judgementToText(previous.judgement, previous.solvers.length),
+          instructions: wanted,
+        },
+        previous,
+      });
+    },
+    [currentSignal, persist, judgeOne],
+  );
+
+  /**
    * Runs the cross-check now, over the chosen finished solutions (two to
    * MAX_JUDGED_SOLUTIONS, in picker order): one that was not switched on,
    * that failed, or whose verdict predates a solver added since.
@@ -553,6 +758,7 @@ export function useSolve() {
     judgeProgress,
     variants,
     interpretation,
+    solutionVersions,
     canRerun,
     start,
     cancel,
@@ -560,8 +766,10 @@ export function useSolve() {
     dismiss,
     solveProvider,
     stopProvider,
+    refineProvider,
     crossCheck,
     stopJudge,
+    refineVerdict,
   };
 }
 
@@ -678,6 +886,12 @@ type JudgeParams = RunContext & {
   handles: JobHandle[];
   /** Makes the judge's Stop button able to end this check. */
   register: (task: RunningTask) => void;
+  /** A re-generation: the last verdict and the user's instructions. */
+  revision?: RevisionRequest;
+  /** The verdict a failed re-generation falls back to. */
+  previous?: DoneJudge | null;
+  /** The solutions' versions now, recorded with a verdict that is sent. */
+  versions: () => SolutionVersions;
   persist: () => void;
   setJudgeRun: (run: JudgeRun) => void;
   setJudgeProgress: (progress: Progress) => void;
@@ -704,6 +918,9 @@ async function runJudge({
   canSendLater,
   handles,
   register,
+  revision,
+  previous,
+  versions,
   persist,
   setJudgeRun: publishJudgeRun,
   setJudgeProgress,
@@ -715,8 +932,28 @@ async function runJudge({
   // Its own controller, so its Stop leaves the solvers alone.
   const own = childController(signal);
   const live = () => !own.signal.aborted && !handle.stopped;
+  // Recorded when the check is sent; a re-attached one (after a reload) has none.
+  const sentVersions = handle.id ? undefined : versions();
   const setJudgeRun = (next: JudgeRun) => {
-    if (live()) publishJudgeRun(next);
+    if (!live()) return;
+    if (next.status === "error" && previous) {
+      publishJudgeRun({
+        ...previous,
+        notice: next.stopped
+          ? "The re-generation was stopped. This is the previous verdict."
+          : `Re-generating the verdict did not work: ${withoutFullStop(next.message)}. This is the previous verdict.`,
+      });
+      return;
+    }
+    if (next.status === "done") {
+      publishJudgeRun({
+        ...next,
+        ...(sentVersions ? { versions: sentVersions } : {}),
+        ...(revision ? { revisedWith: revision.instructions } : {}),
+      });
+      return;
+    }
+    publishJudgeRun(next);
   };
 
   let solvers: ProviderKey[];
@@ -756,6 +993,7 @@ async function runJudge({
       ...(body.interpretation ? { interpretation: body.interpretation } : {}),
       ...(saved.variant ? { variant: saved.variant } : {}),
       ...(saved.effort ? { effort: saved.effort } : {}),
+      ...(revision ? { revision } : {}),
       solutions: solvers.map((provider) =>
         artifactToText(solutions.get(provider) as ProviderArtifact, MAX_SOLUTION_TEXT),
       ),
