@@ -7,10 +7,18 @@ import { useState } from "react";
 import { Check, Eye, Languages, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
 
+/** "A", "A and B", "A, B and C". */
+function joinNames(names: string[]) {
+  return names.length < 2
+    ? names.join("")
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 export function InterpretationReview({
   interpretation,
   initialText,
   note,
+  solvers,
   onConfirm,
   onCancel,
 }: {
@@ -18,6 +26,8 @@ export function InterpretationReview({
   initialText: string;
   /** Set when only one reader's reading arrived, so nothing cross-checked it. */
   note?: string;
+  /** Who solves once this is confirmed - nobody has started yet. */
+  solvers: string[];
   onConfirm: (confirmedText: string) => void;
   onCancel: () => void;
 }) {
@@ -35,6 +45,13 @@ export function InterpretationReview({
           ? "Check the reading below — especially the diagram geometry, supports, and loads — fix anything that is wrong, then confirm to start solving."
           : "Two models read the question independently and a third reconciled them. Check the reading below — especially the diagram geometry, supports, and loads — fix anything that is wrong, then confirm to start solving."}
       </p>
+
+      {solvers.length ? (
+        <p className="mb-3 text-sm font-medium text-cs-ink-2">
+          Nothing is solved yet: {joinNames(solvers)} start{solvers.length === 1 ? "s" : ""} when
+          you confirm.
+        </p>
+      ) : null}
 
       {note ? (
         <div className="mb-3 flex gap-2 rounded-cs border border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] px-4 py-3 text-sm text-[#a85a12]">

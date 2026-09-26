@@ -11,7 +11,7 @@ import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { formatClock, useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
-import type { ModelChoice, ModelVariant, ProviderKey } from "../../shared/providers";
+import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
   formatBytes,
@@ -34,11 +34,11 @@ function UnicornCrest() {
 }
 
 // Prepared at submit time and needed again once the user confirms the
-// reviewed interpretation.
+// reviewed interpretation - nothing is solved before that. The cross-check
+// is not part of it: it runs from the solutions once they are in.
 type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
-  judge: ModelChoice | null;
   variants: Partial<Record<ProviderKey, ModelVariant>>;
 };
 
@@ -142,13 +142,16 @@ export default function CivilAnswerAppPage() {
     notes,
     effort,
     verify,
-    judge,
     variants,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
+    // A new question clears the last one's solutions and verdict first.
+    // Left on screen while the new question was being read, they looked
+    // like what the interpretation pass was working on (26 September 2026).
+    dismiss();
     setPrepStatus("Preparing images...");
 
     try {
@@ -186,13 +189,13 @@ export default function CivilAnswerAppPage() {
       }
 
       if (verify) {
-        setPendingSolve({ providers, body, judge, variants });
+        setPendingSolve({ providers, body, variants });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
       }
 
-      start(providers, body, judge, variants);
+      start(providers, body, null, variants);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -204,10 +207,10 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve) return;
-    const { providers, body, judge, variants } = pendingSolve;
+    const { providers, body, variants } = pendingSolve;
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, judge, variants);
+    start(providers, { ...body, interpretation: confirmedText }, null, variants);
   }
 
   return (
@@ -234,6 +237,13 @@ export default function CivilAnswerAppPage() {
         <UploadForm
           providerStatus={providerStatus}
           busy={busy}
+          busyLabel={
+            isInterpreting
+              ? "Reading the question..."
+              : prepStatus
+                ? "Preparing the upload..."
+                : "Generating solutions..."
+          }
           solving={isSolving || isInterpreting}
           status={statusMessage}
           error={bannerError}
@@ -246,6 +256,11 @@ export default function CivilAnswerAppPage() {
             interpretation={pipeline.interpretation}
             initialText={pipeline.text}
             note={pipeline.note}
+            solvers={
+              pendingSolve
+                ? pendingSolve.providers.map((key) => providerDisplayName(key, pendingSolve.variants[key]))
+                : []
+            }
             onConfirm={confirmInterpretation}
             onCancel={cancelAll}
           />

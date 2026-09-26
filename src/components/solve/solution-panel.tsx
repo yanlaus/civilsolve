@@ -250,16 +250,6 @@ export default function SolutionPanel({
         </h2>
       </div>
 
-      {judgeRun.status !== "idle" ? (
-        <JudgementCard
-          judgeRun={judgeRun}
-          runs={runs}
-          variants={variants}
-          progress={judgeProgress ?? undefined}
-          now={now}
-        />
-      ) : null}
-
       <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">
         <div className="border-b-2 border-cs-line-soft px-2 pt-1">
           <div className="flex overflow-x-auto">
@@ -436,6 +426,21 @@ export default function SolutionPanel({
         onCrossCheck={onCrossCheck}
       />
 
+      {/* The verdict comes last, under the controls that run it: it is read
+          after the solutions, not before them (the owner's order since
+          26 September 2026). */}
+      {judgeRun.status !== "idle" ? (
+        <div className="mt-4">
+          <JudgementCard
+            judgeRun={judgeRun}
+            runs={runs}
+            variants={variants}
+            progress={judgeProgress ?? undefined}
+            now={now}
+          />
+        </div>
+      ) : null}
+
       {/* Hidden on screen; the only visible content when printing (Save as PDF). */}
       {printHtml ? (
         <div
@@ -586,7 +591,35 @@ function JudgementCard({
         </span>
       </div>
 
-      <p className={`mt-2 text-base font-semibold ${headlineTone}`}>
+      {/* The verdict itself, first and on its own: which solution is right,
+          which is wrong - before any of the reasoning. */}
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Verdict per solution">
+        {solvers.map((provider, index) => {
+          const correct = judgement.correct.includes(index);
+          return (
+            <li
+              key={provider}
+              className={`flex items-center gap-2 rounded-cs border px-3 py-2 text-sm font-semibold ${
+                correct
+                  ? "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a]"
+                  : "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger"
+              }`}
+            >
+              {correct ? (
+                <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+              ) : (
+                <X className="h-4 w-4 shrink-0" aria-hidden="true" />
+              )}
+              <span className="min-w-0 flex-1 truncate">
+                {SOLUTION_LETTERS[index] ?? String(index + 1)} · {nameOf(provider)}
+              </span>
+              <span className="shrink-0">{correct ? "Correct 正確" : "Wrong 錯誤"}</span>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className={`mt-3 text-base font-semibold ${headlineTone}`}>
         {verdictHeadline(labels, judgement.correct)}
       </p>
       {skipped.length ? (
@@ -598,7 +631,7 @@ function JudgementCard({
       {notGraded.length ? (
         <p className="mt-1 text-xs font-medium text-[#a85a12]">
           Not in this verdict: {notGraded.map(nameOf).join(", ")}{" "}
-          finished after it. Run the cross-check again below to include{" "}
+          finished after it. Run the cross-check again above to include{" "}
           {notGraded.length === 1 ? "it" : "them"}.
         </p>
       ) : null}
@@ -612,39 +645,51 @@ function JudgementCard({
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {solvers.map((provider, index) => (
-          <Assessment
-            key={provider}
-            label={nameOf(provider)}
-            letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
-            text={judgement.assessments[index] ?? ""}
-            correct={judgement.correct.includes(index)}
-          />
-        ))}
-      </div>
-
-      {judgement.comparison ? (
-        <div className="mt-4">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            Why
+      {/* The reasoning, for whoever wants it: each solution's assessment,
+          why, and the Traditional Chinese version. */}
+      <details className="group mt-4 rounded-cs border border-cs-line-soft">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-2.5 text-sm font-semibold text-cs-accent">
+          <span>Read the full verdict · 閱讀完整評語</span>
+          <span className="text-xs font-normal text-cs-ink-3 group-open:hidden">
+            what each solution got right and wrong, and why
+          </span>
+        </summary>
+        <div className="border-t border-cs-line-soft px-4 pb-4">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {solvers.map((provider, index) => (
+              <Assessment
+                key={provider}
+                label={nameOf(provider)}
+                letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
+                text={judgement.assessments[index] ?? ""}
+                correct={judgement.correct.includes(index)}
+              />
+            ))}
           </div>
-          <Prose source={judgement.comparison} />
-        </div>
-      ) : null}
 
-      {judgement.traditional_chinese ? (
-        <div
-          lang="zh-Hant-HK"
-          className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3"
-        >
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-            繁體中文 · Traditional Chinese
-          </div>
-          <Prose source={judgement.traditional_chinese} />
+          {judgement.comparison ? (
+            <div className="mt-4">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+                Why
+              </div>
+              <Prose source={judgement.comparison} />
+            </div>
+          ) : null}
+
+          {judgement.traditional_chinese ? (
+            <div
+              lang="zh-Hant-HK"
+              className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3"
+            >
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+                繁體中文 · Traditional Chinese
+              </div>
+              <Prose source={judgement.traditional_chinese} />
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </details>
 
       <p className="mt-4 text-xs text-cs-ink-3">
         The judge is a model too — treat this as a second opinion, not an answer key. Open
