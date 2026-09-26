@@ -43,6 +43,43 @@ export const solutionSchema = {
   ],
 } as const;
 
+/**
+ * LaTeX commands that begin with "n": a backslash-n in front of one of these
+ * is the command, not an escaped line break.
+ */
+const LATEX_N_COMMANDS = new Set([
+  "nabla", "natural", "ncong", "ne", "nearrow", "neg", "neq", "newline", "newpage", "nexists",
+  "ngeq", "ngeqslant", "ngtr", "ni", "nleftarrow", "nLeftarrow", "nleftrightarrow", "nleq",
+  "nleqslant", "nless", "nmid", "nobreak", "noindent", "nolimits", "nonumber", "normalsize", "not",
+  "notin", "nparallel", "nprec", "nrightarrow", "nRightarrow", "nsim", "nsubset", "nsubseteq",
+  "nsucc", "nsupset", "nsupseteq", "nu", "nvdash", "nwarrow",
+]);
+
+/**
+ * Line breaks a model escaped twice. Writing LaTeX inside JSON, a model
+ * doubles every backslash - and now and then the newline's too, `\\n` for
+ * `\n`, so the parsed text holds a literal backslash-n: the page showed
+ * "\n" and ran the lines together into one paragraph. Seen on ChatGPT
+ * (Luna), in 4 of 5 fields of one reconcile on 26 September 2026, next to
+ * real line breaks in the same answer. Kept as they are: a LaTeX command that
+ * starts with n (`\nu`, `\neq`...), and `\\` - a LaTeX line break - followed
+ * by an n. A literal `\r\n` is a line break too.
+ */
+export function fixEscapedNewlines(value: string) {
+  if (!value.includes("\\")) return value;
+  return value.replace(/(\\+)(r\\n|n)([A-Za-z]*)/g, (match, slashes: string, escape: string, word: string) => {
+    // An even run of backslashes is LaTeX's "\\" and the n is ordinary text.
+    if (slashes.length % 2 === 0) return match;
+    if (escape === "n" && LATEX_N_COMMANDS.has(`n${word}`)) return match;
+    return `${slashes.slice(0, -1)}\n${word}`;
+  });
+}
+
+/** A text field a model wrote, cleaned for display: escapes and stray characters. */
+export function cleanModelText(value: string) {
+  return sanitizeText(fixEscapedNewlines(value));
+}
+
 export function sanitizeText(value: string) {
   return value
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
@@ -993,6 +1030,11 @@ export function finalizeProviderArtifact(
   options: ParseOptions = {},
 ): ProviderArtifact {
   let solution = parseStructuredSolution(rawText, provider, options);
+  // Every field, latex_body included: a doubly escaped line break is no more
+  // use to LaTeX than to Markdown.
+  solution = Object.fromEntries(
+    Object.entries(solution).map(([field, text]) => [field, fixEscapedNewlines(text)]),
+  ) as StructuredSolution;
 
   // Template slots left unfilled. If the working went into latex_body
   // instead, it is rebuilt from there below; if it went nowhere, this is not

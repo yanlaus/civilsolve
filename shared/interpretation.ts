@@ -4,6 +4,7 @@
 
 import { PROVIDER_LABELS, type ProviderKey } from "./providers";
 import {
+  cleanModelText,
   normalizeJsonCandidate,
   sanitizeText,
   stripThinkTags,
@@ -146,7 +147,7 @@ function readReading(record: Record<string, unknown>): InterpretationResult {
           .filter(Boolean)
           .join("\n\n")
       : "";
-    result[field] = sanitizeText([top, perPart].filter(Boolean).join("\n\n"));
+    result[field] = cleanModelText([top, perPart].filter(Boolean).join("\n\n"));
   }
   return result;
 }
@@ -196,7 +197,7 @@ export function parseInterpretation(
     // Something came back, just not under any name above. On the last
     // attempt that is still worth reading - all of it, as the statement -
     // rather than an error in its place.
-    const everything = sanitizeText(textOf(record));
+    const everything = cleanModelText(textOf(record));
     if (options.allowIncomplete && everything.length >= 40) {
       return { ...result, interpreted_problem: everything };
     }
