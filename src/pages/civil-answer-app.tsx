@@ -4,6 +4,7 @@ import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { useHealth } from "@/hooks/use-health";
 import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
@@ -42,7 +43,20 @@ type PendingSolve = {
 
 export default function CivilAnswerAppPage() {
   const { theme } = useTheme();
-  const { runs, judgeRun, progress, judgeProgress, start, cancel, restore, dismiss } = useSolve();
+  const {
+    runs,
+    judgeRun,
+    progress,
+    judgeProgress,
+    canRerun,
+    start,
+    cancel,
+    restore,
+    dismiss,
+    solveProvider,
+    crossCheck,
+  } = useSolve();
+  const { providerStatus, signInError } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
@@ -105,7 +119,8 @@ export default function CivilAnswerAppPage() {
           .join(" · ")
       : "";
   const statusMessage = prepStatus || interpretStatus;
-  const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
+  const bannerError =
+    error || (pipeline.status === "error" ? pipeline.message : "") || signInError;
 
   function clearRecovered() {
     dismiss();
@@ -120,7 +135,7 @@ export default function CivilAnswerAppPage() {
   }
 
   async function handleSolve({
-    files,
+    uploads,
     lectureFiles,
     providers,
     notes,
@@ -135,7 +150,7 @@ export default function CivilAnswerAppPage() {
     setPrepStatus("Preparing images...");
 
     try {
-      const images = await filesToImageDataUrls(files);
+      const images = await filesToImageDataUrls(uploads);
       if (images.length > MAX_IMAGES) {
         throw new Error(
           `The upload produced ${images.length} images (PDF pages count individually). The limit is ${MAX_IMAGES} — remove some files or pages.`,
@@ -215,6 +230,7 @@ export default function CivilAnswerAppPage() {
         </header>
 
         <UploadForm
+          providerStatus={providerStatus}
           busy={busy}
           solving={isSolving || isInterpreting}
           status={statusMessage}
@@ -268,6 +284,11 @@ export default function CivilAnswerAppPage() {
             judgeRun={judgeRun}
             progress={progress}
             judgeProgress={judgeProgress}
+            providerStatus={providerStatus}
+            canRerun={canRerun}
+            locked={isInterpreting || Boolean(prepStatus)}
+            onSolveProvider={solveProvider}
+            onCrossCheck={crossCheck}
           />
         </Suspense>
       </div>

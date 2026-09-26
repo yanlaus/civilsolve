@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   Brain,
@@ -33,20 +33,28 @@ import {
   PROVIDER_LABELS,
   SOLVER_KEYS,
   UNSTABLE_PROVIDERS,
-  type HealthResponse,
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
-import { isAcceptedUpload, isPdfFile } from "@/lib/attachments";
+import { isAcceptedUpload, isPdfFile, type UploadItem } from "@/lib/attachments";
+import { parsePageSpec } from "@/lib/page-range";
+import { MAX_IMAGES } from "../../../shared/stream-protocol";
 
 type QueuedFile = {
   id: string;
   file: File;
   previewUrl?: string;
+  /** PDFs: the page count, once read; undefined while it is being read. */
+  pageCount?: number;
+  /** PDFs: why the page count could not be read. */
+  pageError?: string;
+  /** PDFs: which pages to send, as typed ("" means every page). */
+  pageSpec?: string;
 };
 
 export type SolveSubmission = {
-  files: File[];
+  /** Assignment files; each PDF with the pages chosen from it. */
+  uploads: UploadItem[];
   /** Reference material for method/notation, never solved. */
   lectureFiles: File[];
   /** The selected solvers, in picker order; they run together. */
@@ -86,6 +94,7 @@ function formatSize(bytes: number) {
 }
 
 export function UploadForm({
+  providerStatus,
   busy,
   solving,
   status,
@@ -93,6 +102,8 @@ export function UploadForm({
   onSolve,
   onCancel,
 }: {
+  /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
+  providerStatus: Record<ProviderKey, ProviderStatus> | null;
   busy: boolean;
   /** True only while provider requests are in flight (image prep excluded). */
   solving: boolean;
@@ -113,8 +124,6 @@ export function UploadForm({
   const [judge, setJudge] = useState<ProviderKey>(DEFAULT_JUDGE);
   const [effort, setEffort] = useState<EffortKey>("high");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(DEFAULT_SOLVERS);
-  const [providerStatus, setProviderStatus] =
-    useState<Record<ProviderKey, ProviderStatus> | null>(null);
   const [fileError, setFileError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -126,31 +135,17 @@ export function UploadForm({
     };
   }, [queuedFiles]);
 
-  // Which providers actually have a key on the server. Advisory only: if the
-  // probe fails the form still works and the Worker reports the real error.
+  // Once the server says which providers actually have a key, untick the
+  // ones that do not.
   useEffect(() => {
-    let cancelled = false;
-
-    fetch("/api/health")
-      .then((response) => (response.ok ? (response.json() as Promise<HealthResponse>) : null))
-      .then((payload) => {
-        if (cancelled || !payload?.providers) return;
-        setProviderStatus(payload.providers);
-        setSelectedProviders((current) => {
-          const configured = current.filter((key) => payload.providers[key]?.configured);
-          if (configured.length) return configured;
-          const firstConfigured = SOLVER_KEYS.find((key) => payload.providers[key]?.configured);
-          return firstConfigured ? [firstConfigured] : current;
-        });
-      })
-      .catch(() => {
-        // Ignored on purpose - health is a hint, not a gate.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!providerStatus) return;
+    setSelectedProviders((current) => {
+      const configured = current.filter((key) => providerStatus[key]?.configured);
+      if (configured.length) return configured;
+      const firstConfigured = SOLVER_KEYS.find((key) => providerStatus[key]?.configured);
+      return firstConfigured ? [firstConfigured] : current;
+    });
+  }, [providerStatus]);
 
   const isAvailable = (provider: ProviderKey) =>
     providerStatus ? providerStatus[provider]?.configured !== false : true;
@@ -232,12 +227,71 @@ export function UploadForm({
             ? `The cross-check compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some solvers.`
             : "";
 
+  // Every page that will be sent: one per image, the chosen pages of each PDF.
+  // A paper longer than the request can carry makes the user choose pages
+  // rather than losing the rest without a word.
+  const pageSelections = queuedFiles.map((item) => {
+    if (!isPdfFile(item.file)) return { item, pages: 1 };
+    if (item.pageError) return { item, error: `${item.file.name}: ${item.pageError}` };
+    if (item.pageCount === undefined) return { item, pending: true };
+    const selection = parsePageSpec(item.pageSpec ?? "", item.pageCount);
+    return "error" in selection
+      ? { item, error: `${item.file.name}: ${selection.error}` }
+      : { item, pages: selection.pages.length, chosen: selection.pages };
+  });
+  const countingPages = pageSelections.some((entry) => entry.pending);
+  const totalPages = pageSelections.reduce((sum, entry) => sum + (entry.pages ?? 0), 0);
+  const hasPdf = queuedFiles.some((item) => isPdfFile(item.file));
+  const pageConfigError =
+    pageSelections.find((entry) => entry.error)?.error ??
+    (!countingPages && totalPages > MAX_IMAGES
+      ? `That is ${totalPages} pages, and up to ${MAX_IMAGES} can be sent at once. Choose the pages to solve for each PDF below (for example 1-6).`
+      : "");
+
   const canSubmit =
     queuedFiles.length > 0 &&
     selectedProviders.every(isAvailable) &&
     !verifyConfigError &&
     !solverConfigError &&
+    !pageConfigError &&
+    !countingPages &&
     !busy;
+
+  // Each queued PDF has its pages counted once, in the background.
+  const countRequested = useRef(new Set<string>());
+  useEffect(() => {
+    for (const item of queuedFiles) {
+      if (!isPdfFile(item.file) || countRequested.current.has(item.id)) continue;
+      countRequested.current.add(item.id);
+      readPageCount(item.id, item.file);
+    }
+  }, [queuedFiles]);
+
+  /** Reads a queued PDF's page count (pdf.js loads on demand). */
+  function readPageCount(id: string, file: File) {
+    import("@/lib/pdf-to-images")
+      .then(({ pdfPageCount }) => pdfPageCount(file))
+      .then((pageCount) => {
+        setQueuedFiles((current) =>
+          current.map((item) => (item.id === id ? { ...item, pageCount } : item)),
+        );
+      })
+      .catch(() => {
+        setQueuedFiles((current) =>
+          current.map((item) =>
+            item.id === id
+              ? { ...item, pageError: "could not be opened as a PDF (damaged or password-protected?)" }
+              : item,
+          ),
+        );
+      });
+  }
+
+  function setPageSpec(id: string, pageSpec: string) {
+    setQueuedFiles((current) =>
+      current.map((item) => (item.id === id ? { ...item, pageSpec } : item)),
+    );
+  }
 
   function addFiles(inputFiles: FileList | File[]) {
     const next = Array.from(inputFiles);
@@ -322,6 +376,8 @@ export function UploadForm({
   }
 
   function removeFile(id: string) {
+    // The same file added again is counted again.
+    countRequested.current.delete(id);
     setQueuedFiles((current) => {
       const match = current.find((item) => item.id === id);
       if (match?.previewUrl) URL.revokeObjectURL(match.previewUrl);
@@ -342,7 +398,7 @@ export function UploadForm({
     event.preventDefault();
     if (!canSubmit) return;
     onSolve({
-      files: queuedFiles.map((item) => item.file),
+      uploads: pageSelections.map((entry) => ({ file: entry.item.file, pages: entry.chosen })),
       lectureFiles: lectureFiles.map((item) => item.file),
       providers: selectedProviders,
       notes,
@@ -352,7 +408,8 @@ export function UploadForm({
     });
   }
 
-  const bannerError = error || fileError || verifyConfigError || solverConfigError;
+  const bannerError =
+    error || fileError || pageConfigError || verifyConfigError || solverConfigError;
 
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
@@ -447,9 +504,48 @@ export function UploadForm({
                     {formatSize(item.file.size)}
                   </div>
                 </div>
+                {isPdfFile(item.file) ? (
+                  <div className="border-t border-cs-line-soft px-3 py-2">
+                    {item.pageError ? (
+                      <p className="text-[0.7rem] text-cs-danger">
+                        Could not be opened as a PDF.
+                      </p>
+                    ) : item.pageCount === undefined ? (
+                      <p className="flex items-center gap-1.5 text-[0.7rem] text-cs-ink-3">
+                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                        Counting pages...
+                      </p>
+                    ) : (
+                      <label className="block text-[0.7rem] text-cs-ink-3">
+                        {item.pageCount} page{item.pageCount === 1 ? "" : "s"} · pages to send
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={item.pageSpec ?? ""}
+                          onChange={(event) => setPageSpec(item.id, event.target.value)}
+                          placeholder={item.pageCount === 1 ? "1" : `all, or e.g. 1-${Math.min(item.pageCount, 4)}`}
+                          aria-label={`Pages of ${item.file.name} to send`}
+                          className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-2 py-1 text-xs text-cs-ink outline-none transition focus:border-cs-accent"
+                        />
+                      </label>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
+        ) : null}
+
+        {hasPdf && !countingPages ? (
+          <p
+            className={`mt-2 text-xs ${
+              totalPages > MAX_IMAGES
+                ? "font-semibold text-cs-danger"
+                : "text-cs-ink-3"
+            }`}
+          >
+            Pages to send: {totalPages} of at most {MAX_IMAGES}.
+          </p>
         ) : null}
       </section>
 

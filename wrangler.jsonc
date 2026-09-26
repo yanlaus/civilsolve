@@ -11,19 +11,31 @@
   // Non-secret overrides only. API keys are Wrangler secrets in production
   // and live in .dev.vars locally - never put a key in this file.
   //
-  // Empty on purpose: the production routing is the defaults in
-  // worker/channels.ts (DEFAULT_CHANNELS, ROUTES, INTERPRET_MODEL_DEFAULT),
-  // next to the route flags that were measured for each model, so there is
-  // one place to read and change it. Add a var here only to depart from a
-  // default; `WorkerEnv` in worker/channels.ts lists every one, and GET
-  // /api/health reports what is in effect. For example:
+  // Routing is not set here on purpose: the production routing is the
+  // defaults in worker/channels.ts (DEFAULT_CHANNELS, ROUTES,
+  // INTERPRET_MODEL_DEFAULT), next to the route flags that were measured for
+  // each model, so there is one place to read and change it. Add a routing
+  // var here only to depart from a default; `WorkerEnv` in
+  // worker/channels.ts lists every one, and GET /api/health reports what is
+  // in effect. For example:
   //   "MINIMAX_CHANNEL": "opencode",   // MiniMax on the Go plan only
   //   "NO_STREAM": "deepseek",         // only if the account drops to the free plan
   // Every model must be vision-capable - verify with an image before
   // changing one (AGENTS.md). List what a key can see with:
   //   curl -H "Authorization: Bearer $POE_API_KEY" https://api.poe.com/v1/models
   //   OpenCode Go: GET https://opencode.ai/zen/go/v1/models
-  "vars": {},
+  "vars": {
+    // Sign-in (worker/access.ts) - the one thing with no default in code.
+    // Cloudflare Access signs users in at the edge; the Worker verifies the
+    // token Access attaches and refuses every /api/* request without a valid
+    // one. Both come from the Zero Trust dashboard: the team domain
+    // ("yourteam.cloudflareaccess.com") and the Access application's
+    // Audience (AUD) tag. Left empty, the deployed API is closed to
+    // everyone - requests to localhost (npm run dev / preview) are the only
+    // exception. Setup steps: README.md, "Sign-in and rate limiting".
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
   // Every solve, interpretation step and cross-check runs in a TaskJob of
   // its own (worker/jobs.ts), so it finishes and keeps its answer for 24
   // hours even when the page that asked has gone away (a phone putting the
@@ -33,6 +45,20 @@
     "bindings": [{ "name": "JOBS", "class_name": "TaskJob" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskJob"] }],
+  // Workers Rate Limiting: at most 20 model-calling requests (solve,
+  // interpret, judge) per signed-in user per minute. One run with every
+  // option on is about a dozen - eight solvers, two readers, a reconciler, a
+  // judge - so this only stops a runaway client, never a real run.
+  // Re-attaching to a job and cancelling one are not counted. The period
+  // can only be 10 or 60 s; the namespace_id is any number unique to this
+  // limiter in the account.
+  "ratelimits": [
+    {
+      "name": "TASK_LIMITER",
+      "namespace_id": "2609",
+      "simple": { "limit": 20, "period": 60 }
+    }
+  ],
   "observability": {
     "enabled": true
   }

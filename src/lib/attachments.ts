@@ -64,13 +64,16 @@ export async function imageFileToDataUrl(file: File): Promise<string> {
   }
 }
 
-/** Converts all queued files (images + PDFs) into JPEG data URLs. */
-export async function filesToImageDataUrls(files: File[]): Promise<string[]> {
+/** An assignment file, and for a PDF the pages chosen from it (every page when absent). */
+export type UploadItem = { file: File; pages?: number[] };
+
+/** Converts all queued files (images + chosen PDF pages) into JPEG data URLs. */
+export async function filesToImageDataUrls(items: UploadItem[]): Promise<string[]> {
   const results: string[] = [];
-  for (const file of files) {
+  for (const { file, pages } of items) {
     if (isPdfFile(file)) {
       const { pdfToImageDataUrls } = await import("./pdf-to-images");
-      results.push(...(await pdfToImageDataUrls(file)));
+      results.push(...(await pdfToImageDataUrls(file, pages)));
     } else {
       results.push(await imageFileToDataUrl(file));
     }

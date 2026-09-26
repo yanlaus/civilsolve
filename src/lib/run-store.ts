@@ -4,15 +4,17 @@
 //
 // Only ids and provider names are kept here, never images or answers: the
 // answers live on the server (worker/jobs.ts) for 24 hours, and so does this
-// record. Everything is best effort - storage can be unavailable (private
-// browsing, blocked site data) and the page works without it.
+// record. The images the run was sent with are kept apart, in IndexedDB
+// (upload-store.ts), because they are megabytes. Everything is best effort -
+// storage can be unavailable (private browsing, blocked site data) and the
+// page works without it.
 
 import { isProviderKey, type ProviderKey } from "../../shared/providers";
 
 const KEY = "civilsolve:last-run";
 
 /** Matches JOB_RETENTION_MS on the server: past this the jobs are gone. */
-const RETENTION_MS = 24 * 60 * 60 * 1000;
+export const RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export type SavedJudge = {
   provider: ProviderKey;
