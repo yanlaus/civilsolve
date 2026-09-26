@@ -126,6 +126,9 @@ export function UploadForm({
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
   const [readerEffort, setReaderEffort] = useState<EffortKey>("medium");
+  // The reconciler thinks at "high" unless the user asks for more: at "max"
+  // ChatGPT took 4-6 minutes on B.8 and was no more accurate.
+  const [verifierEffortPick, setVerifierEffortPick] = useState<EffortKey>("high");
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
   const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(() =>
@@ -195,6 +198,20 @@ export function UploadForm({
   const labelsFor = (matches: (key: ProviderKey) => boolean) =>
     selectedProviders.filter(matches).map((key) => PROVIDER_LABELS[key]).join(" and ");
   const floorLabels = labelsFor((key) => providerFloor(key) === floorIndex);
+  // The reconciler's level, kept inside its route's band like the judge's
+  // (run-actions.tsx): out-of-band levels are disabled, and a pick outside
+  // the band moves to its nearest edge.
+  const verifierFloor = Math.max(0, providerFloor(verifier.provider));
+  const verifierCeiling = Math.min(EFFORT_KEYS.length - 1, providerCeiling(verifier.provider));
+  const verifierInBand = (key: EffortKey) => {
+    const index = EFFORT_KEYS.indexOf(key);
+    return index >= verifierFloor && index <= verifierCeiling;
+  };
+  const verifierEffort: EffortKey = verifierInBand(verifierEffortPick)
+    ? verifierEffortPick
+    : EFFORT_KEYS[
+        Math.min(Math.max(EFFORT_KEYS.indexOf(verifierEffortPick), verifierFloor), verifierCeiling)
+      ];
   const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
 
   // A floor above a ceiling leaves no level that suits every solver. Nothing
@@ -410,7 +427,9 @@ export function UploadForm({
       providers: selectedProviders,
       notes,
       effort,
-      verify: verifyEnabled ? { interpreterA, interpreterB, verifier, readerEffort } : null,
+      verify: verifyEnabled
+        ? { interpreterA, interpreterB, verifier, readerEffort, verifierEffort }
+        : null,
       variants: Object.fromEntries(
         selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
       ),
@@ -870,9 +889,27 @@ export function UploadForm({
                   </option>
                 ))}
               </select>
-              <span className="mt-1 block text-[0.7rem] text-cs-ink-3">
-                The reconciler always thinks at its maximum.
-              </span>
+            </label>
+            <label className="block text-xs text-cs-ink-3">
+              Reconciler&apos;s thinking
+              <select
+                value={verifierEffort}
+                onChange={(event) => setVerifierEffortPick(event.target.value as EffortKey)}
+                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
+              >
+                {EFFORT_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key} disabled={!verifierInBand(option.key)}>
+                    {option.label}
+                    {option.key === "high" ? " (default)" : ""}
+                    {verifierInBand(option.key) ? "" : " - not offered"}
+                  </option>
+                ))}
+              </select>
+              {verifierEffort === "max" ? (
+                <span className="mt-1 block text-[0.7rem] text-[#a85a12]">
+                  Max can take 4-6 minutes before you can review the reading.
+                </span>
+              ) : null}
             </label>
           </div>
         ) : null}
