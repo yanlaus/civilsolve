@@ -188,16 +188,16 @@ export const DEFAULT_SOLVERS: ProviderKey[] = ["deepseek", "muse"];
 /**
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree; the judge is a third model.
- * DeepSeek Flash and Muse Spark read; ChatGPT (gpt-5.6-luna on OpenCode Go,
- * the most reliable solver in the B.8 matrix) reconciles them. DeepSeek has
- * no pinned interpretation route, so it reads on its solve route - the same
- * deepseek-v4.1-flash that solves. It replaced Gemini as the first reader on
- * 25 September 2026, at the owner's request: Gemini's free-tier key fails
- * too often to be the default for a step every solve then waits on.
+ * Kimi and Gemini Flash read; ChatGPT (gpt-5.6-luna on OpenCode Go, the most
+ * reliable solver in the B.8 matrix) reconciles them. The readers were
+ * DeepSeek Flash and Muse Spark from 25 September 2026 (Gemini's free
+ * AI Studio key failed too often to be the default then); the owner chose
+ * Kimi and Gemini Flash on 26 September, with Gemini on Vertex AI and its
+ * prepaid credit - each reading is a billed Flash call.
  */
 export const DEFAULT_INTERPRETERS: [ModelChoice, ModelChoice] = [
-  { provider: "deepseek" },
-  { provider: "muse" },
+  { provider: "kimi" },
+  { provider: "gemini", variant: "flash" },
 ];
 export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
 

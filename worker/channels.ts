@@ -437,6 +437,14 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // no response_format and the shape spelled out in the prompt, five out
       // of five came back whole.
       structured: false,
+      // Plain JSON mode from the start. Once readings were asked for in
+      // Markdown and LaTeX (26 September 2026), the strict schema - still
+      // sent first, with the field contract in the prompt - came back as
+      // `{\n \t}` three times out of three, the pass's retry included, so
+      // Kimi as the default reader never produced a reading. In JSON mode
+      // four out of four came back whole (29-56 s), as did one with no
+      // response_format.
+      startSchema: "loose",
     },
   },
   muse: {
