@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  Asterisk,
-  Atom,
   BookOpen,
   Brain,
   Calculator,
@@ -11,22 +9,15 @@ import {
   Flag,
   FileText,
   Flame,
-  Gem,
-  Lightbulb,
   Loader2,
-  Moon,
-  Orbit,
   PenSquare,
   Scale,
-  Sparkles,
   TriangleAlert,
   Upload,
-  Waves,
   X,
-  Zap,
-  type LucideIcon,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
+import { ProviderLogo } from "./provider-logo";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
@@ -79,21 +70,6 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
-
-// One glyph per provider so the cards read at a glance. Lucide, like the rest
-// of the UI, rather than vendor logos: no assets, no trademark questions, and
-// they take the accent colour in both themes.
-const PROVIDER_ICONS: Record<ProviderKey, LucideIcon> = {
-  chatgpt: Sparkles,
-  gemini: Gem,
-  deepseek: Waves,
-  grok: Zap,
-  mimo: Orbit,
-  minimax: Atom,
-  kimi: Moon,
-  muse: Lightbulb,
-  claude: Asterisk,
-};
 
 const EFFORT_OPTIONS: Array<{ key: EffortKey; label: string }> = [
   { key: "none", label: "None" },
@@ -381,16 +357,16 @@ export function UploadForm({
   return (
     <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Upload className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Upload className="h-4 w-4 text-cs-accent" />
           Upload Assignment Materials
         </p>
 
         <label
-          className={`relative block cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed bg-white px-6 py-12 text-center shadow-[0_1px_3px_rgba(27,22,16,0.06)] transition dark:bg-[#151d2e] ${
+          className={`cs-panel relative block cursor-pointer overflow-hidden rounded-cs-lg border-2 border-dashed bg-cs-surface px-6 py-12 text-center shadow-[0_1px_3px_var(--cs-shadow)] transition ${
             isDragging
-              ? "border-[#b35c1e] shadow-[0_0_0_4px_rgba(179,92,30,0.15)] dark:border-[#e8903a]"
-              : "border-[#d4cdc3] hover:border-[#b35c1e] hover:shadow-[0_0_0_4px_rgba(179,92,30,0.15)] dark:border-[#2a3650] dark:hover:border-[#e8903a]"
+              ? "border-cs-accent shadow-[0_0_0_4px_var(--cs-ring)]"
+              : "border-cs-line hover:border-cs-accent hover:shadow-[0_0_0_4px_var(--cs-ring)]"
           }`}
           onDragOver={(event) => {
             event.preventDefault();
@@ -409,14 +385,14 @@ export function UploadForm({
           }}
         >
           <div className="relative">
-            <div className="mb-3 text-[#b35c1e] dark:text-[#e8903a]">
+            <div className="mb-3 text-cs-accent">
               <FileImage className="mx-auto h-10 w-10" />
             </div>
-            <p className="text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+            <p className="text-lg font-semibold text-cs-ink">
               Drag and drop your files here
             </p>
-            <p className="mt-1 text-sm text-[#8a7f72] dark:text-[#a8a098]">
-              or <span className="font-semibold text-[#b35c1e] dark:text-[#e8903a]">browse</span> — JPEG, PNG, WebP, GIF, and PDF accepted
+            <p className="mt-1 text-sm text-cs-ink-3">
+              or <span className="font-semibold text-cs-accent">browse</span> — JPEG, PNG, WebP, GIF, and PDF accepted
             </p>
           </div>
           <input
@@ -437,7 +413,7 @@ export function UploadForm({
             {queuedFiles.map((item) => (
               <div
                 key={item.id}
-                className="relative overflow-hidden rounded-[10px] border border-[#e8e3db] bg-white shadow-[0_1px_3px_rgba(27,22,16,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(27,22,16,0.08)] dark:border-[#1e2a40] dark:bg-[#151d2e]"
+                className="relative overflow-hidden rounded-cs border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] transition hover:-translate-y-0.5 hover:shadow-[0_4px_16px_var(--cs-shadow)]"
               >
                 <button
                   type="button"
@@ -454,7 +430,7 @@ export function UploadForm({
                     className="h-[120px] w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-[120px] w-full flex-col items-center justify-center bg-[#e8e3db] text-[#c0392b] dark:bg-[#080d15] dark:text-[#e74c3c]">
+                  <div className="flex h-[120px] w-full flex-col items-center justify-center bg-cs-sunken text-cs-danger">
                     <FileText className="mb-1 h-9 w-9" />
                     <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em]">
                       {isPdfFile(item.file) ? "PDF" : "IMAGE"}
@@ -463,11 +439,11 @@ export function UploadForm({
                 )}
                 <div className="flex items-center justify-between gap-2 px-3 py-2">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium text-[#5c5347] dark:text-[#a8a098]">
+                    <div className="truncate text-xs font-medium text-cs-ink-2">
                       {item.file.name}
                     </div>
                   </div>
-                  <div className="shrink-0 text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+                  <div className="shrink-0 text-[0.7rem] text-cs-ink-3">
                     {formatSize(item.file.size)}
                   </div>
                 </div>
@@ -478,32 +454,32 @@ export function UploadForm({
       </section>
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <PenSquare className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <PenSquare className="h-4 w-4 text-cs-accent" />
           Additional Instructions
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
         </p>
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
           rows={4}
           placeholder='e.g. "Focus on shear force diagrams" or "Show all unit conversions"'
-          className="min-h-24 w-full resize-y rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-base text-[#1b1610] shadow-none outline-none transition focus:border-[#b35c1e] focus:ring-4 focus:ring-[rgba(179,92,30,0.15)] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#e4e0db] dark:focus:border-[#e8903a]"
+          className="min-h-24 w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-base text-cs-ink shadow-none outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
         />
       </section>
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <BookOpen className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <BookOpen className="h-4 w-4 text-cs-accent" />
           Lecture Notes
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
         </p>
-        <p className="mb-3 text-sm text-[#8a7f72] dark:text-[#a8a098]">
+        <p className="mb-3 text-sm text-cs-ink-3">
           Attach notes or worked examples and the solutions will follow the methods, notation,
           and sign conventions taught there. Reference only — nothing in them is solved.
         </p>
-        <label className="relative block cursor-pointer rounded-[10px] border-2 border-dashed border-[#d4cdc3] bg-white px-4 py-5 text-center text-sm text-[#8a7f72] transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a]">
-          Add lecture notes — <span className="font-semibold text-[#b35c1e] dark:text-[#e8903a]">browse</span>
+        <label className="relative block cursor-pointer rounded-cs border-2 border-dashed border-cs-line bg-cs-surface px-4 py-5 text-center text-sm text-cs-ink-3 transition hover:border-cs-accent">
+          Add lecture notes — <span className="font-semibold text-cs-accent">browse</span>
           <input
             type="file"
             accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf"
@@ -522,21 +498,21 @@ export function UploadForm({
             {lectureFiles.map((item) => (
               <li
                 key={item.id}
-                className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e8e3db] bg-white px-3 py-2 text-sm dark:border-[#1e2a40] dark:bg-[#151d2e]"
+                className="flex items-center justify-between gap-3 rounded-cs border border-cs-line-soft bg-cs-surface px-3 py-2 text-sm"
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <FileText className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]" />
-                  <span className="truncate text-[#5c5347] dark:text-[#a8a098]">{item.file.name}</span>
+                  <FileText className="h-4 w-4 shrink-0 text-cs-accent" />
+                  <span className="truncate text-cs-ink-2">{item.file.name}</span>
                 </span>
                 <span className="flex shrink-0 items-center gap-3">
-                  <span className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+                  <span className="text-[0.7rem] text-cs-ink-3">
                     {formatSize(item.file.size)}
                   </span>
                   <button
                     type="button"
                     onClick={() => removeLectureFile(item.id)}
                     aria-label={`Remove ${item.file.name}`}
-                    className="text-[#8a7f72] transition hover:text-[#c0392b] dark:text-[#6e6960]"
+                    className="text-cs-ink-3 transition hover:text-cs-danger"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -548,25 +524,25 @@ export function UploadForm({
       </section>
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Calculator className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Calculator className="h-4 w-4 text-cs-accent" />
           AI Providers
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">
+          <span className="font-sans text-sm font-normal text-cs-ink-3">
             {crossCheckEnabled
               ? `(solvers - pick two to ${MAX_JUDGED_SOLUTIONS})`
               : "(pick one or more - they solve together)"}
           </span>
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {SOLVER_OPTIONS.map((provider) => {
             const status = providerStatus?.[provider.key];
             const available = isAvailable(provider.key);
             const checked = selectedProviders.includes(provider.key) && available;
-            const Icon = PROVIDER_ICONS[provider.key];
             const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
             const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
             const china = CHINA_PROVIDERS.has(provider.key);
             const unstable = UNSTABLE_PROVIDERS.has(provider.key);
+            const hasBadge = higherCredit || lowerCredit || china || unstable;
             // Brand, account, model - nothing else. Effort floors are shown
             // under Thinking Effort, and a model chain announces itself in the
             // status line when it actually switches.
@@ -578,33 +554,34 @@ export function UploadForm({
             return (
               <label
                 key={provider.key}
-                className={`flex min-h-[84px] items-start gap-3 rounded-[10px] border-2 bg-white p-4 transition dark:bg-[#151d2e] ${
+                className={`flex min-w-0 flex-col gap-2 rounded-cs border-2 bg-cs-surface p-3.5 transition ${
                   available ? "cursor-pointer" : "cursor-not-allowed opacity-55"
                 } ${
                   checked
-                    ? "border-[#b35c1e] shadow-[0_0_0_4px_rgba(179,92,30,0.12)] dark:border-[#e8903a]"
-                    : "border-[#d4cdc3] hover:border-[#b35c1e] dark:border-[#2a3650] dark:hover:border-[#e8903a]"
+                    ? "border-cs-accent shadow-[0_0_0_4px_var(--cs-ring)]"
+                    : "border-cs-line hover:border-cs-accent"
                 }`}
               >
-                <input
-                  type="checkbox"
-                  name="providers"
-                  value={provider.key}
-                  checked={checked}
-                  disabled={!available}
-                  onChange={() => toggleProvider(provider.key)}
-                  className="mt-1 h-4 w-4 accent-[#b35c1e] disabled:cursor-not-allowed dark:accent-[#e8903a]"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-                    <Icon
-                      className="h-4 w-4 shrink-0 text-[#b35c1e] dark:text-[#e8903a]"
-                      aria-hidden="true"
-                    />
-                    {provider.label}
+                <span className="flex items-start justify-between gap-2">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-cs border border-cs-line-soft bg-white">
+                    <ProviderLogo provider={provider.key} className="h-6 w-6" />
+                  </span>
+                  <input
+                    type="checkbox"
+                    name="providers"
+                    value={provider.key}
+                    checked={checked}
+                    disabled={!available}
+                    onChange={() => toggleProvider(provider.key)}
+                    className="mt-0.5 h-4 w-4 accent-cs-accent disabled:cursor-not-allowed"
+                  />
+                </span>
+                <span className="text-sm font-semibold text-cs-ink">{provider.label}</span>
+                {hasBadge ? (
+                  <span className="flex flex-wrap gap-1">
                     {higherCredit ? (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e] dark:border-[#4a2f18] dark:bg-[#2b1d10] dark:text-[#e8903a]"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e]"
                         title={`${provider.label} draws more credit per solve than the other providers.`}
                       >
                         <Flame className="h-3 w-3" aria-hidden="true" />
@@ -613,7 +590,7 @@ export function UploadForm({
                     ) : null}
                     {lowerCredit ? (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a] dark:border-[#2f4a2c] dark:bg-[#14241a] dark:text-[#8fcf86]"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a]"
                         title={`${provider.label} draws less credit per solve than the other providers.`}
                       >
                         <Feather className="h-3 w-3" aria-hidden="true" />
@@ -622,7 +599,7 @@ export function UploadForm({
                     ) : null}
                     {unstable ? (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#ecdcae] bg-[#fdf8e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a6a12] dark:border-[#4a3f1a] dark:bg-[#2a2310] dark:text-[#e0c46a]"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#ecdcae] bg-[#fdf8e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a6a12]"
                         title={`${provider.label} costs nothing but often fails to answer - its tab is shown last.`}
                       >
                         <TriangleAlert className="h-3 w-3" aria-hidden="true" />
@@ -631,7 +608,7 @@ export function UploadForm({
                     ) : null}
                     {china ? (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040] dark:border-[#4a2a2a] dark:bg-[#241616] dark:text-[#d99a9a]"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040]"
                         title={`${provider.label} is developed and served in mainland China.`}
                       >
                         <Flag className="h-3 w-3" aria-hidden="true" />
@@ -639,16 +616,14 @@ export function UploadForm({
                       </span>
                     ) : null}
                   </span>
-                  <span className="mt-1 block break-words text-xs text-[#8a7f72] dark:text-[#a8a098]">
-                    {note}
-                  </span>
-                </span>
+                ) : null}
+                <span className="mt-auto block break-words text-xs text-cs-ink-3">{note}</span>
               </label>
             );
           })}
         </div>
         {noneConfigured ? (
-          <p className="mt-3 text-sm text-[#c0392b] dark:text-[#f2b8b2]">
+          <p className="mt-3 text-sm text-cs-danger">
             No provider keys are configured on the server. Add at least one key
             (OPENCODE_API_KEY, POE_API_KEY, or GOOGLE_API_KEY) and restart.
           </p>
@@ -656,10 +631,10 @@ export function UploadForm({
       </section>
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Brain className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Brain className="h-4 w-4 text-cs-accent" />
           Thinking Effort
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(guides solution depth)</span>
+          <span className="font-sans text-sm font-normal text-cs-ink-3">(guides solution depth)</span>
         </p>
         <div className="flex flex-wrap gap-2">
           {EFFORT_OPTIONS.map((option) => {
@@ -679,10 +654,10 @@ export function UploadForm({
                 onClick={() => setEffort(option.key)}
                 className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
                   effort === option.key
-                    ? "border-[#b35c1e] bg-[#b35c1e] text-white shadow-[0_2px_10px_rgba(179,92,30,0.15)] dark:border-[#e8903a] dark:bg-[#e8903a] dark:text-[#0e1420]"
+                    ? "border-cs-accent bg-cs-accent text-cs-on-accent shadow-[0_2px_10px_var(--cs-ring)]"
                     : locked
-                      ? "cursor-not-allowed border-[#d4cdc3] bg-white text-[#5c5347] opacity-45 dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098]"
-                      : "border-[#d4cdc3] bg-white text-[#5c5347] hover:border-[#b35c1e] hover:text-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#e8903a] dark:hover:text-[#e8903a]"
+                      ? "cursor-not-allowed border-cs-line bg-cs-surface text-cs-ink-2 opacity-45"
+                      : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
                 }`}
               >
                 {option.label}
@@ -691,18 +666,18 @@ export function UploadForm({
           })}
         </div>
         {effortFloor && !bandIsEmpty ? (
-          <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
+          <p className="mt-3 text-xs text-cs-accent">
             {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
             lower levels are disabled for every solver in this run.
           </p>
         ) : null}
         {effortCeiling && !bandIsEmpty ? (
-          <p className="mt-3 text-xs text-[#b35c1e] dark:text-[#e8903a]">
+          <p className="mt-3 text-xs text-cs-accent">
             {ceilingLabels} cannot finish above <strong>{effortCeiling}</strong> on this route
             — it thinks past the time limit — so higher levels are disabled.
           </p>
         ) : null}
-        <p className="mt-3 text-xs text-[#8a7f72] dark:text-[#a8a098]">
+        <p className="mt-3 text-xs text-cs-ink-3">
           Each model has its own reasoning scale, so the level is mapped per provider.
           Levels a model does not offer fall back to its own default (Gemini Pro, for
           example, cannot switch thinking off).
@@ -711,24 +686,24 @@ export function UploadForm({
 
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Eye className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Eye className="h-4 w-4 text-cs-accent" />
           Question Interpretation
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
         </p>
 
-        <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border-2 border-[#d4cdc3] bg-white p-4 transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:hover:border-[#e8903a]">
+        <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
           <input
             type="checkbox"
             checked={verifyEnabled}
             onChange={(event) => setVerifyEnabled(event.target.checked)}
-            className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+            className="mt-1 h-4 w-4 accent-cs-accent"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+            <span className="block text-sm font-semibold text-cs-ink">
               Check the diagram reading before solving
             </span>
-            <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+            <span className="mt-1 block text-xs text-cs-ink-3">
               Two models read the question independently, a third reconciles them, and you get to
               correct the result before any solving starts. Catches misread diagrams — at the cost
               of three extra model calls and a wait before the solutions begin.
@@ -743,12 +718,12 @@ export function UploadForm({
               { label: "Second reader", value: interpreterB, set: setInterpreterB },
               { label: "Reconciler", value: verifier, set: setVerifier },
             ].map((field) => (
-              <label key={field.label} className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+              <label key={field.label} className="block text-xs text-cs-ink-3">
                 {field.label}
                 <select
                   value={field.value}
                   onChange={(event) => field.set(event.target.value as ProviderKey)}
-                  className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+                  className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
                 >
                   {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
                     <option key={option.key} value={option.key}>
@@ -758,12 +733,12 @@ export function UploadForm({
                 </select>
               </label>
             ))}
-            <label className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+            <label className="block text-xs text-cs-ink-3">
               Readers&apos; thinking
               <select
                 value={readerEffort}
                 onChange={(event) => setReaderEffort(event.target.value as EffortKey)}
-                className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
               >
                 {EFFORT_OPTIONS.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -771,7 +746,7 @@ export function UploadForm({
                   </option>
                 ))}
               </select>
-              <span className="mt-1 block text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960]">
+              <span className="mt-1 block text-[0.7rem] text-cs-ink-3">
                 The reconciler always thinks at its maximum.
               </span>
             </label>
@@ -780,24 +755,24 @@ export function UploadForm({
       </section>
 
       <section>
-        <p className="mb-3 flex items-center gap-2 font-serif text-lg font-semibold text-[#1b1610] dark:text-[#e4e0db]">
-          <Scale className="h-4 w-4 text-[#b35c1e] dark:text-[#e8903a]" />
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <Scale className="h-4 w-4 text-cs-accent" />
           Answer Cross-check
-          <span className="font-sans text-sm font-normal text-[#8a7f72] dark:text-[#a8a098]">(optional)</span>
+          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
         </p>
 
-        <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border-2 border-[#d4cdc3] bg-white p-4 transition hover:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#151d2e] dark:hover:border-[#e8903a]">
+        <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
           <input
             type="checkbox"
             checked={crossCheckEnabled}
             onChange={(event) => setCrossCheckEnabled(event.target.checked)}
-            className="mt-1 h-4 w-4 accent-[#b35c1e] dark:accent-[#e8903a]"
+            className="mt-1 h-4 w-4 accent-cs-accent"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-[#1b1610] dark:text-[#e4e0db]">
+            <span className="block text-sm font-semibold text-cs-ink">
               Have a judge grade every solution
             </span>
-            <span className="mt-1 block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+            <span className="mt-1 block text-xs text-cs-ink-3">
               The selected solvers work at the same time, then the judge re-derives the
               numbers from the images and says which solutions are right — or corrects them
               all. Catches a plausible-looking wrong answer, at the cost of one extra model
@@ -809,12 +784,12 @@ export function UploadForm({
 
         {crossCheckEnabled ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs text-[#8a7f72] dark:text-[#a8a098]">
+            <label className="block text-xs text-cs-ink-3">
               Judge
               <select
                 value={judge}
                 onChange={(event) => setJudge(event.target.value as ProviderKey)}
-                className="mt-1 w-full rounded-[10px] border border-[#d4cdc3] bg-white px-3 py-2 text-sm text-[#1b1610] outline-none transition focus:border-[#b35c1e] dark:border-[#2a3650] dark:bg-[#0e1420] dark:text-[#e4e0db]"
+                className="mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent"
               >
                 {PROVIDER_OPTIONS.filter((option) => isAvailable(option.key)).map((option) => (
                   <option key={option.key} value={option.key}>
@@ -823,7 +798,7 @@ export function UploadForm({
                 ))}
               </select>
             </label>
-            <p className="text-[0.7rem] text-[#8a7f72] dark:text-[#6e6960] sm:col-span-2">
+            <p className="text-[0.7rem] text-cs-ink-3 sm:col-span-2">
               Solving: {selectedProviders.map((key) => PROVIDER_LABELS[key]).join(", ") || "nobody yet"}.
               The judge thinks at <strong>high</strong> and never learns which model wrote
               which solution.
@@ -833,13 +808,13 @@ export function UploadForm({
       </section>
 
       {bannerError ? (
-        <div className="rounded-[10px] border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-[#c0392b] dark:border-[#5b2a31] dark:text-[#f2b8b2]">
+        <div className="rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger">
           {bannerError}
         </div>
       ) : null}
 
       {status ? (
-        <div className="rounded-[10px] border border-[#d4cdc3] bg-white px-4 py-3 text-sm text-[#5c5347] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#cfc7bf]">
+        <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
           {status}
         </div>
       ) : null}
@@ -848,7 +823,7 @@ export function UploadForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[10px] bg-[#b35c1e] px-8 py-3 text-base font-semibold text-white shadow-[0_3px_14px_rgba(179,92,30,0.15)] transition hover:-translate-y-0.5 hover:bg-[#9a4d17] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#e8903a] dark:text-[#0e1420] dark:hover:bg-[#f5a04f] sm:px-12"
+          className="cs-primary inline-flex min-h-12 items-center justify-center gap-2 rounded-cs bg-cs-accent px-8 py-3 text-base font-semibold text-cs-on-accent shadow-[0_3px_14px_var(--cs-ring)] transition hover:-translate-y-0.5 hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50 sm:px-12"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
           {busy ? "Generating solutions..." : "Solve Problems"}
@@ -857,7 +832,7 @@ export function UploadForm({
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[10px] border-2 border-[#d4cdc3] bg-white px-6 py-3 text-base font-semibold text-[#5c5347] transition hover:border-[#c0392b] hover:text-[#c0392b] dark:border-[#2a3650] dark:bg-[#151d2e] dark:text-[#a8a098] dark:hover:border-[#f2b8b2] dark:hover:text-[#f2b8b2]"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-cs border-2 border-cs-line bg-cs-surface px-6 py-3 text-base font-semibold text-cs-ink-2 transition hover:border-cs-danger hover:text-cs-danger"
           >
             <X className="h-4 w-4" />
             Stop

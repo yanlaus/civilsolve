@@ -131,8 +131,13 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
 │   ├── pages/civil-answer-app.tsx      # Page composition
+│   ├── styles.css                      # Tailwind + the four light themes (cs-* tokens)
+│   ├── components/
+│   │   ├── theme-provider.tsx          # Active theme (data-theme on <html>, localStorage)
+│   │   └── theme-switcher.tsx          # Theme picker in the page header
 │   ├── components/solve/
 │   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort, both optional passes
+│   │   ├── provider-logo.tsx           # Official provider logo (src/assets/providers/*.svg)
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
 │   │   ├── solution-panel.tsx          # Tabs, streaming states, verdict card, exports (lazy)
 │   │   └── solution-article.tsx        # Markdown + KaTeX rendering

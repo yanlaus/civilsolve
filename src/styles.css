@@ -1,18 +1,122 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * Page themes. Every one is light - there is deliberately no dark theme. The
+ * active theme is data-theme on <html> (theme-provider.tsx); a theme block
+ * also works on any element, which is how the switcher previews them.
+ */
+:root,
+[data-theme="classic"] {
+  --cs-page: #f4f1ec;
+  --cs-grid: rgba(139, 126, 112, 0.07);
+  --cs-surface: #ffffff;
+  --cs-muted: #faf8f5;
+  --cs-sunken: #e8e3db;
+  --cs-ink: #1b1610;
+  --cs-ink-2: #5c5347;
+  --cs-ink-3: #8a7f72;
+  --cs-line: #d4cdc3;
+  --cs-line-soft: #e8e3db;
+  --cs-accent: #b35c1e;
+  --cs-accent-hover: #9a4d17;
+  --cs-on-accent: #ffffff;
+  --cs-ring: rgba(179, 92, 30, 0.15);
+  --cs-shadow: rgba(27, 22, 16, 0.08);
+  --cs-success: #2d8a4e;
+  --cs-danger: #c0392b;
+  --cs-prose: #44403c;
+  --cs-radius: 10px;
+  --cs-radius-lg: 16px;
+  --cs-font-display: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+[data-theme="slate"] {
+  --cs-page: #f3f5f8;
+  --cs-grid: rgba(100, 116, 139, 0.16);
+  --cs-surface: #ffffff;
+  --cs-muted: #f8fafc;
+  --cs-sunken: #eef2f6;
+  --cs-ink: #0f172a;
+  --cs-ink-2: #334155;
+  --cs-ink-3: #64748b;
+  --cs-line: #cbd5e1;
+  --cs-line-soft: #e2e8f0;
+  --cs-accent: #1d4ed8;
+  --cs-accent-hover: #1e40af;
+  --cs-on-accent: #ffffff;
+  --cs-ring: rgba(29, 78, 216, 0.16);
+  --cs-shadow: rgba(15, 23, 42, 0.08);
+  --cs-success: #15803d;
+  --cs-danger: #b91c1c;
+  --cs-prose: #1e293b;
+  --cs-radius: 8px;
+  --cs-radius-lg: 12px;
+  --cs-font-display: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="graphite"] {
+  --cs-page: #f4f4f2;
+  --cs-grid: transparent;
+  --cs-surface: #ffffff;
+  --cs-muted: #f7f8f7;
+  --cs-sunken: #ebedec;
+  --cs-ink: #1a1d1c;
+  --cs-ink-2: #3f4644;
+  --cs-ink-3: #6b7471;
+  --cs-line: #cfd4d2;
+  --cs-line-soft: #e4e7e6;
+  --cs-accent: #0f6e63;
+  --cs-accent-hover: #0b5a51;
+  --cs-on-accent: #ffffff;
+  --cs-ring: rgba(15, 110, 99, 0.16);
+  --cs-shadow: rgba(26, 29, 28, 0.07);
+  --cs-success: #2f7d4a;
+  --cs-danger: #b3261e;
+  --cs-prose: #2a2f2d;
+  --cs-radius: 4px;
+  --cs-radius-lg: 6px;
+  --cs-font-display: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Gundam-inspired: white armour, gold trim, a blue psycho-frame glow. */
+[data-theme="unicorn"] {
+  --cs-page: #edf0f5;
+  --cs-grid: rgba(21, 28, 40, 0.07);
+  --cs-surface: #ffffff;
+  --cs-muted: #f6f8fb;
+  --cs-sunken: #e6eaf0;
+  --cs-ink: #151c28;
+  --cs-ink-2: #3a4458;
+  --cs-ink-3: #69738a;
+  --cs-line: #c6cedb;
+  --cs-line-soft: #dde3ec;
+  --cs-accent: #8f6b0e;
+  --cs-accent-hover: #75570a;
+  --cs-on-accent: #ffffff;
+  --cs-gold: #d4a72c;
+  --cs-glow: #2f86ff;
+  --cs-ring: rgba(47, 134, 255, 0.22);
+  --cs-shadow: rgba(21, 28, 40, 0.1);
+  --cs-success: #1f8a4c;
+  --cs-danger: #c4262e;
+  --cs-prose: #1f2735;
+  --cs-radius: 3px;
+  --cs-radius-lg: 4px;
+  --cs-font-display: "Bahnschrift", "DIN Alternate", "DIN Condensed", "Barlow Semi Condensed",
+    "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+}
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.25);
+  --background: var(--cs-page);
+  --foreground: var(--cs-ink);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.147 0.004 49.25);
   --popover: oklch(1 0 0);
@@ -44,45 +148,29 @@
   --sidebar-ring: oklch(0.709 0.01 56.259);
 }
 
-.dark {
-  --background: oklch(0.147 0.004 49.25);
-  --foreground: oklch(0.985 0.001 106.423);
-  --card: oklch(0.216 0.006 56.043);
-  --card-foreground: oklch(0.985 0.001 106.423);
-  --popover: oklch(0.216 0.006 56.043);
-  --popover-foreground: oklch(0.985 0.001 106.423);
-  --primary: oklch(0.923 0.003 48.717);
-  --primary-foreground: oklch(0.216 0.006 56.043);
-  --secondary: oklch(0.268 0.007 34.298);
-  --secondary-foreground: oklch(0.985 0.001 106.423);
-  --muted: oklch(0.268 0.007 34.298);
-  --muted-foreground: oklch(0.709 0.01 56.259);
-  --accent: oklch(0.268 0.007 34.298);
-  --accent-foreground: oklch(0.985 0.001 106.423);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.553 0.013 58.071);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.216 0.006 56.043);
-  --sidebar-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-accent: oklch(0.268 0.007 34.298);
-  --sidebar-accent-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.553 0.013 58.071);
-}
-
 body {
   margin: 0;
 }
 
 @theme inline {
+  --font-display: var(--cs-font-display);
+  --radius-cs: var(--cs-radius);
+  --radius-cs-lg: var(--cs-radius-lg);
+  --color-cs-page: var(--cs-page);
+  --color-cs-surface: var(--cs-surface);
+  --color-cs-muted: var(--cs-muted);
+  --color-cs-sunken: var(--cs-sunken);
+  --color-cs-ink: var(--cs-ink);
+  --color-cs-ink-2: var(--cs-ink-2);
+  --color-cs-ink-3: var(--cs-ink-3);
+  --color-cs-line: var(--cs-line);
+  --color-cs-line-soft: var(--cs-line-soft);
+  --color-cs-accent: var(--cs-accent);
+  --color-cs-accent-hover: var(--cs-accent-hover);
+  --color-cs-on-accent: var(--cs-on-accent);
+  --color-cs-ring: var(--cs-ring);
+  --color-cs-success: var(--cs-success);
+  --color-cs-danger: var(--cs-danger);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -129,9 +217,101 @@ body {
   }
 }
 
+/* The page backdrop, one per theme. */
+.cs-backdrop {
+  background-color: var(--cs-page);
+  background-image:
+    linear-gradient(var(--cs-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cs-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+[data-theme="slate"] .cs-backdrop {
+  background-image: radial-gradient(var(--cs-grid) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+
+[data-theme="graphite"] .cs-backdrop {
+  background-image: linear-gradient(var(--cs-accent), var(--cs-accent));
+  background-size: 100% 4px;
+  background-repeat: no-repeat;
+}
+
+/* Hangar panel lines under a soft blue glow. */
+[data-theme="unicorn"] .cs-backdrop {
+  background-image:
+    radial-gradient(1100px 420px at 50% -140px, rgba(47, 134, 255, 0.12), transparent 70%),
+    linear-gradient(var(--cs-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cs-grid) 1px, transparent 1px),
+    linear-gradient(var(--cs-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cs-grid) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    96px 96px,
+    96px 96px,
+    24px 24px,
+    24px 24px;
+  background-repeat: no-repeat, repeat, repeat, repeat, repeat;
+}
+
+/* Unicorn: headings set like a mobile suit's hull markings. */
+[data-theme="unicorn"] .font-display {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+[data-theme="unicorn"] .font-display .font-sans {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Unicorn: gold corner brackets on the main panels. */
+[data-theme="unicorn"] .cs-panel {
+  background-image:
+    linear-gradient(var(--cs-gold), var(--cs-gold)),
+    linear-gradient(var(--cs-gold), var(--cs-gold)),
+    linear-gradient(var(--cs-gold), var(--cs-gold)),
+    linear-gradient(var(--cs-gold), var(--cs-gold));
+  background-size:
+    22px 3px,
+    3px 22px,
+    22px 3px,
+    3px 22px;
+  background-position:
+    top left,
+    top left,
+    bottom right,
+    bottom right;
+  background-repeat: no-repeat;
+}
+
+/* Unicorn: gold, chamfered primary buttons. */
+[data-theme="unicorn"] .cs-primary {
+  background-image: linear-gradient(135deg, #b88a17 0%, #8f6b0e 55%, #6b500a 100%);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  box-shadow: none;
+}
+
+[data-theme="unicorn"] .cs-primary:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
 .solution-content {
   overflow-wrap: anywhere;
   word-break: normal;
+  --tw-prose-body: var(--cs-prose);
+  --tw-prose-headings: var(--cs-ink);
+  --tw-prose-lead: var(--cs-ink-2);
+  --tw-prose-bold: var(--cs-ink);
+  --tw-prose-links: var(--cs-accent);
+  --tw-prose-counters: var(--cs-ink-3);
+  --tw-prose-bullets: var(--cs-ink-3);
+  --tw-prose-hr: var(--cs-line-soft);
+  --tw-prose-quotes: var(--cs-ink);
+  --tw-prose-quote-borders: var(--cs-line);
+  --tw-prose-captions: var(--cs-ink-3);
+  --tw-prose-th-borders: var(--cs-line);
+  --tw-prose-td-borders: var(--cs-line-soft);
 }
 
 .solution-content :where(p, li, blockquote, td, th) {
@@ -174,6 +354,10 @@ body {
 
 /* "Save as PDF" prints only the .print-area (see solution-panel). */
 @media print {
+  .cs-backdrop {
+    background: none;
+  }
+
   .print-area {
     display: block;
     color: #000;
