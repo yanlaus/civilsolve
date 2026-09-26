@@ -28,9 +28,18 @@ function restoreCodeSpans(value: string, protectedChunks: string[]) {
   );
 }
 
-function normalizeMathMarkdown(value: string) {
+export type RenderOptions = {
+  /**
+   * Text written in Chinese on purpose (the Traditional Chinese reading and
+   * verdict): its 已知 / 所求 / 代入 labels are kept, not turned into the
+   * English ones a solver that slipped into Chinese gets.
+   */
+  chinese?: boolean;
+};
+
+function normalizeMathMarkdown(value: string, options: RenderOptions) {
   return autoFormatPlainMath(
-    normalizeProviderArtifacts(value)
+    normalizeProviderArtifacts(value, options)
       .replace(/\s+(Step\s+\d+\s*(?:[–-]|:))/gi, "\n\n$1")
       .replace(
         /```(?:latex|tex|math)\s*([\s\S]*?)```/gi,
@@ -39,15 +48,20 @@ function normalizeMathMarkdown(value: string) {
   );
 }
 
-function normalizeProviderArtifacts(value: string) {
+function translateCjkLabels(value: string) {
   return value
-    .replace(/^\s*\\\s*$/gm, "")
-    .replace(/(^|\n)\s*\\\s*(?=\\)/g, "$1")
     .replace(/(^|\n)\s*代入[:：]\s*/g, "$1Substitute:\n")
     .replace(/(^|\n)\s*結果[:：]\s*/g, "$1Result:\n")
     .replace(/(^|\n)\s*已知[:：]\s*/g, "$1Given:\n")
     .replace(/(^|\n)\s*所求[:：]\s*/g, "$1Required:\n")
-    .replace(/(^|\n)\s*公式[:：]\s*/g, "$1Formula:\n")
+    .replace(/(^|\n)\s*公式[:：]\s*/g, "$1Formula:\n");
+}
+
+function normalizeProviderArtifacts(value: string, options: RenderOptions) {
+  const stripped = value
+    .replace(/^\s*\\\s*$/gm, "")
+    .replace(/(^|\n)\s*\\\s*(?=\\)/g, "$1");
+  return (options.chinese ? stripped : translateCjkLabels(stripped))
     .replace(/\\times\s*\\times\s*([^\n]*?)\s*\\times\s*\\times/g, (_match, label: string) =>
       `**${label.trim()}**`,
     )
@@ -96,9 +110,18 @@ function autoFormatPlainMath(value: string) {
     .join("\n");
 }
 
+// Chinese prose. A line with any is a sentence, never a bare formula, and
+// KaTeX cannot typeset it in math mode.
+const CJK = /[㐀-鿿豈-﫿　-〿＀-￯]/;
+
 function formatPlainMathLine(line: string) {
   const trimmed = line.trim();
-  if (!trimmed || isMarkdownStructureLine(trimmed) || isDelimitedMathLine(trimmed)) {
+  if (
+    !trimmed ||
+    isMarkdownStructureLine(trimmed) ||
+    isDelimitedMathLine(trimmed) ||
+    CJK.test(trimmed)
+  ) {
     return line;
   }
 
@@ -294,10 +317,10 @@ function restoreMathHtml(value: string, mathHtml: string[]) {
  * the DOM. KaTeX output is spliced in afterwards, from placeholders, so our own
  * generated math markup is never mangled by the sanitizer.
  */
-export function renderMarkdown(value: string) {
+export function renderMarkdown(value: string, options: RenderOptions = {}) {
   try {
     const { protectedText, protectedChunks } = protectCodeSpans(
-      normalizeMathMarkdown(sanitizeText(value)),
+      normalizeMathMarkdown(sanitizeText(value), options),
     );
     const { markdown, mathHtml } = replaceMathWithPlaceholders(protectedText);
     const html = marked.parse(restoreCodeSpans(markdown, protectedChunks)) as string;

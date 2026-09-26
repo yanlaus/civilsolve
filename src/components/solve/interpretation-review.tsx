@@ -1,11 +1,26 @@
 // Pause-for-review step of the diagram-interpretation pipeline: shows the
 // verified interpretation for the user to correct before solving starts,
 // with the reconciler's Traditional Chinese version beside it to check
-// against.
+// against. Both are rendered like a solution - Markdown, LaTeX typeset - and
+// the English can be edited as source, with its preview a tab away.
 
-import { useState } from "react";
-import { Check, Eye, Languages, TriangleAlert, X } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
+import { Check, Eye, Languages, Pencil, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
+
+// The math renderer (katex, marked, dompurify) stays out of the first bundle.
+const MathProse = lazy(() => import("./math-prose"));
+
+/** Rendered Markdown and LaTeX, with the plain text in its place while the renderer loads. */
+export function RenderedText({ source, chinese = false }: { source: string; chinese?: boolean }) {
+  return (
+    <Suspense
+      fallback={<div className="whitespace-pre-wrap text-sm leading-7 text-cs-ink">{source}</div>}
+    >
+      <MathProse source={source} chinese={chinese} />
+    </Suspense>
+  );
+}
 
 /** "A", "A and B", "A, B and C". */
 function joinNames(names: string[]) {
@@ -13,6 +28,8 @@ function joinNames(names: string[]) {
     ? names.join("")
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
+
+const TAB_CLASS = "inline-flex items-center gap-1 px-3 py-1 transition";
 
 export function InterpretationReview({
   interpretation,
@@ -32,6 +49,7 @@ export function InterpretationReview({
   onCancel: () => void;
 }) {
   const [text, setText] = useState(initialText);
+  const [editing, setEditing] = useState(false);
   const chinese = interpretation.traditional_chinese?.trim() ?? "";
 
   return (
@@ -63,20 +81,70 @@ export function InterpretationReview({
       {interpretation.discrepancies ? (
         <div className="mb-3 rounded-cs border border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] px-4 py-3 text-sm text-[#7a5d10]">
           <span className="font-semibold">Discrepancies found between the two readings:</span>
-          <p className="mt-1 whitespace-pre-wrap">{interpretation.discrepancies}</p>
+          <div className="mt-1">
+            <RenderedText source={interpretation.discrepancies} />
+          </div>
         </div>
       ) : null}
 
-      <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-        English — sent to the solvers
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+          English — sent to the solvers
+        </span>
+        <span
+          className="flex overflow-hidden rounded-full border border-cs-line text-xs font-semibold"
+          role="tablist"
+          aria-label="Show the reading or edit it"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!editing}
+            onClick={() => setEditing(false)}
+            className={`${TAB_CLASS} ${
+              editing ? "bg-cs-surface text-cs-ink-2 hover:text-cs-accent" : "bg-cs-accent text-cs-on-accent"
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+            Preview
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editing}
+            onClick={() => setEditing(true)}
+            className={`${TAB_CLASS} ${
+              editing ? "bg-cs-accent text-cs-on-accent" : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
+            }`}
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+            Edit
+          </button>
+        </span>
       </div>
-      <textarea
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        rows={12}
-        aria-label="Verified problem interpretation"
-        className="min-h-48 w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-4 py-3 font-mono text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
-      />
+      {editing ? (
+        <>
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={12}
+            aria-label="Verified problem interpretation"
+            className="min-h-48 w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-4 py-3 font-mono text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
+          />
+          <p className="mt-1 text-[0.7rem] text-cs-ink-3">
+            Formulas are LaTeX between dollar signs, such as{" "}
+            <code>{"$F_x = 10\\,\\text{N}$"}</code>. Switch to Preview to see them typeset.
+          </p>
+        </>
+      ) : (
+        <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-2">
+          {text.trim() ? (
+            <RenderedText source={text} />
+          ) : (
+            <p className="py-2 text-sm text-cs-ink-3">Empty - switch to Edit to write the question.</p>
+          )}
+        </div>
+      )}
 
       {chinese ? (
         <div className="mt-3">
@@ -84,11 +152,8 @@ export function InterpretationReview({
             <Languages className="h-3.5 w-3.5" aria-hidden="true" />
             繁體中文 · Traditional Chinese — for reference
           </div>
-          <div
-            lang="zh-Hant-HK"
-            className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3 text-sm leading-7 text-cs-ink"
-          >
-            {chinese}
+          <div className="max-h-96 overflow-y-auto rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-2">
+            <RenderedText source={chinese} chinese />
           </div>
           <p className="mt-1 text-[0.7rem] text-cs-ink-3">
             Written by the reconciler from its own reading. The solvers get the English above,

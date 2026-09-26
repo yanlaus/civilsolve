@@ -909,7 +909,7 @@ export function UploadForm({
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-cs border-2 border-cs-line bg-cs-surface px-6 py-3 text-base font-semibold text-cs-ink-2 transition hover:border-cs-danger hover:text-cs-danger"
           >
             <X className="h-4 w-4" />
-            Stop
+            Stop all
           </button>
         ) : null}
       </div>

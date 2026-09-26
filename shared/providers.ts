@@ -136,12 +136,13 @@ export const MODEL_CHOICES: ModelChoice[] = PROVIDER_KEYS.flatMap((provider) =>
 
 /**
  * Models badged as China models in the picker, at the owner's choice: MiMo
- * is Xiaomi's and MiniMax is MiniMax's, both reached on their mainland
- * deployments. DeepSeek is Chinese too and was badged for one day, but the
- * owner asked for the label on these two only. This is a provenance label,
- * not a quality or cost one.
+ * is Xiaomi's, MiniMax is MiniMax's and Kimi is Moonshot AI's (added
+ * 26 September 2026). DeepSeek is Chinese too and was badged for one day,
+ * but the owner has not asked for the label on it. This is a provenance
+ * label, not a quality or cost one.
  */
 export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
+  "kimi",
   "mimo",
   "minimax",
 ]);

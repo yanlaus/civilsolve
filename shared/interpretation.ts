@@ -53,14 +53,17 @@ export const verifiedInterpretationSchema = {
 
 /**
  * Flattens an InterpretationResult into the single problem-statement text
- * that is shown for review and later attached to solve requests.
+ * that is shown for review and later attached to solve requests. It is
+ * Markdown, with the formulas in `$...$` as the readers are asked to write
+ * them, and the page renders it like a solution; each section's label sits
+ * on a line of its own, so a list that follows it stays a list.
  */
 export function interpretationToText(result: InterpretationResult) {
   return [
     result.interpreted_problem,
-    result.diagram_description ? `Diagram: ${result.diagram_description}` : "",
-    result.given ? `Given: ${result.given}` : "",
-    result.required ? `Required: ${result.required}` : "",
+    result.diagram_description ? `**Diagram:**\n${result.diagram_description}` : "",
+    result.given ? `**Given:**\n${result.given}` : "",
+    result.required ? `**Required:**\n${result.required}` : "",
   ]
     .filter(Boolean)
     .join("\n\n")

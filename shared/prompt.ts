@@ -57,6 +57,19 @@ const INTERPRETATION_FIELDS = [
 
 const VERIFIED_INTERPRETATION_FIELDS = [...INTERPRETATION_FIELDS, "traditional_chinese"] as const;
 
+/**
+ * How a reading is written: Markdown with LaTeX, like a solution, because the
+ * page renders it the same way - in the review step and above the solutions
+ * (26 September 2026; it was plain text in a text box before, formulas and
+ * all).
+ */
+const READING_FORMAT = [
+  "Write every field as Markdown, the way the page renders it:",
+  "- Put each given quantity, and each thing required, on a `- ` bullet line of its own.",
+  "- Format every symbol, formula and value with its unit as LaTeX in Markdown math delimiters: `$...$` inline (for example `$d_1 = 60\\,\\text{mm}$`, `$\\theta = 30^\\circ$`, `$P_A$`), `$$...$$` for a displayed equation. Never leave a formula or a subscripted symbol as plain text such as d_1 = 60 mm.",
+  "- No headings, no backticks, no code blocks.",
+];
+
 export type TutorPromptExtras = {
   /** Human-confirmed problem statement from the interpretation pipeline. */
   interpretation?: string;
@@ -152,6 +165,7 @@ export function buildInterpretPrompt(
     "State the problem in your own words, list all given quantities with symbols and units, and state exactly what is being asked.",
     "If any part of the image is ambiguous or unreadable, say so explicitly in the relevant field rather than guessing silently.",
     "Set the `discrepancies` field to an empty string.",
+    ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
     "",
     userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
@@ -177,7 +191,8 @@ export function buildVerifyPrompt(
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
-    "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, as plain text with no Markdown or backticks. Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep only numbers, units, symbols, variable names, formulas and the figure's own labels (such as Fig. B.8b) exactly as in English, for example W = 0.5 kN, P_A, 30°. Every other field stays in English.",
+    "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, each part opening with a bold label on a line of its own (**題目：**, **圖示：**, **已知：**, **所求：**). Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep the figure's own labels (such as Fig. B.8b) as they are, and write every number with its unit, symbol, variable name and formula exactly as in the English fields, in the same `$...$` math, for example `$W = 0.5\\,\\text{kN}$`, `$P_A$`, `$30^\\circ$`. Every other field stays in English.",
+    ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
     "",
     "Interpretation A:",
@@ -232,7 +247,7 @@ export function buildJudgePrompt(
     "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
     "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer, what each solution got right or wrong, and the decisive reason - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
-    "Format formulas in `final_answer`, `assessments`, `comparison` and `traditional_chinese` with Markdown math delimiters: `$...$` inline, `$$...$$` displayed.",
+    "Write `final_answer`, `assessments`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     "Return JSON matching the required schema exactly.",
     "",
     userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
