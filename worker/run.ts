@@ -130,6 +130,8 @@ type UpstreamError = Error & {
    * runTask asks `finalize` before deciding between delivering and retrying.
    */
   partialText?: string;
+  /** What the upstream said inside a stream that stopped partway, if anything. */
+  upstreamDetail?: string;
 };
 
 function isRetryableStatus(status: number) {
@@ -433,16 +435,19 @@ export async function runTask(
      * that did not answer is more likely fixed by a different model than by
      * asking it again. The fallback starts with a fresh transient budget.
      */
-    const switchModel = async (): Promise<boolean> => {
+    const switchModel = async (why: string): Promise<boolean> => {
       const next = route.fallbackModels[modelFallbacks];
       if (!next) return false;
       modelFallbacks += 1;
       const previous = route.model;
       route = { ...route, model: next };
       transientRetries = 0;
+      // Says what went wrong, not just that something did: "did not answer"
+      // for a model that had written 9,352 characters before its stream
+      // stopped read as nonsense to the owner (26 September 2026).
       await write({
         type: "status",
-        message: `${route.label}: ${previous} did not answer. Trying ${next}...`,
+        message: `${route.label}: ${previous} ${why}. Trying ${next}...`,
       });
       // Same pause as a transient retry. Measured on Google: after 3.8-flash
       // closed the socket on a 190 KB request, an immediate 3.5-flash call to
@@ -518,7 +523,7 @@ export async function runTask(
           donePayload = finalize(rawText, { lastAttempt: !canSwitch });
           break;
         } catch (error) {
-          if (canSwitch && (await switchModel())) continue;
+          if (canSwitch && (await switchModel("returned an answer that could not be used"))) continue;
           // Asked again, the same model usually answers properly: these are
           // one-off degenerations, not a steady refusal - MiMo's blank
           // template of PLACEHOLDER_* fields, Kimi's empty object (both
@@ -547,7 +552,9 @@ export async function runTask(
         // client". A drop retries as-is; hitting the output cap retries a
         // level down, since less thinking is what leaves room for the answer.
         if (lastError.partialText !== undefined) {
-          const lowered = lastError.lowerEffort ? stepDownEffort(route, effort) : null;
+          const hitOutputCap = Boolean(lastError.lowerEffort);
+          const upstreamDetail = lastError.upstreamDetail;
+          const lowered = hitOutputCap ? stepDownEffort(route, effort) : null;
           const canStepDown = Boolean(lowered) && effortStepDowns < MAX_EFFORT_STEPDOWNS;
           const canRetry =
             modelFallbacks < route.fallbackModels.length ||
@@ -571,7 +578,10 @@ export async function runTask(
             });
             continue;
           }
-          if (await switchModel()) continue;
+          const why = hitOutputCap
+            ? "ran out of room before finishing the answer"
+            : `stopped partway through the answer${upstreamDetail ? ` (${upstreamDetail.slice(0, 140)})` : ""}`;
+          if (await switchModel(why)) continue;
           if (canRetry) {
             transientRetries += 1;
             await write({
@@ -642,7 +652,8 @@ export async function runTask(
         }
 
         if (!isRetryable(lastError)) break;
-        if (await switchModel()) continue;
+        const failure = lastError.status ? `HTTP ${lastError.status}` : "no response";
+        if (await switchModel(`did not answer (${failure})`)) continue;
         if (transientRetries >= MAX_TRANSIENT_RETRIES) {
           // This channel has had its retry. The next one in the chain gets a
           // fresh attempt before the solve is given up on.
@@ -663,7 +674,9 @@ export async function runTask(
       throw new Error(`${route.label} returned an empty response.`);
     }
 
-    await write({ type: "done", ...donePayload });
+    // The model that actually answered: after a switch down a model chain
+    // it is not the one the user picked (Gemini Flash is 3.8, then 3.5).
+    await write({ type: "done", ...donePayload, model: route.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
     try {
@@ -855,6 +868,9 @@ async function fetchStreamed(
     error.retryable = !sawCap;
     error.lowerEffort = sawCap;
     error.partialText = accumulated;
+    // A stream can carry its own error before it stops (a quota, say); the
+    // text reached the user, so the reason should too.
+    if (upstreamMessage) error.upstreamDetail = upstreamMessage;
     throw error;
   }
 

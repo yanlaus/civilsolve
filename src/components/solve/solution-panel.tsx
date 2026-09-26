@@ -322,9 +322,11 @@ export default function SolutionPanel({
             <div className="border-b border-cs-line-soft px-7 py-5">
               <div className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-cs-ink-3">
                 {activeLabel}
-                {tookLabel(activeProgress) ? (
+                {tookLabel(activeProgress) || (activeRun.status === "done" && activeRun.model) ? (
                   <span className="ml-2 font-normal normal-case tracking-normal">
-                    answered in {tookLabel(activeProgress)}
+                    answered
+                    {tookLabel(activeProgress) ? ` in ${tookLabel(activeProgress)}` : ""}
+                    {activeRun.status === "done" && activeRun.model ? ` with ${activeRun.model}` : ""}
                   </span>
                 ) : null}
               </div>

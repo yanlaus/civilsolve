@@ -94,7 +94,7 @@ The five UI levels (`none`/`low`/`medium`/`high`/`max`) do **not** mean the same
 
 - OpenAI-style enums accept `none` and `xhigh` only on GPT-5.x. Other bots clamp: `max` → `high`, and `none` is omitted.
 - Claude has no "off" enum value — thinking is disabled by omitting the parameter.
-- Gemini takes an integer token budget (2048 / 8192 / 16384 / 32768). Pro-tier models reject a budget of `0`, so `none` falls back to the model default.
+- Gemini 3 takes a thinking **level** (`thinkingConfig.thinkingLevel`: low / medium / high; `max` sends high, the top level). It took token budgets until 26 September 2026, when streamed gemini-3.5-flash on Vertex AI refused them on half of all requests ("Thinking budget is not supported for this model"). Pro cannot switch thinking off, so `none` sends nothing and falls back to the model default. The dialect still sends `thinkingBudget` for a route whose effort spec is a budget.
 
 A level with no mapping sends **nothing** rather than a value the model would reject.
 
