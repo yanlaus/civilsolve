@@ -32,16 +32,10 @@ export type WorkerEnv = {
   JOBS?: DurableObjectNamespace;
   /**
    * Workers Rate Limiting (wrangler.jsonc "ratelimits"): caps the model-calling
-   * requests each signed-in user can make per minute. Optional - without it
+   * requests each client IP can make per minute. Optional - without it
    * nothing is limited.
    */
   TASK_LIMITER?: RateLimit;
-
-  // --- Sign-in: Cloudflare Access (worker/access.ts) ---------------------
-  /** The Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com". */
-  ACCESS_TEAM_DOMAIN?: string;
-  /** The Access application's Audience (AUD) tag. */
-  ACCESS_AUD?: string;
 
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;

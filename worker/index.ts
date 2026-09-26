@@ -1,43 +1,28 @@
 import { Hono, type Context } from "hono";
 import { PROVIDER_KEYS, type HealthResponse, type ProviderKey, type ProviderStatus } from "../shared/providers";
 import { MAX_BODY_BYTES } from "../shared/stream-protocol";
-import { checkAccess } from "./access";
 import { routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
 
 export { TaskJob } from "./jobs";
 
-type AppEnv = {
-  Bindings: WorkerEnv;
-  /** `user`: who Cloudflare Access signed in (worker/access.ts). */
-  Variables: { user: string };
-};
+const app = new Hono<{ Bindings: WorkerEnv }>();
 
-const app = new Hono<AppEnv>();
-
-type AppContext = Context<AppEnv>;
-
-// Every API route is for signed-in users only. Cloudflare Access signs them
-// in at the edge; this verifies the token it attaches, so a request that
-// reached the Worker some other way is refused before it can spend a key.
-app.use("/api/*", async (c, next) => {
-  const access = await checkAccess(c.req.raw, c.env);
-  if (!access.ok) return c.json({ error: access.error }, access.status);
-  c.set("user", access.identity.user);
-  await next();
-});
+type AppContext = Context<{ Bindings: WorkerEnv }>;
 
 /**
- * Caps how many model-calling requests one user can start per minute
+ * Caps how many model-calling requests one client IP can start per minute
  * (wrangler.jsonc "ratelimits"; a whole run with every option on is about a
  * dozen). Re-attaching to a job and cancelling one are not counted: they
- * call no model.
+ * call no model. Keyed by IP because the API has no sign-in yet - the
+ * Cloudflare Access version, keyed by user, is parked on the
+ * `access-sign-in` branch.
  */
 async function rateLimited(c: AppContext): Promise<Response | null> {
   const limiter = c.env.TASK_LIMITER;
   if (!limiter) return null;
-  const { success } = await limiter.limit({ key: c.get("user") });
+  const { success } = await limiter.limit({ key: c.req.header("cf-connecting-ip") ?? "local" });
   if (success) return null;
   return c.json(
     { error: "Too many requests in the last minute. Wait a minute, then try again." },

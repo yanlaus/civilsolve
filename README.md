@@ -119,8 +119,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ```
 ├── worker/
-│   ├── index.ts            # Hono app: sign-in check, rate limit, validation, task endpoints, /api/jobs/:id
-│   ├── access.ts           # Cloudflare Access token verification (who may call /api/*)
+│   ├── index.ts            # Hono app: rate limit, validation, task endpoints, /api/jobs/:id
 │   ├── tasks.ts            # Request body -> task, for solve / interpret / judge
 │   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
@@ -148,7 +147,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── hooks/
 │   │   ├── use-solve.ts                # Per-provider state machine, solvers -> judge, restore, retry
 │   │   ├── use-interpret.ts            # interpret -> verify -> review
-│   │   ├── use-health.ts               # GET /api/health once for the page; sign-in refusals
+│   │   ├── use-health.ts               # GET /api/health once for the page
 │   │   └── use-wake-lock.ts            # Keep the screen on while a run is in flight
 │   └── lib/
 │       ├── sse.ts                      # SSE reader, job handles, re-attach, resume on return
@@ -169,7 +168,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ## API
 
-Every `/api/*` route is for signed-in users only (see "Sign-in and rate limiting" below). Without a valid Cloudflare Access token a route answers `401 {"error": ...}`; with sign-in not configured on the server, `503`. `POST /api/solve`, `/api/interpret` and `/api/judge` are also rate limited per user: past the limit they answer `429` with `retry-after: 60`. The page shows each of these messages as the tab's error.
+`POST /api/solve`, `/api/interpret` and `/api/judge` are rate limited per client IP: past the limit they answer `429` with `retry-after: 60`, and the page shows that message as the tab's error. There is no sign-in yet - see "Rate limiting" below.
 
 ### `GET /api/health`
 
@@ -302,16 +301,14 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | Binding | Class | Purpose |
 |---|---|---|
 | `JOBS` | `TaskJob` (`worker/jobs.ts`), SQLite-backed, migration `v1` | One Durable Object per task, so it finishes after the page leaves and keeps its answer 24 hours. Available on Workers Free and Paid; each job is billed for the time it is active (≈ 128 MB × run time), comfortably inside the Paid plan's 400,000 GB-s a month. Remove it and tasks run inline again |
-| `TASK_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2609`) | 20 model-calling requests (solve, interpret, judge) per signed-in user per minute. A whole run with every option on is about a dozen, so it only stops a runaway client. Re-attaching and cancelling are not counted. Remove it and nothing is limited |
+| `TASK_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2609`) | 20 model-calling requests (solve, interpret, judge) per client IP per minute. A whole run with every option on is about a dozen, so it only stops a runaway client. Re-attaching and cancelling are not counted. Remove it and nothing is limited |
 
 ### Vars (optional overrides, non-secret)
 
-No routing var is set: the only vars in `wrangler.jsonc` are the two sign-in settings, `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, which have no default in code. The **Default** column is the code default in `worker/channels.ts` (`DEFAULT_CHANNELS`, `ROUTES`, `INTERPRET_MODEL_DEFAULT`), and it is what production runs - the model ids live next to the route flags (`structured`, `timeoutMs`, `minEffort`) that were measured for them, so there is one place to read and change the routing. Set a var in `wrangler.jsonc` `vars` (production) or `.dev.vars` (local) only to depart from a default; `WorkerEnv` in the same file lists every one, and `GET /api/health` reports what is in effect.
+None is set: `wrangler.jsonc` carries an empty `vars` block. The **Default** column is the code default in `worker/channels.ts` (`DEFAULT_CHANNELS`, `ROUTES`, `INTERPRET_MODEL_DEFAULT`), and it is what production runs - the model ids live next to the route flags (`structured`, `timeoutMs`, `minEffort`) that were measured for them, so there is one place to read and change the routing. Set a var in `wrangler.jsonc` `vars` (production) or `.dev.vars` (local) only to depart from a default; `WorkerEnv` in the same file lists every one, and `GET /api/health` reports what is in effect.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ACCESS_TEAM_DOMAIN` | *(empty)* | Zero Trust team domain, e.g. `yourteam.cloudflareaccess.com`. Empty: the deployed API refuses everything (see "Sign-in and rate limiting") |
-| `ACCESS_AUD` | *(empty)* | The Access application's Audience (AUD) tag |
 | `CHATGPT_CHANNEL` | `opencode` | `opencode` or `poe` |
 | `CLAUDE_CHANNEL` | `poe` | Channel for Claude |
 | `GEMINI_CHANNEL` | `google` | `google` or `poe` |
@@ -408,20 +405,11 @@ npm run deploy     # vite build && wrangler deploy
 
 The app deploys to `https://civilsolve.<account>.workers.dev`.
 
-### Sign-in and rate limiting
+### Rate limiting
 
-The app spends the owner's provider subscriptions, so only people you allow can use it. **Cloudflare Access** signs them in at Cloudflare's edge, before anything reaches the Worker, and the Worker checks the proof Access attaches to every request (`worker/access.ts`): an RS256 JWT in the `Cf-Access-Jwt-Assertion` header, verified against the team's public keys (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`) for its signature, audience, issuer and expiry. A request that reaches the Worker without passing Access - a hostname Access does not cover, such as a preview URL, or an Access application that was removed - is refused with `401`, so no provider key is spent on it. With `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` empty the deployed API refuses everything with `503`: it fails closed. Requests to `localhost` (`npm run dev`, `npm run preview`) are the one exception, since Access never sees them; Cloudflare routes by hostname, so no request to the deployed Worker can pass for one.
+The model-calling routes are limited by the `TASK_LIMITER` binding (Workers Rate Limiting, `ratelimits` in `wrangler.jsonc`): 20 solve, interpret and judge requests per client IP (`cf-connecting-ip`) per minute, counted per Cloudflare location. A whole run with every option on is about a dozen, so this only stops a runaway client or script; people on one shared network share the limit. Past it the request gets `429` and the tab says to wait a minute. The period can only be 10 or 60 seconds. Re-attaching to a job (`GET /api/jobs/:id`) and cancelling one are not counted - they call no model.
 
-Set it up **before** deploying this version:
-
-1. In the Cloudflare dashboard, open **Workers & Pages → civilsolve → Settings → Domains & Routes** and enable **Cloudflare Access** on the `workers.dev` route (and on Preview URLs, if they are on). This creates an Access application for the Worker. For a custom domain, add a self-hosted Access application for that hostname in **Zero Trust → Access → Applications** instead.
-2. In **Zero Trust → Access → Applications**, edit that application's policy to allow exactly the people who may use the app (for example *Emails* `you@example.com`, or *Emails ending in* your school's domain). The One-time PIN login method needs no identity provider. Set the **session duration** to 24 hours or more, so a long solve does not outlive the sign-in.
-3. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`, under Zero Trust → Settings) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`, then `npm run deploy`.
-4. Check: opening the app in a private window should show the Access login; `curl -i https://civilsolve.<account>.workers.dev/api/health` should not return the provider list.
-
-A sign-in that expires in the middle of a run makes Access redirect the page's requests to its login page, which the browser reports as a network error; the page keeps reconnecting for 2 minutes and then asks for a reload, which signs in again and picks the run back up (its job ids are saved).
-
-**Rate limiting** is the `TASK_LIMITER` binding (Workers Rate Limiting, `ratelimits` in `wrangler.jsonc`): 20 solve, interpret and judge requests per signed-in user per minute, counted per Cloudflare location. A whole run with every option on is about a dozen, so this only stops a runaway client or script; past it the request gets `429` and the tab says to wait a minute. The period can only be 10 or 60 seconds. Re-attaching to a job (`GET /api/jobs/:id`) and cancelling one are not counted - they call no model.
+**There is no sign-in yet: anyone with the URL can use the app and spend the provider subscriptions.** Cloudflare Access sign-in is built - the Worker verifies the Access token on every `/api/*` request and fails closed without one, and the rate limit is then keyed per user rather than per IP - and parked on the `access-sign-in` branch until Access is set up in the Zero Trust dashboard. Merge that branch then; its README has the setup steps. Deploying it before Access is set up closes the API to everyone.
 
 The account is on **Workers Paid** ($5/month) since 22 September 2026, which raises CPU per invocation from 10 ms to 30 s (the default; `limits.cpu_ms` in `wrangler.jsonc` goes to 5 min). Measured on production the same day: MiMo streamed B.8 1,424 ms `ok`; DeepSeek streamed B.8 3,201 ms `ok` in 77 s (the free plan killed it at 63 s); DeepSeek as interpretation judge 1,906 ms `ok`. Nothing else in the plan matters here: a solve is at most 5 requests, static assets are unlimited, and the immediate SSE headers + heartbeats keep long solves alive. Everything below this line was written against the free plan and is kept because it explains why the code was shaped the way it was — the single-choice picker, the sequential interpretation pass, `NO_STREAM`, all since relaxed — and what to re-enable if the account ever drops back.
 
@@ -448,7 +436,6 @@ Model output is also **untrusted input** — the uploaded images are user-suppli
 ## Maintenance rules
 
 - Keep provider keys server-side only. No key ever reaches the client, and no key ever goes in a URL or query string.
-- Keep every `/api/*` route behind the Access check in `worker/index.ts`, and keep it failing closed when sign-in is not configured.
 - Keep `/api/solve/:provider` streaming — the immediate SSE response is what makes long solves survivable on Workers.
 - Do not turn one provider's failure into a whole-solve failure.
 - Keep `delta` events limited to visible output; never forward reasoning/thinking fragments.

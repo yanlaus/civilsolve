@@ -56,7 +56,7 @@ export default function CivilAnswerAppPage() {
     solveProvider,
     crossCheck,
   } = useSolve();
-  const { providerStatus, signInError } = useHealth();
+  const { providerStatus } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
@@ -119,8 +119,7 @@ export default function CivilAnswerAppPage() {
           .join(" · ")
       : "";
   const statusMessage = prepStatus || interpretStatus;
-  const bannerError =
-    error || (pipeline.status === "error" ? pipeline.message : "") || signInError;
+  const bannerError = error || (pipeline.status === "error" ? pipeline.message : "");
 
   function clearRecovered() {
     dismiss();
