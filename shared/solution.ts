@@ -80,8 +80,39 @@ export function cleanModelText(value: string) {
   return sanitizeText(fixEscapedNewlines(value));
 }
 
+// LaTeX commands a model wrote with one backslash inside JSON, where \r, \f,
+// \t, \b and \n are escapes: JSON.parse turned \rho into a carriage return
+// and "ho", \frac into a form feed and "rac", \text into a tab and "ext". The
+// page showed "$ ho = 790$" (MiMo, 27 September 2026).
+//
+// After a backspace, form feed or carriage return, letters can only be such a
+// command - nothing else puts those characters in text (a real \r\n line
+// ending has no letter after the \r). After a tab or a line break they are
+// the start of a word as often as not, so only these commands are restored:
+// a real line break followed by u_{1x} is velocity, not \nu.
+const TAB_COMMANDS = new Set([
+  "an", "anh", "au", "ext", "extbf", "extit", "extrm", "extstyle", "frac", "heta", "herefore",
+  "hinspace", "ilde", "imes", "o", "op", "riangle", "t",
+]);
+const NEWLINE_COMMANDS = new Set(["abla", "eq", "exists", "geq", "leq", "otin", "parallel", "subseteq", "supseteq"]);
+
+export function restoreSwallowedCommands(value: string) {
+  if (!/[\u0008\u0009\u000a\u000c\u000d][A-Za-z]/.test(value)) return value;
+  return value.replace(
+    /([\u0008\u0009\u000a\u000c\u000d])([A-Za-z]+)(?=(.?))/g,
+    (match, control: string, word: string, next: string) => {
+      if (control === "\u0008") return `\\b${word}`;
+      if (control === "\u000c") return `\\f${word}`;
+      if (control === "\u000d") return `\\r${word}`;
+      if (control === "\u0009") return TAB_COMMANDS.has(word) ? `\\t${word}` : match;
+      // "eq." at the start of a line is an abbreviation, not \neq.
+      return NEWLINE_COMMANDS.has(word) && !(word === "eq" && next === ".") ? `\\n${word}` : match;
+    },
+  );
+}
+
 export function sanitizeText(value: string) {
-  return value
+  return restoreSwallowedCommands(value)
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
     .replace(/[\u200b-\u200d\ufeff]/g, "")
     .replace(/\u0015/g, " x ")
