@@ -384,7 +384,14 @@ function normalizeMathExpression(value: string) {
         "\\",
       )
       // "35,\text{mm}": a thin space that lost its backslash.
-      .replace(/(\d),(?=\\text\{)/g, "$1\\,"),
+      .replace(/(\d),(?=\\text\{)/g, "$1\\,")
+      // A power inside a unit's text, \text{kg/m^3}: text mode shows the
+      // caret as typed, so the power moves out, \text{kg/m}^{3}.
+      .replace(
+        /\\(text|mathrm)\{([^{}]*?)\^(\{-?\d+\}|-?\d+)\}/g,
+        (_match, command: string, unit: string, power: string) =>
+          `\\${command}{${unit}}^{${power.replace(/^\{|\}$/g, "")}}`,
+      ),
   );
   const repaired = text
     // Thin spaces are kept: stripping them set every unit against its

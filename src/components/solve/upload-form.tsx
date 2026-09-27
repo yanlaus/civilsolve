@@ -964,8 +964,16 @@ export function UploadForm({
           disabled={!canSubmit}
           className="cs-primary inline-flex min-h-12 items-center justify-center gap-2 rounded-cs bg-cs-accent px-8 py-3 text-base font-semibold text-cs-on-accent shadow-[0_3px_14px_var(--cs-ring)] transition hover:-translate-y-0.5 hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50 sm:px-12"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-          {busy ? busyLabel : "Solve Problems"}
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : verifyEnabled ? (
+            <Eye className="h-4 w-4" />
+          ) : (
+            <Calculator className="h-4 w-4" />
+          )}
+          {/* With the interpretation pass on, this reads the question first -
+              nothing is solved until the reading is confirmed. */}
+          {busy ? busyLabel : verifyEnabled ? "Interpret Questions" : "Solve Problems"}
         </button>
         {solving ? (
           <button
