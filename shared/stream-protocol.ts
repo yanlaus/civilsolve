@@ -1,4 +1,5 @@
-// App-level SSE protocol for POST /api/solve, /api/interpret and /api/judge.
+// App-level SSE protocol for POST /api/solve, /api/interpret, /api/judge and
+// /api/study.
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
@@ -7,6 +8,7 @@ import type { JudgementResult } from "./judgement";
 import type { EffortKey } from "./prompt";
 import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
+import type { StudyKind, StudyResult } from "./study";
 
 /**
  * A re-generation: the version the model wrote last time, as text, and what
@@ -70,6 +72,33 @@ export type JudgeRequestBody = {
 };
 
 /**
+ * Study notes (shared/study.ts), from what the user picked: one solver's
+ * solution alone, or the verdict with the solutions it graded, as Solution
+ * A, B, ... in its order so its letters still match. Nothing of the notes is
+ * ever sent to the cross-check.
+ */
+export type StudyRequestBody = {
+  kind: StudyKind;
+  images: string[];
+  notes: string;
+  /** Human-confirmed problem statement from the optional interpretation pass. */
+  interpretation?: string;
+  /**
+   * As text (see `artifactToText`): the one solution the notes start from,
+   * or - with `verdict` - the one to MAX_JUDGED_SOLUTIONS it graded.
+   */
+  solutions: string[];
+  /** The cross-check verdict as text (`judgementToText`), when the notes start from it. */
+  verdict?: string;
+  /** Reasoning level. Defaults to "medium": the notes explain, they do not derive. */
+  effort?: EffortKey;
+  /** Which of the provider's models, when it offers several. */
+  variant?: ModelVariant;
+  /** Set when the user asked for the notes again, with instructions. */
+  revision?: RevisionRequest;
+};
+
+/**
  * The first event of every job's stream (worker/jobs.ts), on the first
  * connection and on every re-attach. Times are the server's clock, in ms;
  * `now` lets the page correct for its own clock being off, so the elapsed
@@ -106,6 +135,12 @@ export type JudgeEvent =
   | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
   | { type: "done"; judgement: JudgementResult; at?: number }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
+
+export type StudyEvent =
+  | { type: "status"; message: string; at?: number }
+  | { type: "delta"; text: string }
+  | { type: "done"; study: StudyResult; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
 /** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */
@@ -149,6 +184,7 @@ export function estimateBodyBytes(body: {
   referenceText?: string;
   referenceImages?: string[];
   solutions?: string[];
+  verdict?: string;
   revision?: RevisionRequest;
 }) {
   let total = 128; // envelope and field names
@@ -160,6 +196,7 @@ export function estimateBodyBytes(body: {
     (body.interpretation || "") +
     (body.referenceText || "") +
     (body.solutions ? body.solutions.join("") : "") +
+    (body.verdict || "") +
     (body.revision ? body.revision.previous + body.revision.instructions : "");
   return total + text.length * 3;
 }

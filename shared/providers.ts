@@ -210,6 +210,14 @@ export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
  */
 export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
 
+/**
+ * Default writer of the optional study notes (shared/study.ts), for both
+ * kinds; the user picks another for either. ChatGPT, like the judge: the
+ * notes are only as good as the model's grasp of the engineering, and they
+ * are written in English and Traditional Chinese at once.
+ */
+export const DEFAULT_STUDY_WRITER: ModelChoice = { provider: "chatgpt" };
+
 export type ChannelKey = "poe" | "opencode" | "google" | "minimax";
 
 export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "minimax"];

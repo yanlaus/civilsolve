@@ -10,7 +10,6 @@ import {
   Loader2,
   RotateCw,
   Scale,
-  Square,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -25,26 +24,40 @@ import {
 } from "../../../shared/providers";
 import type { EffortKey } from "../../../shared/prompt";
 import type { ProviderArtifact } from "../../../shared/solution";
-import { formatDuration } from "../../../shared/stream-protocol";
+import { STUDY_KINDS, type StudyKind } from "../../../shared/study";
 import {
   isJudgeActive,
   isRunActive,
+  isStudyActive,
   type ConfirmedInterpretation,
   type JudgeRun,
   type ProgressMap,
   type ProviderRuns,
   type RunVariants,
   type SolutionVersions,
+  type StudyProgress,
+  type StudyRuns,
+  type StudySource,
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
-import { formatClock, useNow, type Progress } from "@/lib/progress";
-import { STOP_BUTTON_CLASS } from "./interpret-progress";
+import { useNow, type Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
 import { ProviderLogo } from "./provider-logo";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { RunActions } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
+import { StudyNotes } from "./study-notes";
+import {
+  ERROR_BOX,
+  EventLog,
+  ProgressBox,
+  STOPPED_BOX,
+  STOPPED_DOT,
+  TIMEOUT_BOX,
+  TIMEOUT_DOT,
+  tookLabel,
+} from "./task-status";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
 type ViewKey = "problem" | "assumptions" | "steps" | "answer";
@@ -99,95 +112,6 @@ function verdictHeadline(labels: string[], correct: number[]) {
   const names = correct.map((index) => labels[index]);
   if (names.length === 1) return `${names[0]}'s solution is correct`;
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are correct`;
-}
-
-// A task that ran out of time and returned nothing is shown in orange, apart
-// from the red of a real failure: nothing went wrong that a rerun could not fix.
-const TIMEOUT_DOT = "bg-[#e67e22]";
-const TIMEOUT_BOX =
-  "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12]";
-const ERROR_BOX =
-  "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-cs-danger";
-// Stopped by the user: grey - neither a failure nor a timeout.
-const STOPPED_DOT = "bg-cs-ink-3";
-const STOPPED_BOX = "border-cs-line bg-cs-muted text-cs-ink-2";
-
-/**
- * Every status line so far, with when it came, so a long wait shows its
- * history - each retry, model switch and dropped connection - instead of one
- * line that never changes. The line already shown above is left out.
- */
-function EventLog({ progress, current }: { progress?: Progress; current?: string }) {
-  if (!progress) return null;
-  const events = progress.events.filter(
-    (event, index, all) => !(index === all.length - 1 && event.message === current),
-  );
-  if (!events.length) return null;
-  return (
-    <ol className="mt-3 space-y-1 border-t border-current/10 pt-2 text-xs opacity-80">
-      {events.map((event, index) => (
-        <li key={`${event.at}-${index}`} className="flex gap-2">
-          <span className="shrink-0 tabular-nums opacity-70">
-            {formatClock(event.at - progress.startedAt)}
-          </span>
-          <span className="min-w-0 break-words">{event.message}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/**
- * The progress bar of a task still running: what it is doing, how long it has
- * taken so far, and what happened on the way. The timeout is deliberately not
- * shown - only the time spent (the owner's choice, 25 September 2026).
- */
-function ProgressBox({
-  line,
-  progress,
-  now,
-  onStop,
-  stopTitle,
-}: {
-  line: string;
-  progress?: Progress;
-  now: number;
-  /** This task's own Stop; the others carry on. */
-  onStop?: () => void;
-  stopTitle?: string;
-}) {
-  const elapsed = progress ? now - progress.startedAt : 0;
-  return (
-    <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
-      <div className="flex items-center gap-3">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs-accent" />
-        <span className="min-w-0 flex-1 break-words">{line}</span>
-        {progress ? (
-          <span className="shrink-0 font-semibold tabular-nums" title="Time since the request was sent">
-            {formatClock(elapsed)}
-          </span>
-        ) : null}
-        {onStop ? (
-          <button type="button" onClick={onStop} title={stopTitle} className={STOP_BUTTON_CLASS}>
-            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-            Stop
-          </button>
-        ) : null}
-      </div>
-      <EventLog progress={progress} current={line} />
-    </div>
-  );
-}
-
-/**
- * How long a finished task took, when known: "2 min 15 s". Nothing under a
- * second - that is a request refused outright, or a job the server no longer
- * had, where a time would only mislead.
- */
-function tookLabel(progress?: Progress) {
-  if (!progress?.endedAt) return "";
-  const took = progress.endedAt - progress.startedAt;
-  return took >= 1000 ? formatDuration(took) : "";
 }
 
 /**
@@ -261,6 +185,11 @@ export default function SolutionPanel({
   onCrossCheck,
   onStopJudge,
   onRefineVerdict,
+  studyRuns,
+  studyProgress,
+  onWriteStudy,
+  onStopStudy,
+  onRefineStudy,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -285,6 +214,12 @@ export default function SolutionPanel({
   onStopJudge: () => void;
   /** Re-generates the verdict with the user's instructions. */
   onRefineVerdict: (instructions: string) => void;
+  /** The optional study notes under the solutions, by kind. */
+  studyRuns: StudyRuns;
+  studyProgress: StudyProgress;
+  onWriteStudy: (kind: StudyKind, choice: ModelChoice, effort: EffortKey, source: StudySource) => void;
+  onStopStudy: (kind: StudyKind) => void;
+  onRefineStudy: (kind: StudyKind, instructions: string) => void;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -339,8 +274,9 @@ export default function SolutionPanel({
   const activeLabel = nameOf(activeProvider);
   const activeProgress = progress[activeProvider];
   // Ticks every second while anything is still running, for the clocks.
+  const solving = visibleProviders.some((provider) => isRunActive(runs[provider.key]));
   const now = useNow(
-    visibleProviders.some((provider) => isRunActive(runs[provider.key])) || isJudgeActive(judgeRun),
+    solving || isJudgeActive(judgeRun) || STUDY_KINDS.some((kind) => isStudyActive(studyRuns[kind])),
   );
 
   // What "Save as PDF" prints: the open solution, or the verdict. Set just
@@ -623,7 +559,7 @@ export default function SolutionPanel({
                 ? "Needs this run's images, which this browser no longer has."
                 : locked
                   ? "Waits until the new upload is ready."
-                  : visibleProviders.some((provider) => isRunActive(runs[provider.key]))
+                  : solving
                     ? "Waits for every solver to finish."
                     : undefined
             }
@@ -632,6 +568,34 @@ export default function SolutionPanel({
             onSavePdf={() => printAs("verdict", "verified final answer")}
           />
         </div>
+      ) : null}
+
+      {/* Study notes last: written from a solution or the verdict above, as
+          picked on each card, and never sent back to the cross-check. */}
+      {visibleProviders.some((provider) => runs[provider.key].status === "done") ||
+      STUDY_KINDS.some((kind) => studyRuns[kind].status !== "idle") ? (
+        <StudyNotes
+          studyRuns={studyRuns}
+          studyProgress={studyProgress}
+          runs={runs}
+          judgeRun={judgeRun}
+          now={now}
+          providerStatus={providerStatus}
+          nameOf={nameOf}
+          judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
+          markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
+          interpretation={Boolean(interpretation)}
+          blocked={
+            !canRerun
+              ? "Needs this run's images, which this browser no longer has. Upload the question again to make notes."
+              : locked
+                ? "Waits until the new upload is ready."
+                : undefined
+          }
+          onWrite={onWriteStudy}
+          onStop={onStopStudy}
+          onRefine={onRefineStudy}
+        />
       ) : null}
 
       {/* Hidden on screen; the only visible content when printing (Save as PDF). */}

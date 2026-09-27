@@ -30,6 +30,7 @@ import {
   type ProviderRuns,
   type RunVariants,
 } from "@/hooks/use-solve";
+import { effortBand } from "@/lib/effort-band";
 
 const SELECT_CLASS =
   "mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent disabled:opacity-50";
@@ -92,18 +93,8 @@ export function RunActions({
   // runs at high or max); those are disabled, and a pick outside the band
   // moves to its nearest edge rather than being silently raised by the server.
   const [effortPick, setEffortPick] = useState<EffortKey>("high");
-  const judgeStatus = providerStatus?.[judge.provider];
-  const floor = judgeStatus?.forcedEffort ?? judgeStatus?.minEffort;
-  const ceiling = judgeStatus?.forcedEffort ?? judgeStatus?.maxEffort;
-  const floorIndex = floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : 0;
-  const ceilingIndex = ceiling ? EFFORT_KEYS.indexOf(ceiling as EffortKey) : EFFORT_KEYS.length - 1;
-  const inBand = (key: EffortKey) => {
-    const index = EFFORT_KEYS.indexOf(key);
-    return index >= floorIndex && index <= ceilingIndex;
-  };
-  const judgeEffort: EffortKey = inBand(effortPick)
-    ? effortPick
-    : EFFORT_KEYS[Math.min(Math.max(EFFORT_KEYS.indexOf(effortPick), floorIndex), ceilingIndex)];
+  const { inBand, clamp } = effortBand(providerStatus?.[judge.provider]);
+  const judgeEffort = clamp(effortPick);
 
   const solving = PROVIDER_KEYS.some((key) => isRunActive(runs[key]));
   const judging = isJudgeActive(judgeRun);

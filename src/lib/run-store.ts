@@ -11,6 +11,7 @@
 
 import type { EffortKey } from "../../shared/prompt";
 import { isProviderKey, type ModelVariant, type ProviderKey } from "../../shared/providers";
+import type { StudyKind } from "../../shared/study";
 
 const KEY = "civilsolve:last-run";
 
@@ -30,6 +31,19 @@ export type SavedJudge = {
   skipped?: ProviderKey[];
 };
 
+/** One kind of study notes: who writes it, its job, and what it was written from. */
+export type SavedStudy = {
+  provider: ProviderKey;
+  variant?: ModelVariant;
+  effort?: EffortKey;
+  /** Set once the request was sent; notes never sent are not resumed. */
+  jobId?: string;
+  /** What the notes start from: one solver's solution, or the verdict. */
+  source: ProviderKey | "verdict";
+  /** The solutions it was given: the source solver, or the verdict's A, B, ... */
+  solvers: ProviderKey[];
+};
+
 export type SavedRun = {
   savedAt: number;
   /** The solvers, in picker order. */
@@ -38,6 +52,8 @@ export type SavedRun = {
   judge: SavedJudge | null;
   /** The model picked for each solver that offers several (Gemini Flash or Pro). */
   variants?: Partial<Record<ProviderKey, ModelVariant>>;
+  /** The study notes asked for, by kind (shared/study.ts). */
+  study?: Partial<Record<StudyKind, SavedStudy>>;
 };
 
 export function loadRun(): SavedRun | null {
