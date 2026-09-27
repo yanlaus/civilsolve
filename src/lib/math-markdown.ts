@@ -93,15 +93,18 @@ function translateCjkLabels(value: string) {
     .replace(/(^|\n)\s*公式[:：]\s*/g, "$1Formula:\n");
 }
 
+// A rule here, and in normalizeDisplayText (shared/solution.ts), used to turn
+// "\times <word> \times" into bold "**<word>**" - a repair for some model's
+// bold markers - and so broke every product whose middle factor starts with
+// a letter: $\rho \times A_1 \times V_1$ showed as "ρ∗∗A1∗∗V1" (the owner,
+// 27 September 2026). The doubled forms below (\times\times ... \times\times,
+// ×× ... ××) never occur in real math and stay.
 function normalizeProviderArtifacts(value: string, options: RenderOptions) {
   const stripped = value
     .replace(/^\s*\\\s*$/gm, "")
     .replace(/(^|\n)\s*\\\s*(?=\\)/g, "$1");
   return (options.chinese ? stripped : translateCjkLabels(stripped))
     .replace(/\\times\s*\\times\s*([^\n]*?)\s*\\times\s*\\times/g, (_match, label: string) =>
-      `**${label.trim()}**`,
-    )
-    .replace(/\\times\s+([A-Za-z][^\\\n]{1,80}?)\s*\\times/g, (_match, label: string) =>
       `**${label.trim()}**`,
     )
     .replace(/×\s*×\s*([^\n]*?)\s*×\s*×/g, (_match, label: string) =>
@@ -385,6 +388,9 @@ function normalizeMathExpression(value: string) {
       )
       // "35,\text{mm}": a thin space that lost its backslash.
       .replace(/(\d),(?=\\text\{)/g, "$1\\,")
+      // Products the old "\times <word> \times" rule made bold, in results
+      // stored before it was removed: math has no bold markers.
+      .replace(/\*\*([^*]+?)\*\*/g, " \\times $1 \\times ")
       // A power inside a unit's text, \text{kg/m^3}: text mode shows the
       // caret as typed, so the power moves out, \text{kg/m}^{3}.
       .replace(
