@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   BookOpen,
   Check,
@@ -342,6 +343,53 @@ export default function SolutionPanel({
     visibleProviders.some((provider) => isRunActive(runs[provider.key])) || isJudgeActive(judgeRun),
   );
 
+  // What "Save as PDF" prints: the open solution, or the verdict. Set just
+  // before printing (flushSync, so the print area has it when the dialog
+  // opens) and left as it is afterwards - each button sets its own.
+  const [printTarget, setPrintTarget] = useState<"solution" | "verdict">("solution");
+  const printAs = (target: "solution" | "verdict", title: string) => {
+    flushSync(() => setPrintTarget(target));
+    exportPdf(title);
+  };
+
+  const verdictPrintHtml = useMemo(() => {
+    if (judgeRun.status !== "done") return "";
+    const { judgement, solvers } = judgeRun;
+    const escape = (value: string) =>
+      value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const letter = (index: number) => SOLUTION_LETTERS[index] ?? String(index + 1);
+    const label = (provider: ProviderKey) => escape(providerDisplayName(provider, variants.solvers[provider]));
+    const chinese = (value: string) =>
+      `<div lang="zh-Hant-HK">${renderMarkdown(value, { chinese: true })}</div>`;
+    return [
+      "<h1>Cross-check verdict</h1>",
+      `<p>Judged by ${escape(providerDisplayName(judgeRun.judge, variants.judge))}${
+        variants.judgeEffort ? ` at ${variants.judgeEffort} thinking` : ""
+      } · ${judgement.confidence} confidence</p>`,
+      "<ul>",
+      ...solvers.map(
+        (provider, index) =>
+          `<li>Solution ${letter(index)} · ${label(provider)}: <strong>${
+            judgement.correct.includes(index) ? "Correct 正確" : "Wrong 錯誤"
+          }</strong></li>`,
+      ),
+      "</ul>",
+      judgement.final_answer ? `<h2>Verified final answer</h2>${renderMarkdown(judgement.final_answer)}` : "",
+      ...solvers.map((provider, index) =>
+        [
+          `<h2>Solution ${letter(index)} · ${label(provider)}</h2>`,
+          renderMarkdown(judgement.assessments[index] ?? ""),
+          // Absent from verdicts given before 27 September 2026.
+          judgement.assessments_chinese?.[index] ? chinese(judgement.assessments_chinese[index]) : "",
+        ].join("\n"),
+      ),
+      judgement.comparison ? `<h2>Why</h2>${renderMarkdown(judgement.comparison)}` : "",
+      judgement.traditional_chinese
+        ? `<h2>繁體中文 · Traditional Chinese</h2>${chinese(judgement.traditional_chinese)}`
+        : "",
+    ].join("\n");
+  }, [judgeRun, variants]);
+
   const printHtml = useMemo(() => {
     if (!activeArtifact) return "";
     const escapedTitle = activeArtifact.title
@@ -462,7 +510,7 @@ export default function SolutionPanel({
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => exportPdf(activeArtifact.title)}
+                  onClick={() => printAs("solution", activeArtifact.title)}
                   className="inline-flex items-center gap-2 rounded-cs bg-cs-ink px-4 py-2 text-sm font-semibold text-cs-surface"
                 >
                   <Download className="h-4 w-4" />
@@ -612,15 +660,18 @@ export default function SolutionPanel({
             }
             interpretation={Boolean(interpretation)}
             onRefine={onRefineVerdict}
+            onSavePdf={() => printAs("verdict", "cross-check verdict")}
           />
         </div>
       ) : null}
 
       {/* Hidden on screen; the only visible content when printing (Save as PDF). */}
-      {printHtml ? (
+      {(printTarget === "verdict" ? verdictPrintHtml : printHtml) ? (
         <div
           className="print-area solution-content prose prose-stone hidden max-w-none print:block"
-          dangerouslySetInnerHTML={{ __html: printHtml }}
+          dangerouslySetInnerHTML={{
+            __html: printTarget === "verdict" ? verdictPrintHtml : printHtml,
+          }}
         />
       ) : null}
     </section>
@@ -639,11 +690,14 @@ function Assessment({
   label,
   letter,
   text,
+  chinese,
   correct,
 }: {
   label: string;
   letter: string;
   text: string;
+  /** The same assessment in Traditional Chinese, when the judge wrote it. */
+  chinese?: string;
   correct: boolean;
 }) {
   return (
@@ -657,6 +711,15 @@ function Assessment({
         Solution {letter} · {label}
       </div>
       {text ? <MathProse source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
+      {chinese?.trim() ? (
+        <div className="mt-2 border-t border-cs-line-soft pt-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+            繁體中文
+          </div>
+          <MathProse source={chinese} chinese />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -678,6 +741,7 @@ function JudgementCard({
   refineBlocked,
   interpretation,
   onRefine,
+  onSavePdf,
 }: {
   judgeRun: JudgeRun;
   /** The solvers now, to tell which finished after this verdict was given. */
@@ -692,6 +756,8 @@ function JudgementCard({
   /** Whether the run had a confirmed reading, which the judge also gets. */
   interpretation: boolean;
   onRefine: (instructions: string) => void;
+  /** Prints the verdict - verified answer, each assessment, the Chinese - as a PDF. */
+  onSavePdf: () => void;
 }) {
   if (judgeRun.status === "idle") return null;
   const judgeLabel = providerDisplayName(judgeRun.judge, variants.judge);
@@ -770,10 +836,20 @@ function JudgementCard({
             {tookLabel(progress) ? ` in ${tookLabel(progress)}` : ""}
           </span>
         </p>
-        <span
-          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.7rem] font-medium ${CONFIDENCE_CLASS[judgement.confidence]}`}
-        >
-          {judgement.confidence} confidence
+        <span className="flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.7rem] font-medium ${CONFIDENCE_CLASS[judgement.confidence]}`}
+          >
+            {judgement.confidence} confidence
+          </span>
+          <button
+            type="button"
+            onClick={onSavePdf}
+            className="inline-flex items-center gap-1.5 rounded-cs bg-cs-ink px-3 py-1.5 text-xs font-semibold text-cs-surface"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            Save as PDF
+          </button>
         </span>
       </div>
 
@@ -861,6 +937,7 @@ function JudgementCard({
                 label={nameOf(provider)}
                 letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
                 text={judgement.assessments[index] ?? ""}
+                chinese={judgement.assessments_chinese?.[index]}
                 correct={judgement.correct.includes(index)}
               />
             ))}

@@ -28,6 +28,8 @@ export type JudgementResult = {
   final_answer: string;
   /** One per solution, in order: what it got right and, precisely, where it went wrong. */
   assessments: string[];
+  /** The same assessments in Traditional Chinese, one per solution; empty strings if left out. */
+  assessments_chinese: string[];
   /** Where the solutions differ and the decisive reason for the verdict. */
   comparison: string;
   confidence: Confidence;
@@ -51,6 +53,7 @@ export const judgementSchema = {
     },
     final_answer: { type: "string" },
     assessments: { type: "array", items: { type: "string" } },
+    assessments_chinese: { type: "array", items: { type: "string" } },
     comparison: { type: "string" },
     confidence: { type: "string", enum: CONFIDENCES },
     traditional_chinese: { type: "string" },
@@ -59,6 +62,7 @@ export const judgementSchema = {
     "correct_solutions",
     "final_answer",
     "assessments",
+    "assessments_chinese",
     "comparison",
     "confidence",
     "traditional_chinese",
@@ -164,6 +168,7 @@ export function parseJudgement(
       correct: [],
       final_answer: "",
       assessments: Array.from({ length: count }, () => ""),
+      assessments_chinese: Array.from({ length: count }, () => ""),
       comparison: text,
       confidence: "low",
       traditional_chinese: "",
@@ -183,6 +188,10 @@ export function parseJudgement(
     correct: correct ?? [],
     final_answer: read("final_answer") || read("answer"),
     assessments: readAssessments(record.assessments, count),
+    assessments_chinese: readAssessments(
+      record.assessments_chinese ?? record.assessments_zh ?? record.chinese_assessments,
+      count,
+    ),
     comparison: read("comparison") || read("discrepancies") || read("reasoning"),
     confidence: readConfidence(read("confidence")),
     traditional_chinese: read("traditional_chinese") || read("chinese"),

@@ -21,6 +21,11 @@ export type InterpretationResult = {
   // they were resolved. Empty for the interpret stage.
   discrepancies: string;
   /**
+   * Verify (and revise) stage only: the discrepancies again in Traditional
+   * Chinese, shown under the English ones in the review step.
+   */
+  discrepancies_chinese: string;
+  /**
    * Verify stage only: the whole reconciled reading in Traditional Chinese,
    * shown beside the English for the user to check against. Display only -
    * the solvers are given the English. Empty for the interpret stage.
@@ -48,8 +53,12 @@ export const interpretationSchema = {
 export const verifiedInterpretationSchema = {
   type: "object",
   additionalProperties: false,
-  properties: { ...READING_PROPERTIES, traditional_chinese: { type: "string" } },
-  required: [...Object.keys(READING_PROPERTIES), "traditional_chinese"],
+  properties: {
+    ...READING_PROPERTIES,
+    discrepancies_chinese: { type: "string" },
+    traditional_chinese: { type: "string" },
+  },
+  required: [...Object.keys(READING_PROPERTIES), "discrepancies_chinese", "traditional_chinese"],
 } as const;
 
 /**
@@ -99,6 +108,7 @@ const FIELD_KEYS: Record<keyof InterpretationResult, string[]> = {
   given: ["given", "given_quantities", "givens", "given_data", "given_information", "known", "knowns", "data"],
   required: ["required", "required_quantities", "find", "to_find", "asked", "unknowns", "requirements"],
   discrepancies: ["discrepancies", "disagreements", "differences", "resolution"],
+  discrepancies_chinese: ["discrepancies_chinese", "discrepancies_zh", "chinese_discrepancies"],
   traditional_chinese: ["traditional_chinese", "chinese", "zh_hant", "zh", "translation"],
 };
 
@@ -182,6 +192,7 @@ export function parseInterpretation(
       given: "",
       required: "",
       discrepancies: "",
+      discrepancies_chinese: "",
       traditional_chinese: "",
     };
   }

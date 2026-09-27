@@ -61,7 +61,11 @@ const INTERPRETATION_FIELDS = [
   "discrepancies",
 ] as const;
 
-const VERIFIED_INTERPRETATION_FIELDS = [...INTERPRETATION_FIELDS, "traditional_chinese"] as const;
+const VERIFIED_INTERPRETATION_FIELDS = [
+  ...INTERPRETATION_FIELDS,
+  "discrepancies_chinese",
+  "traditional_chinese",
+] as const;
 
 /**
  * Units go inside the math with their number and exponent. Models also wrote
@@ -229,6 +233,10 @@ export function buildInterpretPrompt(
   return sections.join("\n");
 }
 
+/** The discrepancies again, in Chinese, for the review step. */
+const CHINESE_DISCREPANCIES =
+  "In the `discrepancies_chinese` field, write the `discrepancies` again in Traditional Chinese as written in Hong Kong, in the same Markdown and the same `$...$` math: translate every ordinary word; keep numbers, units, symbols and formulas exactly as in English.";
+
 /** The reconciler's Traditional Chinese version of the whole reading. */
 const CHINESE_READING =
   "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, each part opening with a bold label on a line of its own (**題目：**, **圖示：**, **已知：**, **所求：**). Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep the figure's own labels (such as Fig. B.8b) as they are, and write every number with its unit, symbol, variable name and formula exactly as in the English fields, in the same `$...$` math, for example `$W = 0.5\\,\\text{kN}$`, `$P_A$`, `$30^\\circ$`. Every other field stays in English.";
@@ -249,6 +257,7 @@ export function buildReviseReadingPrompt(
     "The attached civil engineering assignment images were read, and the reading below came out of it. The user reviewed it - and may have edited it - and asks for changes. Your job is to produce ONE corrected, authoritative reading that follows the user's instructions - do NOT solve the problem.",
     "Re-inspect the images yourself. Follow the user's instructions; where one contradicts what the images show, keep what the images show and say so. Keep everything in the current reading that is right.",
     "In the `discrepancies` field, list what you changed from the current reading and why (or state that nothing needed to change).",
+    CHINESE_DISCREPANCIES,
     CHINESE_READING,
     ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
@@ -290,6 +299,7 @@ export function buildVerifyPrompt(
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
+    CHINESE_DISCREPANCIES,
     CHINESE_READING,
     ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
@@ -344,11 +354,12 @@ export function buildJudgePrompt(
     "Then fill the fields:",
     `- \`correct_solutions\`: the letters of the solutions that reach the correct final answers (presentation and rounding differences do not matter), from ${letterList}. An empty list means none is correct or none could be verified.`,
     "- `final_answer`: the correct final answer(s) with units, as you verified them. If no solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
-    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}): what it got right and, precisely, where it went wrong - which step, what the error is, and what the value should be.`,
+    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}), each as \`- \` bullet points, one point per line: what it got right, and precisely where it went wrong - which step, what the error is, and what the value should be.`,
+    `- \`assessments_chinese\`: the same ${count} assessments, in the same order and the same bullet points, in Traditional Chinese as written in Hong Kong. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
     "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
-    "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer, what each solution got right or wrong, and the decisive reason - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
-    "Write `final_answer`, `assessments`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
+    "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
+    "Write `final_answer`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
     "",
@@ -375,12 +386,12 @@ export function buildJudgePrompt(
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic
     // all-strings skeleton cannot express.
-    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
     sections.push(
       "",
-      "Return exactly one JSON object with these 6 fields:",
+      "Return exactly one JSON object with these 7 fields:",
       skeleton,
-      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` has exactly ${count} strings, in order; \`confidence\` is one of "high", "medium", "low".`,
+      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` and \`assessments_chinese\` have exactly ${count} strings each, in order; \`confidence\` is one of "high", "medium", "low".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
     );
   }

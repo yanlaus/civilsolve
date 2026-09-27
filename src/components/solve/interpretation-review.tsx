@@ -117,6 +117,15 @@ export function InterpretationReview({
           <div className="mt-1">
             <RenderedText source={interpretation.discrepancies} />
           </div>
+          {interpretation.discrepancies_chinese?.trim() ? (
+            <div className="mt-2 border-t border-[#e8d9a8] pt-2">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
+                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+                {revisedWith ? "改動 · 繁體中文" : "兩份解讀的分歧 · 繁體中文"}
+              </div>
+              <RenderedText source={interpretation.discrepancies_chinese} chinese />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
