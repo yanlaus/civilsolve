@@ -1,9 +1,12 @@
 // Prompts shared by the Worker. The assignment arrives as attached images
 // (native vision input), so there are no OCR text sections.
 //
-// Three tasks live here: solving; the optional interpret/verify pass that
-// reads the diagram first and pauses for the user to confirm; and the
-// optional answer cross-check, where a judge grades two solvers' work.
+// Four tasks live here: solving; the optional interpret/verify pass that
+// reads the diagram first and pauses for the user to confirm; the optional
+// answer cross-check, where a judge grades two solvers' work; and the
+// optional study notes written from the solutions (shared/study.ts).
+
+import { STUDY_FIELDS, STUDY_PARTS, type StudyKind } from "./study";
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
 
@@ -27,6 +30,8 @@ export const SOLVE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown 
 export const INTERPRET_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} Do NOT solve the problem — only interpret it. Use English, except in a \`traditional_chinese\` field where one is asked for.`;
 
 export const JUDGE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are grading candidate solutions against the attached assignment; verify, do not trust. Use English, except in the \`traditional_chinese\` field.`;
+
+export const STUDY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor writing study notes on an assignment that has already been solved. Use English, except in the \`traditional_chinese\` field.`;
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -394,6 +399,116 @@ export function buildJudgePrompt(
       `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` and \`assessments_chinese\` have exactly ${count} strings each, in order; \`confidence\` is one of "high", "medium", "low".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
     );
+  }
+
+  return sections.join("\n");
+}
+
+export type StudyPromptExtras = {
+  /** Human-confirmed problem statement from the interpretation pass. */
+  interpretation?: string;
+  /** The cross-check verdict as text, when the notes start from its verified answer. */
+  verdict?: string;
+  enforceShape?: boolean;
+  /** A re-generation of earlier notes, with the user's instructions. */
+  revision?: RevisionExtras;
+};
+
+/**
+ * What each kind of study notes is (shared/study.ts), and what goes in each
+ * of its parts, in the order of STUDY_PARTS - which holds their labels.
+ */
+const STUDY_BRIEFS: Record<StudyKind, { what: string; audience: string; parts: string[] }> = {
+  approach: {
+    what: "the type of problem this is and how problems of this type are solved (題型解題思路), with the key formulas",
+    audience:
+      "Write it for a student preparing for the next question of the same type: general enough to reuse, and tied to this question by its numbers.",
+    parts: [
+      "what type of problem this is - the topic and the sub-type (for example, linear momentum applied to a pipe bend) - and the cues in a question that tell you it is this type.",
+      "the general method for this type of problem as numbered steps (`1.`, `2.`, ...): what each step finds and why it comes at that point, and in a few words how it plays out in this question.",
+      "each formula the method needs, as a displayed equation `$$...$$`, followed by what every symbol in it means, with its unit, and when the formula applies (its assumptions and sign convention).",
+      "the traps in this type of problem, as `- ` bullet lines, including any that a solution below fell into.",
+    ],
+  },
+  explain: {
+    what: "the question and its solution explained simply, for a civil engineering student who has not understood much of this subject yet",
+    audience:
+      'Write for a beginner: plain words and short sentences, every technical term explained the first time it is used, an everyday analogy where it helps, and no step skipped or waved through as "obvious".',
+    parts: [
+      "the physical situation in everyday words: what the structure or flow is, what acts on what, what the question asks for, and why an engineer would want to know it.",
+      "each concept the solution relies on, explained simply - what it means physically, not only its formula - as `- ` bullet lines.",
+      "the solution walked through as numbered steps (`1.`, `2.`, ...), each saying in plain words what is done and why, then the calculation with its numbers.",
+      "the final answer(s) with units, what they mean physically, and a quick check that they are reasonable - sign, direction, order of magnitude.",
+    ],
+  },
+};
+
+/**
+ * Study notes on a solved assignment, from what the user picked: one solver's
+ * solution, or the cross-check's verified answer - the verdict, with the
+ * solutions it graded as Solution A, B, ... in its order, for their working.
+ */
+export function buildStudyPrompt(
+  kind: StudyKind,
+  userNotes: string,
+  solutions: string[],
+  extras: StudyPromptExtras = {},
+) {
+  const brief = STUDY_BRIEFS[kind];
+  const labels = STUDY_PARTS[kind];
+  const count = solutions.length;
+  const letters = solutions.map((_, index) => String.fromCharCode(65 + index));
+  const sections = extras.verdict
+    ? [
+        `The attached civil engineering assignment images have been solved by ${count === 1 ? "a solver" : `${count} solvers`}, and a cross-check graded ${count === 1 ? "the solution" : "their solutions"}: the solutions and the verdict are below. Your job is to write study notes on it: ${brief.what}.`,
+        "Build the notes on the verdict's verified final answer - it is authoritative - and on the method of the solutions it found correct; where a solution it found wrong went astray, use that for the mistakes to avoid.",
+      ]
+    : [
+        `The attached civil engineering assignment images have been solved; the solution is below. Your job is to write study notes on it: ${brief.what}.`,
+        "Build the notes on this solution. If it has a clear error, follow the correct engineering and point the error out.",
+      ];
+
+  sections.push(
+    "",
+    `\`guide\`: ${brief.what}. ${brief.audience} Explain the method and the reasoning rather than copying a solution's working. Write it in ${labels.length} parts, in this order:`,
+    ...labels.map((part, index) => `- ${part.label}: ${brief.parts[index]}`),
+    `Open each part with its label in bold on a line of its own - \`**${labels[0].label}**\` - and start the part's content on the next line, never on the label's line.`,
+    "",
+    `\`traditional_chinese\`: the whole \`guide\` again in Traditional Chinese as written in Hong Kong - the same parts in the same order, each opening with its bold label on a line of its own (${labels
+      .map((part) => `**${part.chinese}**`)
+      .join(", ")}), with the same Markdown and the same \`$...$\` math. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. The student is taught in English, so give the English term in brackets after a technical term the first time it appears, for example 動量方程 (momentum equation).`,
+    "",
+    "Write `guide` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$Q = A_1 V_1$`), `$$...$$` for a displayed equation - never as plain text such as Q = A1 V1; lists as `- ` bullet lines or numbered `1.` lines; no headings, backticks or code blocks.",
+    UNIT_RULE,
+    "Return JSON matching the required schema exactly.",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  );
+
+  if (extras.interpretation) {
+    sections.push(
+      "",
+      "Confirmed problem interpretation (cross-checked by two readers and reviewed by the user):",
+      extras.interpretation,
+      "Treat this interpretation as the authoritative reading of the problem.",
+    );
+  }
+
+  if (extras.verdict) {
+    solutions.forEach((solution, index) => {
+      sections.push("", `Solution ${letters[index]}:`, solution);
+    });
+    sections.push("", "Cross-check verdict (the letters are the solutions above):", extras.verdict);
+  } else {
+    sections.push("", "Solution:", solutions[0]);
+  }
+
+  if (extras.revision) {
+    sections.push(...revisionSection("study notes", "`guide`", extras.revision));
+  }
+
+  if (extras.enforceShape) {
+    sections.push(...shapeContract(STUDY_FIELDS));
   }
 
   return sections.join("\n");

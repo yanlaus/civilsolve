@@ -24,6 +24,12 @@
 // instructions (refineProvider, refineVerdict): the model gets everything the
 // first request had, plus its last version and the instructions. The last
 // version stays on the page if the re-generation fails or is stopped.
+//
+// Once there are solutions, study notes can be asked for (writeStudy), each
+// kind by the model the user picks (shared/study.ts), starting from the
+// solution the user picks - one solver's, or the verdict's verified answer;
+// nothing of the notes goes to the cross-check. They are saved with the run,
+// stopped (stopStudy) and re-generated (refineStudy) like the verdict.
 
 import { useCallback, useRef, useState } from "react";
 import {
@@ -32,6 +38,7 @@ import {
   type JudgementResult,
 } from "../../shared/judgement";
 import {
+  isProviderKey,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
   type ModelChoice,
@@ -47,7 +54,9 @@ import {
   type JudgeRequestBody,
   type RevisionRequest,
   type SolveRequestBody,
+  type StudyRequestBody,
 } from "../../shared/stream-protocol";
+import { STUDY_KINDS, type StudyKind, type StudyResult } from "../../shared/study";
 import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
 import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
@@ -175,6 +184,52 @@ const JUDGE_STOPPED = "You stopped the cross-check.";
 
 type DoneJudge = Extract<JudgeRun, { status: "done" }>;
 
+/** Who writes one kind of study notes: the model, and how hard it thinks. */
+export type StudyWriter = { provider: ProviderKey; variant?: ModelVariant; effort?: EffortKey };
+
+/** What study notes start from: one solver's solution, or the verdict's verified answer. */
+export type StudySource = ProviderKey | "verdict";
+
+/** What notes were written from: the source, and the solutions it sent (the verdict's A, B, ...). */
+export type StudyBasis = { source: StudySource; solvers: ProviderKey[] };
+
+/** One kind of study notes: `basis` says what they were written from. */
+export type StudyRun =
+  | { status: "idle" }
+  | ({ status: "waiting"; message: string } & StudyWriter)
+  | ({ status: "streaming"; charsReceived: number } & StudyWriter)
+  | ({
+      status: "done";
+      study: StudyResult;
+      basis: StudyBasis;
+      model?: string;
+      revisedWith?: string;
+      notice?: string;
+    } & StudyWriter)
+  | ({ status: "error"; message: string; timedOut?: boolean; stopped?: boolean } & StudyWriter);
+
+export type StudyRuns = Record<StudyKind, StudyRun>;
+
+/** Each kind's timeline (lib/progress.ts), while it runs and after. */
+export type StudyProgress = Partial<Record<StudyKind, Progress>>;
+
+type DoneStudy = Extract<StudyRun, { status: "done" }>;
+
+const STUDY_STOPPED = "You stopped the study notes.";
+
+const IDLE_STUDY: StudyRuns = { approach: { status: "idle" }, explain: { status: "idle" } };
+
+export function isStudyActive(
+  run: StudyRun,
+): run is Extract<StudyRun, { status: "waiting" | "streaming" }> {
+  return run.status === "waiting" || run.status === "streaming";
+}
+
+/** The writer of a study run that has one. */
+function writerOf(run: Exclude<StudyRun, { status: "idle" }>): StudyWriter {
+  return { provider: run.provider, variant: run.variant, effort: run.effort };
+}
+
 /** A message to go mid-sentence: "... did not work: HTTP 500. This is ..." */
 function withoutFullStop(message: string) {
   return message.trim().replace(/[.。]+$/, "");
@@ -246,6 +301,18 @@ export function useSolve() {
   const solutionsRef = useRef(new Map<ProviderKey, ProviderArtifact>());
   /** Bumped by every new run, so a restore still loading its body stands down. */
   const generationRef = useRef(0);
+  const [studyRuns, setStudyRuns] = useState<StudyRuns>(IDLE_STUDY);
+  const [studyProgress, setStudyProgress] = useState<StudyProgress>({});
+  /** Each kind of study notes in flight, for its Stop; and each one's last notes. */
+  const studyTasksRef = useRef(new Map<StudyKind, RunningTask>());
+  const studyDoneRef = useRef(new Map<StudyKind, DoneStudy>());
+  // What the page shows now, read when study notes are asked for: the
+  // solutions on it and the verdict under them are what the notes are
+  // written from.
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
+  const judgeRunRef = useRef(judgeRun);
+  judgeRunRef.current = judgeRun;
 
   const setBody = useCallback((body: SolveRequestBody | null) => {
     bodyRef.current = body;
@@ -280,6 +347,7 @@ export function useSolve() {
     handlesRef.current = [];
     tasksRef.current = new Map();
     judgeTaskRef.current = null;
+    studyTasksRef.current = new Map();
   }, []);
 
   /**
@@ -289,16 +357,18 @@ export function useSolve() {
    */
   const cancel = useCallback(() => {
     // Their clocks stop where they were, for "stopped after 1:20".
-    for (const task of tasksRef.current.values()) task.tracker.end();
-    judgeTaskRef.current?.tracker.end();
+    const running = [...tasksRef.current.values(), judgeTaskRef.current, ...studyTasksRef.current.values()];
+    for (const task of running) task?.tracker.end();
     // Re-generations in flight go back to the version they started from.
-    const restores = [...tasksRef.current.values(), judgeTaskRef.current].flatMap((task) =>
-      task?.onStop ? [task.onStop] : [],
-    );
+    const restores = running.flatMap((task) => (task?.onStop ? [task.onStop] : []));
     stopCurrent();
     clearRun();
     void clearBody();
     bodySavedRef.current = null;
+    // First, so the previous version is back before whatever is still
+    // running is marked stopped: a solver's restore only replaces a task that
+    // is still running, and it would find it already marked stopped.
+    for (const restore of restores) restore();
     setRuns((current) => {
       const next = { ...current };
       for (const key of Object.keys(next) as ProviderKey[]) {
@@ -311,7 +381,16 @@ export function useSolve() {
         ? { status: "error", judge: current.judge, message: JUDGE_STOPPED, stopped: true }
         : current,
     );
-    for (const restore of restores) restore();
+    setStudyRuns((current) => {
+      const next = { ...current };
+      for (const kind of STUDY_KINDS) {
+        const run = next[kind];
+        if (isStudyActive(run)) {
+          next[kind] = { status: "error", ...writerOf(run), message: STUDY_STOPPED, stopped: true };
+        }
+      }
+      return next;
+    });
   }, [stopCurrent]);
 
   /**
@@ -369,6 +448,9 @@ export function useSolve() {
     setSolutionVersions({});
     doneRef.current = new Map();
     judgeDoneRef.current = null;
+    setStudyRuns(IDLE_STUDY);
+    setStudyProgress({});
+    studyDoneRef.current = new Map();
   }, [stopCurrent, setBody]);
 
   /**
@@ -545,6 +627,99 @@ export function useSolve() {
   );
 
   /**
+   * Sends (or, with `sent` null, re-attaches to) one kind of study notes, as
+   * recorded in `run.study`. A re-generation that fails or is stopped puts
+   * the previous notes back.
+   */
+  const studyOne = useCallback(
+    async (
+      context: RunContext,
+      kind: StudyKind,
+      sent: StudyRequestBody | null,
+      refinement?: Refinement<DoneStudy>,
+    ) => {
+      const { run, signal } = context;
+      const saved = run.study?.[kind];
+      if (!saved) return;
+      const writer: StudyWriter = { provider: saved.provider, variant: saved.variant, effort: saved.effort };
+      const basis: StudyBasis = { source: saved.source, solvers: saved.solvers };
+      const handle = jobHandle(saved.jobId ?? null);
+      // Its own controller, so its Stop leaves everything else running.
+      const own = childController(signal);
+      const live = () => !own.signal.aborted && !handle.stopped;
+      const previous = refinement ? { ...refinement.previous, notice: undefined } : null;
+      const show = (next: StudyRun) => {
+        if (!live()) return;
+        let shown = next;
+        if (next.status === "error" && previous) {
+          shown = {
+            ...previous,
+            notice: next.stopped
+              ? "The re-generation was stopped. These are the previous notes."
+              : `Re-generating the notes did not work: ${withoutFullStop(next.message)}. These are the previous notes.`,
+          };
+        } else if (next.status === "done" && refinement) {
+          shown = { ...next, revisedWith: refinement.revision.instructions };
+        }
+        if (shown.status === "done") studyDoneRef.current.set(kind, shown);
+        setStudyRuns((current) => ({ ...current, [kind]: shown }));
+      };
+
+      handlesRef.current.push(handle);
+      const onJob = (id: string) => {
+        saved.jobId = id;
+        persist();
+      };
+      const tracker = trackProgress((next) => {
+        if (live()) setStudyProgress((current) => ({ ...current, [kind]: next }));
+      });
+      const task: RunningTask = {
+        handle,
+        abort: own,
+        tracker,
+        onStop: previous
+          ? () =>
+              setStudyRuns((current) =>
+                isStudyActive(current[kind])
+                  ? {
+                      ...current,
+                      [kind]: { ...previous, notice: "You stopped the re-generation. These are the previous notes." },
+                    }
+                  : current,
+              )
+          : undefined,
+      };
+      studyTasksRef.current.set(kind, task);
+      try {
+        await withResume(
+          () => streamStudy(writer, basis, sent, own.signal, show, handle, onJob, tracker),
+          handle,
+          own.signal,
+          (message) => {
+            tracker.note(message);
+            show({ status: "waiting", ...writer, message });
+          },
+        );
+      } catch (error) {
+        if (!live()) return;
+        tracker.end();
+        show({
+          status: "error",
+          ...writer,
+          message: isConnectionLost(error)
+            ? `${UNREACHABLE} the study notes (kept for 24 hours).`
+            : error instanceof Error
+              ? error.message
+              : "The study notes request failed.",
+        });
+      } finally {
+        if (studyTasksRef.current.get(kind) === task) studyTasksRef.current.delete(kind);
+      }
+    },
+    [persist],
+  );
+
+  /**
    * Runs (or re-attaches to) every solver of `run`, then its judge. `body`
    * is null for a run restored after a reload: jobs are re-attached to,
    * never started, until the user asks.
@@ -561,10 +736,18 @@ export function useSolve() {
       versionsRef.current = {};
       setSolutionVersions({});
       const context: RunContext = { run, signal, solutions: solutionsRef.current };
+      studyDoneRef.current = new Map();
       persist();
       setProgress({});
       setJudgeProgress(null);
+      setStudyProgress({});
       setVariants(variantsOf(run));
+
+      // Study notes already sent (a restored run) are re-attached to at once:
+      // they were written from solutions that are finished.
+      for (const kind of STUDY_KINDS) {
+        if (run.study?.[kind]?.jobId) void studyOne(context, kind, null);
+      }
 
       void (async () => {
         // A copy: a solver added while these run is started on its own.
@@ -575,7 +758,7 @@ export function useSolve() {
         await judgeOne(context, body);
       })();
     },
-    [stopCurrent, currentSignal, persist, solveOne, judgeOne],
+    [stopCurrent, currentSignal, persist, solveOne, judgeOne, studyOne],
   );
 
   const start = useCallback(
@@ -594,6 +777,7 @@ export function useSolve() {
           ? { status: "waiting", judge: judge.provider, message: "Waiting for the solutions..." }
           : { status: "idle" },
       );
+      setStudyRuns(IDLE_STUDY);
       bodySavedRef.current = null;
       setBody(body);
       execute(
@@ -630,6 +814,28 @@ export function useSolve() {
         ? { status: "waiting", judge: run.judge.provider, message: "Reconnecting..." }
         : { status: "idle" },
     );
+    // Study notes that were sent come back; ones never sent are forgotten.
+    const study: StudyRuns = { ...IDLE_STUDY };
+    for (const kind of STUDY_KINDS) {
+      const saved = run.study?.[kind];
+      if (
+        saved?.jobId &&
+        isProviderKey(saved.provider) &&
+        Array.isArray(saved.solvers) &&
+        (saved.source === "verdict" || isProviderKey(saved.source))
+      ) {
+        study[kind] = {
+          status: "waiting",
+          provider: saved.provider,
+          variant: saved.variant,
+          effort: saved.effort,
+          message: "Reconnecting...",
+        };
+      } else if (run.study) {
+        delete run.study[kind];
+      }
+    }
+    setStudyRuns(study);
     const generation = ++generationRef.current;
     void loadBody(run.savedAt).then((stored) => {
       if (generationRef.current !== generation) return;
@@ -751,6 +957,129 @@ export function useSolve() {
     [currentSignal, persist, judgeOne],
   );
 
+  /**
+   * Sends one kind of study notes, starting from `source` as the page shows
+   * it now: one solver's finished solution alone, or the verdict with the
+   * solutions it graded - in its order, so its letters still match. A
+   * re-generation adds the last notes and the user's instructions.
+   */
+  const sendStudy = useCallback(
+    (
+      kind: StudyKind,
+      writer: StudyWriter,
+      source: StudySource,
+      refinement?: Refinement<DoneStudy>,
+    ) => {
+      const run = runRef.current;
+      const body = bodyRef.current;
+      // One request per kind at a time; the page disables the button meanwhile.
+      if (!run || !body || studyTasksRef.current.has(kind)) return;
+      const current = runsRef.current;
+      const solutionOf = (key: ProviderKey) => {
+        const entry = current[key];
+        return entry.status === "done" ? entry.solution : null;
+      };
+      const judged =
+        source === "verdict" && judgeRunRef.current.status === "done" ? judgeRunRef.current : null;
+      if (source === "verdict" ? !judged : !solutionOf(source)) return;
+      const solvers = judged ? judged.solvers : [source as ProviderKey];
+      if (!solvers.some((key) => solutionOf(key))) return;
+
+      const sent: StudyRequestBody = {
+        kind,
+        images: body.images,
+        notes: body.notes,
+        ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+        solutions: solvers.map((key) => {
+          const solution = solutionOf(key);
+          // A graded solution that has gone since (retried, and failed):
+          // kept as a placeholder so the verdict's letters still line up.
+          return solution
+            ? artifactToText(solution, MAX_SOLUTION_TEXT)
+            : "(This solution is no longer available.)";
+        }),
+        ...(judged ? { verdict: judgementToText(judged.judgement, judged.solvers.length) } : {}),
+        ...(writer.variant ? { variant: writer.variant } : {}),
+        ...(writer.effort ? { effort: writer.effort } : {}),
+        ...(refinement ? { revision: refinement.revision } : {}),
+      };
+      if (estimateBodyBytes(sent) > MAX_BODY_BYTES) {
+        setStudyRuns((runs) => ({
+          ...runs,
+          [kind]: {
+            status: "error",
+            ...writer,
+            message: "The images plus the solutions exceed the request size limit.",
+          },
+        }));
+        return;
+      }
+
+      run.study = {
+        ...run.study,
+        [kind]: { ...writer, source, solvers },
+      };
+      persist();
+      setStudyRuns((runs) => ({
+        ...runs,
+        [kind]: {
+          status: "waiting",
+          ...writer,
+          message: refinement ? "Sending your instructions..." : "Submitting...",
+        },
+      }));
+      void studyOne(
+        { run, signal: currentSignal(), solutions: solutionsRef.current },
+        kind,
+        sent,
+        refinement,
+      );
+    },
+    [currentSignal, persist, studyOne],
+  );
+
+  /** Study notes of one kind, by the model the user picked, from the solution they picked. */
+  const writeStudy = useCallback(
+    (kind: StudyKind, choice: ModelChoice, effort: EffortKey, source: StudySource) =>
+      sendStudy(kind, { provider: choice.provider, variant: choice.variant, effort }, source),
+    [sendStudy],
+  );
+
+  /** The notes again, by the same model from the same source, with the user's instructions. */
+  const refineStudy = useCallback(
+    (kind: StudyKind, instructions: string) => {
+      const previous = studyDoneRef.current.get(kind);
+      const wanted = instructions.trim();
+      if (!previous || !previous.study.guide || !wanted) return;
+      sendStudy(kind, writerOf(previous), previous.basis.source, {
+        revision: { previous: previous.study.guide.slice(0, MAX_SOLUTION_TEXT), instructions: wanted },
+        previous,
+      });
+    },
+    [sendStudy],
+  );
+
+  /** One kind of notes' Stop: everything else carries on. */
+  const stopStudy = useCallback((kind: StudyKind) => {
+    const task = studyTasksRef.current.get(kind);
+    if (!task) return;
+    studyTasksRef.current.delete(kind);
+    task.tracker.end();
+    stopTask(task.handle, task.abort);
+    if (task.onStop) task.onStop();
+    else {
+      setStudyRuns((current) => {
+        const run = current[kind];
+        return isStudyActive(run)
+          ? {
+              ...current,
+              [kind]: { status: "error", ...writerOf(run), message: STUDY_STOPPED, stopped: true },
+            }
+          : current;
+      });
+    }
+  }, []);
+
   return {
     runs,
     judgeRun,
@@ -770,6 +1099,11 @@ export function useSolve() {
     crossCheck,
     stopJudge,
     refineVerdict,
+    studyRuns,
+    studyProgress,
+    writeStudy,
+    stopStudy,
+    refineStudy,
   };
 }
 
@@ -1096,5 +1430,72 @@ async function runJudge({
           ? error.message
           : "The cross-check request failed.",
     });
+  }
+}
+
+/**
+ * One attempt at one kind of study notes: re-attaches to its job if the
+ * handle has one, otherwise sends `body`. Throws when the connection is lost,
+ * which is withResume's cue to re-attach.
+ */
+async function streamStudy(
+  writer: StudyWriter,
+  basis: StudyBasis,
+  body: StudyRequestBody | null,
+  signal: AbortSignal,
+  show: (run: StudyRun) => void,
+  handle: JobHandle,
+  onJob: (id: string) => void,
+  tracker: ProgressTracker,
+) {
+  let charsReceived = 0;
+  const stream = await openTaskStream(handle, `/api/study/${writer.provider}`, body, signal);
+  let terminal = false;
+
+  for await (const event of readSseEvents(stream)) {
+    if (takeJobEvent(handle, event, onJob)) {
+      tracker.job(handle);
+      continue;
+    }
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(event.data) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (event.name === "status" && typeof payload.message === "string") {
+      charsReceived = 0;
+      tracker.status(payload.message, payload.at);
+      show({ status: "waiting", ...writer, message: payload.message });
+    } else if (event.name === "delta" && typeof payload.text === "string") {
+      charsReceived += payload.text.length;
+      show({ status: "streaming", ...writer, charsReceived });
+    } else if (event.name === "done" && payload.study && typeof payload.study === "object") {
+      terminal = true;
+      tracker.end(payload.at);
+      show({
+        status: "done",
+        ...writer,
+        study: payload.study as StudyResult,
+        basis,
+        ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}),
+      });
+    } else if (event.name === "error" && typeof payload.message === "string") {
+      terminal = true;
+      tracker.end(payload.at);
+      show({
+        status: "error",
+        ...writer,
+        ...(payload.message === SERVER_CANCELLED
+          ? { message: STUDY_STOPPED, stopped: true }
+          : { message: payload.message }),
+        ...(payload.timedOut === true ? { timedOut: true } : {}),
+      });
+    }
+  }
+
+  if (!terminal) {
+    throw new StreamInterruptedError("The study notes stream ended before the notes arrived.");
   }
 }

@@ -7,7 +7,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
 import { useHealth } from "@/hooks/use-health";
 import { useInterpret } from "@/hooks/use-interpret";
-import { isJudgeActive, isRunActive, useSolve } from "@/hooks/use-solve";
+import { isJudgeActive, isRunActive, isStudyActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { useNow } from "@/lib/progress";
@@ -66,6 +66,11 @@ export default function CivilAnswerAppPage() {
     crossCheck,
     stopJudge,
     refineVerdict,
+    studyRuns,
+    studyProgress,
+    writeStudy,
+    stopStudy,
+    refineStudy,
   } = useSolve();
   const { providerStatus } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
@@ -116,7 +121,10 @@ export default function CivilAnswerAppPage() {
     };
   }, []);
 
-  const isSolving = Object.values(runs).some(isRunActive) || isJudgeActive(judgeRun);
+  const isSolving =
+    Object.values(runs).some(isRunActive) ||
+    isJudgeActive(judgeRun) ||
+    Object.values(studyRuns).some(isStudyActive);
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
 
@@ -361,6 +369,11 @@ export default function CivilAnswerAppPage() {
             onCrossCheck={crossCheck}
             onStopJudge={stopJudge}
             onRefineVerdict={refineVerdict}
+            studyRuns={studyRuns}
+            studyProgress={studyProgress}
+            onWriteStudy={writeStudy}
+            onStopStudy={stopStudy}
+            onRefineStudy={refineStudy}
           />
         </Suspense>
       </div>

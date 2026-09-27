@@ -17,12 +17,14 @@ import {
   buildInterpretPrompt,
   buildJudgePrompt,
   buildReviseReadingPrompt,
+  buildStudyPrompt,
   buildTutorPrompt,
   buildVerifyPrompt,
   INTERPRET_INSTRUCTIONS,
   isEffortKey,
   JUDGE_INSTRUCTIONS,
   SOLVE_INSTRUCTIONS,
+  STUDY_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
 import {
@@ -35,6 +37,7 @@ import {
   type ProviderKey,
 } from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
+import { isStudyKind, parseStudy, studySchema } from "../shared/study";
 import {
   DATA_URL_PATTERN,
   MAX_IMAGES,
@@ -48,9 +51,9 @@ import {
 import { interpretOverride, variantOverride, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
-export type TaskKind = "solve" | "interpret" | "judge";
+export type TaskKind = "solve" | "interpret" | "judge" | "study";
 
-export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge"];
+export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study"];
 
 export function isTaskKind(value: string): value is TaskKind {
   return (TASK_KINDS as string[]).includes(value);
@@ -133,6 +136,7 @@ export function buildTask(
   }
   if (kind === "solve") return buildSolve(providerName, body, env, variant);
   if (kind === "interpret") return buildInterpret(providerName, body, env, variant);
+  if (kind === "study") return buildStudy(providerName, body, env, variant);
   return buildJudge(providerName, body, env, variant);
 }
 
@@ -321,6 +325,76 @@ function buildJudge(
         judgement: parseJudgement(rawText, provider, solutions.length, {
           allowIncomplete: lastAttempt,
         }),
+      }),
+    },
+  };
+}
+
+// Study notes (shared/study.ts): the problem type and approach with its key
+// formulas, or the solution explained simply - from one solver's solution,
+// or from the verdict and the solutions it graded. On the provider's normal
+// solve route, like the judge, at "medium" unless the user picks a level:
+// the notes explain a solution, they do not derive one.
+function buildStudy(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
+  const assignment = readAssignment(body);
+  if ("error" in assignment) return { error: assignment.error, status: 400 };
+
+  const kind = body.kind;
+  if (!isStudyKind(kind)) {
+    return { error: 'Study notes are "approach" or "explain".', status: 400 };
+  }
+  // One solution to start from, or the verdict with the ones it graded.
+  const verdict = readText(body.verdict, MAX_SOLUTION_TEXT);
+  const candidates = Array.isArray(body.solutions) ? body.solutions : [];
+  const most = verdict ? MAX_JUDGED_SOLUTIONS : 1;
+  if (
+    candidates.length < 1 ||
+    candidates.length > most ||
+    candidates.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    return {
+      error: verdict
+        ? `Study notes from a verdict need between 1 and ${MAX_JUDGED_SOLUTIONS} solutions.`
+        : "Study notes start from one solution, or from a verdict.",
+      status: 400,
+    };
+  }
+  const solutions = (candidates as string[]).map((entry) => entry.slice(0, MAX_SOLUTION_TEXT));
+
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
+  const revised = readRevision(body.revision, MAX_SOLUTION_TEXT);
+  if ("error" in revised) return { error: revised.error, status: 400 };
+
+  return {
+    params: {
+      provider,
+      env,
+      effort,
+      routeOverride: variantOverride(provider, variant, env),
+      task: {
+        session: crypto.randomUUID(),
+        prompt: ({ enforceShape }) =>
+          buildStudyPrompt(kind, notes, solutions, {
+            enforceShape,
+            interpretation: interpretation || undefined,
+            verdict: verdict || undefined,
+            revision: revised.revision,
+          }),
+        instructions: STUDY_INSTRUCTIONS,
+        schemaName: "civil_study_notes",
+        schema: studySchema as unknown as Record<string, unknown>,
+        images: assignment.images,
+      },
+      finalize: (rawText, { lastAttempt }) => ({
+        study: parseStudy(rawText, provider, { allowIncomplete: lastAttempt }),
       }),
     },
   };

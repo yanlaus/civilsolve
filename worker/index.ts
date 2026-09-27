@@ -93,7 +93,8 @@ function startInlineSse(c: AppContext, params: RunTaskParams) {
 }
 
 /**
- * The one handler behind /api/solve, /api/interpret and /api/judge. The task
+ * The one handler behind /api/solve, /api/interpret, /api/judge and
+ * /api/study. The task
  * is built here first so a bad request gets its 400 at once. Then it runs in
  * a TaskJob Durable Object of its own, which carries on when the page goes
  * away and keeps the answer for GET /api/jobs/:id; the job's first event
@@ -132,6 +133,7 @@ app.get("/api/health", (c) => {
 app.post("/api/solve/:provider", (c) => handleTask(c, "solve"));
 app.post("/api/interpret/:provider", (c) => handleTask(c, "interpret"));
 app.post("/api/judge/:provider", (c) => handleTask(c, "judge"));
+app.post("/api/study/:provider", (c) => handleTask(c, "study"));
 
 // Re-attach to a job after the connection dropped: the stored result, or
 // the rest of a run still in progress. Only well-formed ids reach the
