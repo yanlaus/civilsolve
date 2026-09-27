@@ -354,8 +354,21 @@ body {
 
 /* "Save as PDF" prints only the .print-area (see solution-panel). */
 @media print {
+  /* White paper whatever the theme: the page colour sits on body, and a
+     browser that prints backgrounds (Safari on iPhone does) put it behind
+     the whole PDF (27 September 2026). */
+  html,
+  body,
+  main,
   .cs-backdrop {
-    background: none;
+    background: #fff !important;
+    background-image: none !important;
+  }
+
+  .print-area,
+  .print-area * {
+    background: transparent !important;
+    box-shadow: none !important;
   }
 
   .print-area {

@@ -675,9 +675,6 @@ export function normalizeDisplayText(value: string) {
     .replace(/\\times\s*\\times\s*([^\n]*?)\s*\\times\s*\\times/g, (_match, label: string) =>
       `**${label.trim()}**`,
     )
-    .replace(/\\times\s+([A-Za-z][^\\\n]{1,80}?)\s*\\times/g, (_match, label: string) =>
-      `**${label.trim()}**`,
-    )
     .replace(/×\s*×\s*([^\n]*?)\s*×\s*×/g, (_match, label: string) =>
       `**${label.trim()}**`,
     )

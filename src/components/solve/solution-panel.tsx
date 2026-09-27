@@ -352,43 +352,12 @@ export default function SolutionPanel({
     exportPdf(title);
   };
 
+  // The verdict's PDF is its verified final answer and nothing else - the
+  // answer is what gets kept (the owner's call, 27 September 2026).
   const verdictPrintHtml = useMemo(() => {
-    if (judgeRun.status !== "done") return "";
-    const { judgement, solvers } = judgeRun;
-    const escape = (value: string) =>
-      value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const letter = (index: number) => SOLUTION_LETTERS[index] ?? String(index + 1);
-    const label = (provider: ProviderKey) => escape(providerDisplayName(provider, variants.solvers[provider]));
-    const chinese = (value: string) =>
-      `<div lang="zh-Hant-HK">${renderMarkdown(value, { chinese: true })}</div>`;
-    return [
-      "<h1>Cross-check verdict</h1>",
-      `<p>Judged by ${escape(providerDisplayName(judgeRun.judge, variants.judge))}${
-        variants.judgeEffort ? ` at ${variants.judgeEffort} thinking` : ""
-      } · ${judgement.confidence} confidence</p>`,
-      "<ul>",
-      ...solvers.map(
-        (provider, index) =>
-          `<li>Solution ${letter(index)} · ${label(provider)}: <strong>${
-            judgement.correct.includes(index) ? "Correct 正確" : "Wrong 錯誤"
-          }</strong></li>`,
-      ),
-      "</ul>",
-      judgement.final_answer ? `<h2>Verified final answer</h2>${renderMarkdown(judgement.final_answer)}` : "",
-      ...solvers.map((provider, index) =>
-        [
-          `<h2>Solution ${letter(index)} · ${label(provider)}</h2>`,
-          renderMarkdown(judgement.assessments[index] ?? ""),
-          // Absent from verdicts given before 27 September 2026.
-          judgement.assessments_chinese?.[index] ? chinese(judgement.assessments_chinese[index]) : "",
-        ].join("\n"),
-      ),
-      judgement.comparison ? `<h2>Why</h2>${renderMarkdown(judgement.comparison)}` : "",
-      judgement.traditional_chinese
-        ? `<h2>繁體中文 · Traditional Chinese</h2>${chinese(judgement.traditional_chinese)}`
-        : "",
-    ].join("\n");
-  }, [judgeRun, variants]);
+    if (judgeRun.status !== "done" || !judgeRun.judgement.final_answer) return "";
+    return ["<h1>Verified final answer</h1>", renderMarkdown(judgeRun.judgement.final_answer)].join("\n");
+  }, [judgeRun]);
 
   const printHtml = useMemo(() => {
     if (!activeArtifact) return "";
@@ -660,7 +629,7 @@ export default function SolutionPanel({
             }
             interpretation={Boolean(interpretation)}
             onRefine={onRefineVerdict}
-            onSavePdf={() => printAs("verdict", "cross-check verdict")}
+            onSavePdf={() => printAs("verdict", "verified final answer")}
           />
         </div>
       ) : null}
@@ -756,7 +725,7 @@ function JudgementCard({
   /** Whether the run had a confirmed reading, which the judge also gets. */
   interpretation: boolean;
   onRefine: (instructions: string) => void;
-  /** Prints the verdict - verified answer, each assessment, the Chinese - as a PDF. */
+  /** Prints the verified final answer as a PDF. */
   onSavePdf: () => void;
 }) {
   if (judgeRun.status === "idle") return null;
@@ -836,20 +805,10 @@ function JudgementCard({
             {tookLabel(progress) ? ` in ${tookLabel(progress)}` : ""}
           </span>
         </p>
-        <span className="flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.7rem] font-medium ${CONFIDENCE_CLASS[judgement.confidence]}`}
-          >
-            {judgement.confidence} confidence
-          </span>
-          <button
-            type="button"
-            onClick={onSavePdf}
-            className="inline-flex items-center gap-1.5 rounded-cs bg-cs-ink px-3 py-1.5 text-xs font-semibold text-cs-surface"
-          >
-            <Download className="h-3.5 w-3.5" aria-hidden="true" />
-            Save as PDF
-          </button>
+        <span
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.7rem] font-medium ${CONFIDENCE_CLASS[judgement.confidence]}`}
+        >
+          {judgement.confidence} confidence
         </span>
       </div>
 
@@ -913,8 +872,19 @@ function JudgementCard({
 
       {judgement.final_answer ? (
         <div className="mt-3">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            Verified final answer
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+              Verified final answer
+            </span>
+            <button
+              type="button"
+              onClick={onSavePdf}
+              title="Save the verified final answer as a PDF"
+              className="inline-flex items-center gap-1.5 rounded-cs bg-cs-ink px-3 py-1.5 text-xs font-semibold text-cs-surface"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              Save as PDF
+            </button>
           </div>
           <MathProse source={judgement.final_answer} />
         </div>
@@ -922,12 +892,18 @@ function JudgementCard({
 
       {/* The reasoning, for whoever wants it: each solution's assessment,
           why, and the Traditional Chinese version. */}
-      <details className="group mt-4 rounded-cs border border-cs-line-soft">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-2.5 text-sm font-semibold text-cs-accent">
-          <span>Read the full verdict · 閱讀完整評語</span>
+      {/* Open to begin with (the owner's call, 27 September 2026); the
+          chevron folds it away. */}
+      <details open className="group mt-4 rounded-cs border border-cs-line-soft">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm font-semibold text-cs-accent">
+          <span className="min-w-0 flex-1">Full verdict · 完整評語</span>
           <span className="text-xs font-normal text-cs-ink-3 group-open:hidden">
             what each solution got right and wrong, and why
           </span>
+          <ChevronDown
+            className="h-4 w-4 shrink-0 text-cs-ink-3 transition group-open:rotate-180"
+            aria-label="Show or hide the full verdict"
+          />
         </summary>
         <div className="border-t border-cs-line-soft px-4 pb-4">
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
