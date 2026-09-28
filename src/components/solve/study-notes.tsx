@@ -3,15 +3,16 @@
 // approach and key formulas - and the question explained simply. Each is
 // optional and made on request, by the model picked on its card, starting
 // from the solution picked there: one solver's, or the cross-check's
-// verified answer. The English shows first, the Traditional Chinese a fold
-// below it.
+// verified answer. The approach notes come in tabs, one per part, like a
+// solution's, each with its Chinese a fold below; the simple explanation
+// shows its Cantonese first and the English a fold below (the owner's
+// layout, 28 September 2026).
 
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Compass, GraduationCap, Languages, Lightbulb, Sparkles } from "lucide-react";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
-  DEFAULT_STUDY_WRITERS,
   MODEL_CHOICES,
   parseChoice,
   PROVIDER_KEYS,
@@ -20,7 +21,13 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
-import { STUDY_KINDS, type StudyKind } from "../../../shared/study";
+import {
+  openStudyLabels,
+  splitStudyParts,
+  STUDY_KINDS,
+  STUDY_PARTS,
+  type StudyKind,
+} from "../../../shared/study";
 import {
   isStudyActive,
   type JudgeRun,
@@ -34,6 +41,7 @@ import { effortBand } from "@/lib/effort-band";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
+import { SolutionArticle } from "./solution-article";
 import {
   ERROR_BOX,
   EventLog,
@@ -51,8 +59,6 @@ const KINDS: Record<
     blurb: string;
     Icon: typeof Compass;
     placeholder: string;
-    /** The fold with the Chinese version: written Chinese, or spoken Cantonese. */
-    chineseFold: string;
   }
 > = {
   approach: {
@@ -61,16 +67,14 @@ const KINDS: Record<
     blurb: "What type of problem this is, how problems of this type are solved, and the key formulas.",
     Icon: Compass,
     placeholder: "e.g. Compare it with the Bernoulli-only approach. Add the formula for the force on a vane.",
-    chineseFold: "繁體中文 · Traditional Chinese",
   },
   explain: {
     title: "Explained simply",
     chinese: "淺白講解",
     blurb:
-      "The question and its solution talked through like a tutor would - plain words, everyday pictures, what every number means. The Chinese is in Cantonese.",
+      "The question and its solution talked through like a tutor would - plain words, everyday pictures, what every number means. In Cantonese, with the English a click below.",
     Icon: Lightbulb,
     placeholder: "e.g. Explain why the pressure force points into the control volume. Use a garden-hose analogy.",
-    chineseFold: "廣東話 · In Cantonese",
   },
 };
 
@@ -95,6 +99,7 @@ export function StudyNotes({
   nameOf,
   judgeLabel,
   markOf,
+  modelOf,
   blocked,
   interpretation,
   onWrite,
@@ -114,6 +119,8 @@ export function StudyNotes({
   judgeLabel: string;
   /** What the verdict says of a solver's solution as it is now (solution-panel's solverMark). */
   markOf: (key: ProviderKey) => "correct" | "wrong" | null;
+  /** The model that wrote a source: the solver's, or the judge's for the verified answer. */
+  modelOf: (source: StudySource) => ModelChoice;
   /** Why notes cannot be asked for right now, if they cannot. */
   blocked?: string;
   /** Whether the run had a confirmed reading, which the notes' model also gets. */
@@ -153,8 +160,8 @@ export function StudyNotes({
         <span className="font-sans text-base font-normal text-cs-ink-3">溫習筆記</span>
       </h2>
       <p className="mb-3 mt-1 text-xs text-cs-ink-3">
-        Optional - generate either or both, from the solution and with the model you pick. English
-        first, with the Traditional Chinese a click below.
+        Optional - generate either or both, from the solution you pick. The model is the one that
+        wrote that solution unless you pick another.
       </p>
       <div className="grid gap-4">
         {STUDY_KINDS.map((kind) => (
@@ -169,6 +176,7 @@ export function StudyNotes({
             nameOf={nameOf}
             sourceLabel={sourceLabel}
             markOf={markOf}
+            modelOf={modelOf}
             sentWith={sentWith}
             blocked={blocked || (sources.length ? undefined : "Needs a finished solution.")}
             interpretation={interpretation}
@@ -192,6 +200,7 @@ function StudyCard({
   nameOf,
   sourceLabel,
   markOf,
+  modelOf,
   sentWith,
   blocked,
   interpretation,
@@ -209,6 +218,7 @@ function StudyCard({
   nameOf: (key: ProviderKey) => string;
   sourceLabel: (source: StudySource) => string;
   markOf: (key: ProviderKey) => "correct" | "wrong" | null;
+  modelOf: (source: StudySource) => ModelChoice;
   sentWith: (source: StudySource) => string;
   blocked?: string;
   interpretation: boolean;
@@ -216,7 +226,7 @@ function StudyCard({
   onStop: () => void;
   onRefine: (instructions: string) => void;
 }) {
-  const { title, chinese, blurb, Icon, placeholder, chineseFold } = KINDS[kind];
+  const { title, chinese, blurb, Icon, placeholder } = KINDS[kind];
   const configured = (key: ProviderKey) =>
     providerStatus ? providerStatus[key]?.configured !== false : true;
   const writers = MODEL_CHOICES.filter((choice) => configured(choice.provider));
@@ -227,14 +237,15 @@ function StudyCard({
   const source: StudySource | undefined =
     sourcePick && sources.includes(sourcePick) ? sourcePick : sources[0];
 
-  // The model: the user's pick, else the one that wrote the notes on the
-  // page, else the default. The level: medium unless picked - the notes
-  // explain a solution, they do not derive one - kept inside the model's
-  // band (ChatGPT runs at high or max).
+  // The model: the user's pick, else the one that wrote the source -
+  // DeepSeek's solution is explained by DeepSeek, the verified answer by the
+  // judge (the owner's call, 28 September 2026; it was ChatGPT and DeepSeek
+  // per card before). Picking another source goes back to that source's
+  // model. The level: medium unless picked - the notes explain a solution,
+  // they do not derive one - kept inside the model's band (ChatGPT runs at
+  // high or max).
   const [pick, setPick] = useState<ModelChoice | null>(null);
-  const writer: ModelChoice =
-    pick ??
-    (run.status !== "idle" ? { provider: run.provider, variant: run.variant } : DEFAULT_STUDY_WRITERS[kind]);
+  const writer: ModelChoice = pick ?? (source ? modelOf(source) : writers[0] ?? MODEL_CHOICES[0]);
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
   const { inBand, clamp } = effortBand(providerStatus?.[writer.provider]);
   const effort = clamp(effortPick);
@@ -262,7 +273,10 @@ function StudyCard({
           <select
             value={source ?? ""}
             disabled={active || !sources.length}
-            onChange={(event) => setSourcePick(event.target.value as StudySource)}
+            onChange={(event) => {
+              setSourcePick(event.target.value as StudySource);
+              setPick(null);
+            }}
             className={SELECT_CLASS}
           >
             {sources.map((entry) => (
@@ -380,23 +394,11 @@ function StudyCard({
             </div>
           ) : null}
 
-          <MathProse source={run.study.guide} className="mt-2" />
-
-          {run.study.traditional_chinese ? (
-            <details className="group/zh mt-3 rounded-cs border border-cs-line-soft bg-cs-muted">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-                {chineseFold}
-                <ChevronDown
-                  className="ml-auto h-3.5 w-3.5 transition group-open/zh:rotate-180"
-                  aria-label="Show or hide the Traditional Chinese"
-                />
-              </summary>
-              <div className="border-t border-cs-line-soft px-4 py-2">
-                <MathProse source={run.study.traditional_chinese} chinese />
-              </div>
-            </details>
-          ) : null}
+          {kind === "approach" ? (
+            <ApproachTabs guide={run.study.guide} chinese={run.study.traditional_chinese} />
+          ) : (
+            <CantoneseFirst guide={run.study.guide} chinese={run.study.traditional_chinese} />
+          )}
 
           <div className="mt-4">
             <RevisePanel
@@ -418,5 +420,141 @@ function StudyCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** A fold holding the notes in the other language; closed to begin with. */
+function LanguageFold({
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  /** Set to keep its state outside, as each approach tab does. */
+  open?: boolean;
+  onToggle?: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      open={open}
+      onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}
+      className="group/zh rounded-cs border border-cs-line-soft bg-cs-muted"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+        <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+        {label}
+        <ChevronDown
+          className="ml-auto h-3.5 w-3.5 transition group-open/zh:rotate-180"
+          aria-label={`Show or hide ${label}`}
+        />
+      </summary>
+      <div className="border-t border-cs-line-soft px-4 py-2">{children}</div>
+    </details>
+  );
+}
+
+const APPROACH_PARTS = STUDY_PARTS.approach;
+
+/**
+ * The approach notes in tabs - Problem type, Approach, Key formulas, Common
+ * mistakes - drawn like a solution's Problem / Assumptions / Solution / Final
+ * Answer tabs, each part's Chinese a fold below it that opens and closes on
+ * its own. Notes whose parts cannot be told apart (fewer than two labels)
+ * are shown whole.
+ */
+function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
+  const parts = useMemo(() => splitStudyParts(guide, "approach"), [guide]);
+  const chineseParts = useMemo(() => (chinese ? splitStudyParts(chinese, "approach") : null), [chinese]);
+  const [tab, setTab] = useState(0);
+  const [open, setOpen] = useState<boolean[]>(() => APPROACH_PARTS.map(() => false));
+
+  if (!parts) {
+    return (
+      <>
+        <MathProse source={openStudyLabels(guide)} className="mt-2" />
+        {chinese ? (
+          <div className="mt-3">
+            <LanguageFold label="繁體中文 · Traditional Chinese">
+              <MathProse source={openStudyLabels(chinese)} chinese />
+            </LanguageFold>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  // Chinese that cannot be cut into parts goes whole under every tab.
+  const chineseText = chineseParts ? chineseParts[tab] : chinese;
+  return (
+    <div className="mt-3 overflow-hidden rounded-cs-lg border border-cs-line-soft">
+      <div className="border-b-2 border-cs-line-soft px-2 pt-1">
+        <div className="flex overflow-x-auto" role="tablist">
+          {APPROACH_PARTS.map((part, index) => (
+            <button
+              key={part.label}
+              type="button"
+              role="tab"
+              aria-selected={tab === index}
+              onClick={() => setTab(index)}
+              className={`relative shrink-0 px-4 py-3 text-sm font-semibold transition ${
+                tab === index ? "text-cs-accent" : "text-cs-ink-3 hover:text-cs-ink"
+              }`}
+            >
+              {part.label}
+              <span
+                className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
+                  tab === index ? "bg-cs-accent" : "bg-transparent"
+                }`}
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+      {parts[tab] ? (
+        <SolutionArticle source={parts[tab]} />
+      ) : (
+        <p className="px-4 py-6 text-sm text-cs-ink-3 sm:px-7">This part was left out of the notes.</p>
+      )}
+      {chineseText ? (
+        <div className="px-4 pb-4 sm:px-7">
+          <LanguageFold
+            // Its own fold per tab, so one tab's state never leaks into another's.
+            key={tab}
+            label={chineseParts ? "繁體中文 · Traditional Chinese" : "繁體中文 · Traditional Chinese (all parts)"}
+            open={open[tab]}
+            onToggle={(value) =>
+              setOpen((current) =>
+                current[tab] === value ? current : current.map((entry, index) => (index === tab ? value : entry)),
+              )
+            }
+          >
+            <MathProse source={chineseText} chinese />
+          </LanguageFold>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The simple explanation: its Cantonese first, the English a fold below. The
+ * labels are put on lines of their own again here, for notes stored before
+ * the parser did it with a blank line around them ("Wrap-up" indented).
+ */
+function CantoneseFirst({ guide, chinese }: { guide: string; chinese: string }) {
+  const english = useMemo(() => openStudyLabels(guide), [guide]);
+  const cantonese = useMemo(() => openStudyLabels(chinese), [chinese]);
+  if (!cantonese) return <MathProse source={english} className="mt-2" />;
+  return (
+    <>
+      <MathProse source={cantonese} chinese className="mt-2" />
+      <div className="mt-3">
+        <LanguageFold label="English">
+          <MathProse source={english} />
+        </LanguageFold>
+      </div>
+    </>
   );
 }

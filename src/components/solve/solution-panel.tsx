@@ -16,6 +16,7 @@ import {
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
   PROVIDER_KEYS,
+  PROVIDER_VARIANTS,
   providerDisplayName,
   type ModelChoice,
   type ModelVariant,
@@ -99,6 +100,15 @@ function solverMark(
 function changedSinceVerdict(judgeRun: JudgeRun, provider: ProviderKey, versions: SolutionVersions) {
   if (judgeRun.status !== "done" || !judgeRun.versions) return false;
   return (versions[provider] ?? 0) > (judgeRun.versions[provider] ?? 0);
+}
+
+/**
+ * A model as the study notes' picker lists it: a provider that offers several
+ * models is named with one - its first, when the run did not record which.
+ */
+function studyModel(choice: ModelChoice): ModelChoice {
+  const offered = PROVIDER_VARIANTS[choice.provider];
+  return offered && !choice.variant ? { ...choice, variant: offered[0].key } : choice;
 }
 
 /** "Gemini's solution is correct", "Gemini and Muse Spark are correct", ... */
@@ -584,6 +594,13 @@ export default function SolutionPanel({
           nameOf={nameOf}
           judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
           markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
+          modelOf={(source) =>
+            studyModel(
+              source === "verdict" && judgeRun.status !== "idle"
+                ? { provider: judgeRun.judge, variant: variants.judge }
+                : { provider: source as ProviderKey, variant: variants.solvers[source as ProviderKey] },
+            )
+          }
           interpretation={Boolean(interpretation)}
           blocked={
             !canRerun

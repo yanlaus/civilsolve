@@ -1,6 +1,4 @@
 // Provider + channel registry. Pure data shared by the Worker and the client.
-
-import type { StudyKind } from "./study";
 //
 // A "provider" is what the user picks in the UI (ChatGPT, Claude, ...).
 // A "channel" is the upstream account/API the key comes from (Poe, OpenCode
@@ -211,21 +209,6 @@ export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
  * "high" was the most reliable cell in the B.8 matrix.
  */
 export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
-
-/**
- * Default writer of each kind of optional study notes (shared/study.ts); the
- * user picks another on the card. ChatGPT for the problem type and approach,
- * like the judge: those notes are only as good as the model's grasp of the
- * engineering. DeepSeek (Flash) for the simple explanation: on the owner's
- * tension-splice example (28 September 2026) it matched the style they wrote
- * - short, the bolt's "死法" one by one, natural spoken Cantonese - in 36-54 s,
- * where ChatGPT at high was accurate but ran half as long again, listed every
- * detailing check and mixed English phrases into the Cantonese, in 83 s.
- */
-export const DEFAULT_STUDY_WRITERS: Record<StudyKind, ModelChoice> = {
-  approach: { provider: "chatgpt" },
-  explain: { provider: "deepseek" },
-};
 
 export type ChannelKey = "poe" | "opencode" | "google" | "minimax";
 
