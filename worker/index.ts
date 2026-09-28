@@ -4,8 +4,10 @@ import { MAX_BODY_BYTES } from "../shared/stream-protocol";
 import { routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
+import { pdfContentOf, pdfDocument, pdfFileName, printPdf } from "./pdf";
 
 export { TaskJob } from "./jobs";
+export { PdfBudget } from "./pdf";
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
 
@@ -19,8 +21,10 @@ type AppContext = Context<{ Bindings: WorkerEnv }>;
  * Cloudflare Access version, keyed by user, is parked on the
  * `access-sign-in` branch.
  */
-async function rateLimited(c: AppContext): Promise<Response | null> {
-  const limiter = c.env.TASK_LIMITER;
+async function rateLimited(
+  c: AppContext,
+  limiter: RateLimit | undefined = c.env.TASK_LIMITER,
+): Promise<Response | null> {
   if (!limiter) return null;
   const { success } = await limiter.limit({ key: c.req.header("cf-connecting-ip") ?? "local" });
   if (success) return null;
@@ -145,6 +149,69 @@ app.get("/api/jobs/:id", (c) => {
     return c.json({ error: "This result is no longer available." }, 404);
   }
   return jobs.get(jobs.idFromName(id)).fetch("https://job/attach");
+});
+
+// A finished solution, or the verdict's verified answer, as a PDF made by
+// the server (worker/pdf.ts): what "Generate PDF" opens, and a link that
+// works for as long as the job keeps its answer. Served from the edge cache
+// when it has it; otherwise rendered, within the per-IP limit and the
+// month's browser-time allowance.
+app.get("/api/pdf/:id", async (c) => {
+  const id = c.req.param("id");
+  const jobs = c.env.JOBS;
+  if (!jobs || !JOB_ID_PATTERN.test(id)) {
+    return c.json({ error: "This result is no longer available." }, 404);
+  }
+  const cache = caches.default;
+  const cacheKey = new Request(new URL(`/api/pdf/${id}`, c.req.url).toString());
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const browser = c.env.BROWSER;
+  const budgets = c.env.PDF_BUDGET;
+  if (!browser || !budgets) return c.json({ error: "PDFs are not set up on this server." }, 503);
+  const limited = await rateLimited(c, c.env.PDF_LIMITER);
+  if (limited) return limited;
+
+  const stored = await jobs.get(jobs.idFromName(id)).fetch("https://job/result");
+  if (!stored.ok) {
+    return c.json({ error: "This result is no longer available - results are kept for 24 hours." }, 404);
+  }
+  const { terminal, expiresAt } = (await stored.json()) as { terminal: unknown; expiresAt: number };
+  const content = pdfContentOf(terminal);
+  if (!content) return c.json({ error: "There is no PDF for this result." }, 404);
+
+  const budget = budgets.get(budgets.idFromName("account"));
+  if (!(await budget.allowed())) {
+    return c.json(
+      { error: "This month's PDF allowance is used up; it starts again on the 1st. Print from the browser instead." },
+      429,
+    );
+  }
+  const html = await pdfDocument(content);
+  const started = Date.now();
+  let pdf: Uint8Array;
+  try {
+    pdf = await printPdf(browser, html);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `The PDF could not be made: ${detail}` }, 503);
+  } finally {
+    c.executionCtx.waitUntil(budget.add(Date.now() - started));
+  }
+
+  // Kept as long as the job keeps its answer (at most a day), so opening
+  // the link again costs no browser time.
+  const maxAge = Math.max(60, Math.min(86_400, Math.floor((expiresAt - Date.now()) / 1000)));
+  const response = new Response(pdf, {
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": `inline; filename="${pdfFileName(content)}"`,
+      "cache-control": `public, max-age=${maxAge}`,
+    },
+  });
+  c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
 });
 
 // Stop pressed: end the job's model call instead of leaving it running.

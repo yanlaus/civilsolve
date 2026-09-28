@@ -284,6 +284,14 @@ export function useSolve() {
   /** Each solver's finished version, and the verdict's: what a re-generation starts from. */
   const doneRef = useRef(new Map<ProviderKey, DoneRun>());
   const judgeDoneRef = useRef<DoneJudge | null>(null);
+  /**
+   * The job that holds each answer on the page - what "Generate PDF" asks
+   * the server to print (GET /api/pdf/:id). Not run.solveJobs: after a
+   * re-generation that failed, the page shows the previous version, whose
+   * job is an earlier one.
+   */
+  const doneJobsRef = useRef(new Map<ProviderKey, string>());
+  const judgeDoneJobRef = useRef<string | null>(null);
   /** Whether the run's request body is at hand, so it can be sent again. */
   const [canRerun, setCanRerun] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -448,6 +456,8 @@ export function useSolve() {
     setSolutionVersions({});
     doneRef.current = new Map();
     judgeDoneRef.current = null;
+    doneJobsRef.current = new Map();
+    judgeDoneJobRef.current = null;
     setStudyRuns(IDLE_STUDY);
     setStudyProgress({});
     studyDoneRef.current = new Map();
@@ -491,6 +501,7 @@ export function useSolve() {
           return;
         }
         if (next.status === "done") {
+          if (handle.id) doneJobsRef.current.set(provider, handle.id);
           solutions.set(provider, next.solution);
           versionsRef.current = {
             ...versionsRef.current,
@@ -600,6 +611,9 @@ export function useSolve() {
         revision: refinement?.revision,
         previous,
         versions: () => ({ ...versionsRef.current }),
+        recordJob: (id) => {
+          judgeDoneJobRef.current = id;
+        },
         register: (task) => {
           judgeTaskRef.current = {
             ...task,
@@ -733,6 +747,8 @@ export function useSolve() {
       solutionsRef.current = new Map();
       doneRef.current = new Map();
       judgeDoneRef.current = null;
+      doneJobsRef.current = new Map();
+      judgeDoneJobRef.current = null;
       versionsRef.current = {};
       setSolutionVersions({});
       const context: RunContext = { run, signal, solutions: solutionsRef.current };
@@ -1080,6 +1096,16 @@ export function useSolve() {
     }
   }, []);
 
+  /**
+   * The job of an answer on the page - a solver's solution, or the verdict -
+   * for GET /api/pdf/:id. Null until one has come in.
+   */
+  const pdfJobOf = useCallback(
+    (target: ProviderKey | "verdict") =>
+      target === "verdict" ? judgeDoneJobRef.current : (doneJobsRef.current.get(target) ?? null),
+    [],
+  );
+
   return {
     runs,
     judgeRun,
@@ -1104,6 +1130,7 @@ export function useSolve() {
     writeStudy,
     stopStudy,
     refineStudy,
+    pdfJobOf,
   };
 }
 
@@ -1224,6 +1251,8 @@ type JudgeParams = RunContext & {
   revision?: RevisionRequest;
   /** The verdict a failed re-generation falls back to. */
   previous?: DoneJudge | null;
+  /** Called with the job of a verdict that came in: the one its PDF is made from. */
+  recordJob: (id: string) => void;
   /** The solutions' versions now, recorded with a verdict that is sent. */
   versions: () => SolutionVersions;
   persist: () => void;
@@ -1255,6 +1284,7 @@ async function runJudge({
   revision,
   previous,
   versions,
+  recordJob,
   persist,
   setJudgeRun: publishJudgeRun,
   setJudgeProgress,
@@ -1280,6 +1310,7 @@ async function runJudge({
       return;
     }
     if (next.status === "done") {
+      if (handle.id) recordJob(handle.id);
       publishJudgeRun({
         ...next,
         ...(sentVersions ? { versions: sentVersions } : {}),

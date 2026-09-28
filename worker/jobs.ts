@@ -65,6 +65,9 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     if (request.method === "GET" && url.pathname === "/attach") {
       return this.attach();
     }
+    if (request.method === "GET" && url.pathname === "/result") {
+      return this.result();
+    }
     if (request.method === "DELETE" && url.pathname === "/cancel") {
       // Stop pressed in the page. The run ends with an "error: Cancelled."
       // event like any other failure, and that is what gets stored.
@@ -121,6 +124,23 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     // Not awaited: the task outlives this request and whoever sent it.
     void runTask(this.hub(), { ...built.params, signal: this.cancelled.signal });
     return response;
+  }
+
+  /**
+   * The stored final event, and when the alarm will delete it - for
+   * GET /api/pdf/:id, which prints it (worker/pdf.ts). 404 until the job has
+   * finished, and after it has been deleted.
+   */
+  private async result(): Promise<Response> {
+    const terminal = this.terminal ?? (await this.ctx.storage.get<TaskEvent>("terminal")) ?? null;
+    if (!terminal) {
+      return Response.json(
+        { error: "This result is no longer available - results are kept for 24 hours." },
+        { status: 404 },
+      );
+    }
+    const expiresAt = (await this.ctx.storage.getAlarm()) ?? Date.now() + JOB_RETENTION_MS;
+    return Response.json({ terminal, expiresAt });
   }
 
   /**

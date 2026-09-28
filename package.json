@@ -19,6 +19,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "@cloudflare/vite-plugin": "^1.43.0",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@tailwindcss/typography": "^0.5.19",

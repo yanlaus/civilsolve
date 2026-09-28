@@ -71,6 +71,7 @@ export default function CivilAnswerAppPage() {
     writeStudy,
     stopStudy,
     refineStudy,
+    pdfJobOf,
   } = useSolve();
   const { providerStatus } = useHealth();
   // Set when the page came back with the last run's results - the jobs kept
@@ -374,6 +375,7 @@ export default function CivilAnswerAppPage() {
             onWriteStudy={writeStudy}
             onStopStudy={stopStudy}
             onRefineStudy={refineStudy}
+            pdfJobOf={pdfJobOf}
           />
         </Suspense>
       </div>

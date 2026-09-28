@@ -10,6 +10,7 @@
 //
 // worker/run.ts stays dialect-agnostic and only orchestrates.
 
+import type { PdfBudget } from "./pdf";
 import type { EffortKey } from "../shared/prompt";
 import {
   CHANNEL_LABELS,
@@ -38,6 +39,16 @@ export type WorkerEnv = {
    * nothing is limited.
    */
   TASK_LIMITER?: RateLimit;
+  /**
+   * Browser Rendering (wrangler.jsonc "browser"): the headless Chrome that
+   * prints solutions to PDF (worker/pdf.ts). Optional - without it
+   * GET /api/pdf answers 503.
+   */
+  BROWSER?: Fetcher;
+  /** The month's browser time for PDFs, one object for the account (worker/pdf.ts). */
+  PDF_BUDGET?: DurableObjectNamespace<PdfBudget>;
+  /** Caps the PDFs each client IP can have made per minute. */
+  PDF_LIMITER?: RateLimit;
 
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;

@@ -5,7 +5,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  Download,
   Languages,
   Loader2,
   RotateCw,
@@ -44,6 +43,7 @@ import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
+import { PdfButton } from "./pdf-button";
 import { ProviderLogo } from "./provider-logo";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { RunActions } from "./run-actions";
@@ -201,6 +201,7 @@ export default function SolutionPanel({
   onWriteStudy,
   onStopStudy,
   onRefineStudy,
+  pdfJobOf,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -231,6 +232,8 @@ export default function SolutionPanel({
   onWriteStudy: (kind: StudyKind, choice: ModelChoice, effort: EffortKey, source: StudySource) => void;
   onStopStudy: (kind: StudyKind) => void;
   onRefineStudy: (kind: StudyKind, instructions: string) => void;
+  /** The job of an answer on the page, for its PDF (use-solve's pdfJobOf). */
+  pdfJobOf: (target: ProviderKey | "verdict") => string | null;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -290,9 +293,11 @@ export default function SolutionPanel({
     solving || isJudgeActive(judgeRun) || STUDY_KINDS.some((kind) => isStudyActive(studyRuns[kind])),
   );
 
-  // What "Save as PDF" prints: the open solution, or the verdict. Set just
-  // before printing (flushSync, so the print area has it when the dialog
-  // opens) and left as it is afterwards - each button sets its own.
+  // PDFs are made by the server now ("Generate PDF", pdf-button.tsx). The
+  // print dialog stays for when it cannot: "Print instead" prints the open
+  // solution, or the verdict's answer. Set just before printing (flushSync,
+  // so the print area has it when the dialog opens) and left as it is
+  // afterwards - each button sets its own.
   const [printTarget, setPrintTarget] = useState<"solution" | "verdict">("solution");
   const printAs = (target: "solution" | "verdict", title: string) => {
     flushSync(() => setPrintTarget(target));
@@ -423,15 +428,13 @@ export default function SolutionPanel({
                   <RevisionNotice message={activeRun.notice} />
                 </div>
               ) : null}
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => printAs("solution", activeArtifact.title)}
-                  className="inline-flex items-center gap-2 rounded-cs bg-cs-ink px-4 py-2 text-sm font-semibold text-cs-surface"
-                >
-                  <Download className="h-4 w-4" />
-                  Save as PDF
-                </button>
+              <div className="mt-4">
+                <PdfButton
+                  // A new version, or another tab: a fresh button.
+                  key={pdfJobOf(activeProvider) ?? activeProvider}
+                  jobId={pdfJobOf(activeProvider)}
+                  onPrint={() => printAs("solution", activeArtifact.title)}
+                />
               </div>
             </div>
 
@@ -576,7 +579,8 @@ export default function SolutionPanel({
             }
             interpretation={Boolean(interpretation)}
             onRefine={onRefineVerdict}
-            onSavePdf={() => printAs("verdict", "verified final answer")}
+            pdfJobId={pdfJobOf("verdict")}
+            onPrint={() => printAs("verdict", "verified final answer")}
           />
         </div>
       ) : null}
@@ -616,7 +620,7 @@ export default function SolutionPanel({
         />
       ) : null}
 
-      {/* Hidden on screen; the only visible content when printing (Save as PDF). */}
+      {/* Hidden on screen; the only visible content when printing ("Print instead"). */}
       {(printTarget === "verdict" ? verdictPrintHtml : printHtml) ? (
         <div
           className="print-area solution-content prose prose-stone hidden max-w-none print:block"
@@ -692,7 +696,8 @@ function JudgementCard({
   refineBlocked,
   interpretation,
   onRefine,
-  onSavePdf,
+  pdfJobId,
+  onPrint,
 }: {
   judgeRun: JudgeRun;
   /** The solvers now, to tell which finished after this verdict was given. */
@@ -707,8 +712,10 @@ function JudgementCard({
   /** Whether the run had a confirmed reading, which the judge also gets. */
   interpretation: boolean;
   onRefine: (instructions: string) => void;
-  /** Prints the verified final answer as a PDF. */
-  onSavePdf: () => void;
+  /** The verdict's job, which the server makes the PDF of the verified answer from. */
+  pdfJobId: string | null;
+  /** The browser's print dialog, for when the server cannot make the PDF. */
+  onPrint: () => void;
 }) {
   if (judgeRun.status === "idle") return null;
   const judgeLabel = providerDisplayName(judgeRun.judge, variants.judge);
@@ -858,15 +865,7 @@ function JudgementCard({
             <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
               Verified final answer
             </span>
-            <button
-              type="button"
-              onClick={onSavePdf}
-              title="Save the verified final answer as a PDF"
-              className="inline-flex items-center gap-1.5 rounded-cs bg-cs-ink px-3 py-1.5 text-xs font-semibold text-cs-surface"
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden="true" />
-              Save as PDF
-            </button>
+            <PdfButton small key={pdfJobId ?? "verdict"} jobId={pdfJobId} onPrint={onPrint} />
           </div>
           <MathProse source={judgement.final_answer} />
         </div>
