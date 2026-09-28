@@ -55,25 +55,75 @@ export const STUDY_PARTS: Record<StudyKind, ReadonlyArray<{ label: string; chine
   ],
 };
 
+/**
+ * A label as models actually write it: any case, "The" or not, a plural or
+ * not, a space or a hyphen between words, straight or curly apostrophes, the
+ * question mark optional - "Key idea" for "The key idea", "Step-by-step",
+ * "Key formula" (DeepSeek wrote "Key idea", 28 September 2026).
+ */
+function labelPattern(label: string) {
+  const core = label.replace(/^the\s+/i, "").replace(/[?？]$/, "").replace(/s$/, "");
+  const body = core
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/'/g, "['’]")
+    .replace(/[ -]/g, "[\\s-]?");
+  return `(?:the\\s+)?${body}s?[?？]?`;
+}
+
 const LABEL_PATTERNS = Object.values(STUDY_PARTS)
   .flatMap((parts) => parts.flatMap((part) => [part.label, part.chinese]))
   .map((label) => {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // "**Approach**", "- **Approach:**", "**Approach** -", at a line's start.
-    const opening = `^[ \\t]*(?:[-*][ \\t]+)?\\*\\*(${escaped})[ \\t]*[:：]?\\*\\*[ \\t]*[-–—:：]?[ \\t]*`;
-    return { alone: new RegExp(`${opening}$`, "gm"), inline: new RegExp(`${opening}(?=\\S)`, "gm") };
+    const opening = `^[ \\t]*(?:[-*][ \\t]+)?\\*\\*${labelPattern(label)}[ \\t]*[:：]?\\*\\*[ \\t]*[-–—:：]?[ \\t]*`;
+    return {
+      label,
+      alone: new RegExp(`${opening}$`, "gim"),
+      inline: new RegExp(`${opening}(?=\\S)`, "gim"),
+    };
   });
 
 /**
- * Puts each part's label on a line of its own, as the prompt asks. Models
- * also ran the part on after it - "**Approach** - 1. Identify ..." from
- * DeepSeek (28 September 2026) - which cut the numbered steps' list in two.
+ * Puts each part's label on a line of its own, as the prompt asks, spelled as
+ * in STUDY_PARTS and with a blank line before and after it. Models ran the
+ * part on after the label - "**Approach** - 1. Identify ..." from DeepSeek
+ * (28 September 2026), which cut the numbered steps' list in two - and put a
+ * label straight under a list, with no blank line: Markdown then reads it as
+ * more of the list's last item, and "Wrap-up", which follows the numbered
+ * steps, came out indented like one (the owner, 28 September 2026). The page
+ * runs this again when it renders notes, for ones stored before.
  */
 export function openStudyLabels(text: string) {
   let out = text;
-  for (const { alone, inline } of LABEL_PATTERNS) {
-    out = out.replace(alone, "**$1**").replace(inline, "**$1**\n\n");
+  for (const { label, alone, inline } of LABEL_PATTERNS) {
+    out = out.replace(alone, `\n**${label}**\n`).replace(inline, `\n**${label}**\n\n`);
   }
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * The notes cut at the labels that open their parts (STUDY_PARTS), for the
+ * tabs of the approach notes: each part's text without its label, in
+ * STUDY_PARTS order, "" for a part the model left out. Text before the first
+ * label goes with that part. Null when fewer than two labels are found - the
+ * page then shows the notes whole.
+ */
+export function splitStudyParts(text: string, kind: StudyKind): string[] | null {
+  const parts = STUDY_PARTS[kind];
+  const lines = openStudyLabels(text).split("\n");
+  const found: Array<{ part: number; line: number }> = [];
+  lines.forEach((line, index) => {
+    const label = /^\*\*(.+?)\*\*$/.exec(line.trim())?.[1];
+    const part = parts.findIndex((entry) => entry.label === label || entry.chinese === label);
+    if (part >= 0 && !found.some((entry) => entry.part === part)) found.push({ part, line: index });
+  });
+  if (found.length < 2) return null;
+  const out = parts.map(() => "");
+  found.forEach((entry, index) => {
+    const end = index + 1 < found.length ? found[index + 1].line : lines.length;
+    out[entry.part] = lines.slice(entry.line + 1, end).join("\n").trim();
+  });
+  const before = lines.slice(0, found[0].line).join("\n").trim();
+  if (before) out[found[0].part] = `${before}\n\n${out[found[0].part]}`.trim();
   return out;
 }
 
