@@ -415,10 +415,14 @@ export type StudyPromptExtras = {
 };
 
 /**
- * What each kind of study notes is (shared/study.ts), and what goes in each
- * of its parts, in the order of STUDY_PARTS - which holds their labels.
+ * What each kind of study notes is (shared/study.ts), what goes in each of
+ * its parts - in the order of STUDY_PARTS, which holds their labels - and how
+ * its Chinese is written, given its Chinese labels.
  */
-const STUDY_BRIEFS: Record<StudyKind, { what: string; audience: string; parts: string[] }> = {
+const STUDY_BRIEFS: Record<
+  StudyKind,
+  { what: string; audience: string; parts: string[]; chinese: (labels: string) => string[] }
+> = {
   approach: {
     what: "the type of problem this is and how problems of this type are solved (題型解題思路), with the key formulas",
     audience:
@@ -427,18 +431,36 @@ const STUDY_BRIEFS: Record<StudyKind, { what: string; audience: string; parts: s
       "what type of problem this is - the topic and the sub-type (for example, linear momentum applied to a pipe bend) - and the cues in a question that tell you it is this type.",
       "the general method for this type of problem as numbered steps (`1.`, `2.`, ...): what each step finds and why it comes at that point, and in a few words how it plays out in this question.",
       "each formula the method needs, as a displayed equation `$$...$$`, followed by what every symbol in it means, with its unit, and when the formula applies (its assumptions and sign convention).",
-      "the traps in this type of problem, as `- ` bullet lines, including any that a solution below fell into.",
+      "the traps in this type of problem, as `- ` bullet lines (with a verdict, including the mistakes it found in the solutions).",
+    ],
+    chinese: (labels) => [
+      `\`traditional_chinese\`: the whole \`guide\` again in Traditional Chinese as written in Hong Kong - the same parts in the same order, each opening with its bold label on a line of its own (${labels}), with the same Markdown and the same \`$...$\` math. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. The student is taught in English, so give the English term in brackets after a technical term the first time it appears, for example 動量方程 (momentum equation).`,
     ],
   },
+  // The owner's example of what this should read like (28 September 2026):
+  // a Hong Kong tutor talking a student through a bolted tension splice -
+  // the cover plates "like a sandwich", the bolt's three "ways to die" and
+  // the fastest one being its real strength, a line after every number on
+  // what it means, and "that's all there is to it" at the end - in spoken
+  // Cantonese with the English terms kept. The first version read like a
+  // textbook chapter (7,000 characters for a beam).
   explain: {
-    what: "the question and its solution explained simply, for a civil engineering student who has not understood much of this subject yet",
-    audience:
-      'Write for a beginner: plain words and short sentences, every technical term explained the first time it is used, an everyday analogy where it helps, and no step skipped or waved through as "obvious".',
+    what: "the question and its solution explained simply, the way a friendly tutor talks a student through it",
+    audience: [
+      "Pitch it at a secondary-school student who has not understood much of this subject yet. Talk to the student as \"you\", in plain words and short sentences, like a patient tutor sitting beside them - not like a textbook.",
+      "Give the problem an everyday picture that fits it (two plates clamped between two cover plates are \"a sandwich\"; the ways a part can fail are its \"ways to break\", and the one that comes first is its real strength). A comparison of size must be right: 700 kN is the weight of about 70 tonnes, not of hundreds of cars.",
+      "Name each technical term in English with a plain explanation the first time. After every number you work out, say in one line what it means physically (\"so at 183.8 kN the bolt snaps in two places\").",
+      "Keep it short: say each thing once and leave out what the student does not need - about 300 to 450 words for one question, and a short run through each for a paper with several.",
+    ].join(" "),
     parts: [
-      "the physical situation in everyday words: what the structure or flow is, what acts on what, what the question asks for, and why an engineer would want to know it.",
-      "each concept the solution relies on, explained simply - what it means physically, not only its formula - as `- ` bullet lines.",
-      "the solution walked through as numbered steps (`1.`, `2.`, ...), each saying in plain words what is done and why, then the calculation with its numbers.",
-      "the final answer(s) with units, what they mean physically, and a quick check that they are reasonable - sign, direction, order of magnitude.",
+      "the situation in two or three sentences of everyday words, with the everyday picture, and what the question wants you to find.",
+      "the one idea the whole solution hangs on, in a sentence or two (for example: a bolt can fail in several ways, and whichever comes first is its real strength).",
+      "the working as a few numbered points (`1.`, `2.`, ...), one per idea rather than one per line of the solution - checks of the same kind share a point (the three plate-bearing checks are one). Each point: a plain name for what it checks (\"Way 1: the bolt snaps\"), the formula with the numbers put in, the result with its unit, then one line on what that number means. Checks that do not change the answer - spacing, edge distances and other detailing - get one line at the end of this part, not a point each.",
+      "the results side by side as `- ` bullet lines, which one governs and why, the final answer with its unit, and one closing line the student can remember (\"That's all there is to it: work out every way it can fail - the smallest one wins.\").",
+    ],
+    chinese: (labels) => [
+      `\`traditional_chinese\`: the same explanation told again for a Hong Kong student, the way a Hong Kong tutor talks - in spoken Cantonese written in Traditional Chinese characters (係、嘅、咗、咁、佢、呢個、即係話), not formal written Chinese, and not a word-for-word translation of the English. The student is taught in English, so keep each engineering term in English with its Chinese in brackets the first time, for example Double Shear (雙剪), Bearing Capacity (承壓力); everything else - the everyday pictures and words included (三文治, 死法, 頂唔頂得住) - is in Cantonese. The same parts in the same order, each opening with its bold label on a line of its own (${labels}), with the same Markdown and the same \`$...$\` math; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
+      "The tone to aim for, from another question - do not copy its content: 「一粒螺絲有3種死法，邊種死得最快，嗰個就係佢嘅真正實力。三文治夾住，所以螺絲會斷2個位，叫 Double Shear (雙剪)。一個位頂到 $91.8\\,\\text{kN}$，兩個位就係 $2 \\times 91.8 = 183.8\\,\\text{kN}$。即係話，拉到 $183.8\\,\\text{kN}$，粒螺絲就會斷兩截。」",
     ],
   },
 };
@@ -465,7 +487,12 @@ export function buildStudyPrompt(
       ]
     : [
         `The attached civil engineering assignment images have been solved; the solution is below. Your job is to write study notes on it: ${brief.what}.`,
-        "Build the notes on this solution. If it has a clear error, follow the correct engineering and point the error out.",
+        // Not "point out any error": told that, DeepSeek and ChatGPT both
+        // "corrected" a textbook's sqrt(275/345) for a 20 mm S355 plate to
+        // 355 - wrong, p_y is 345 above 16 mm - and ChatGPT changed the
+        // answer with it (28 September 2026). Checking is the cross-check's
+        // job; the user picked this solution to learn from.
+        "Build the notes on this solution as it stands. Checking it is the cross-check's job, not yours: do not re-derive its numbers or correct its code values - one that looks off may well be right (a steel's design strength drops for thicker plates, for instance), and a wrong correction misleads the student.",
       ];
 
   sections.push(
@@ -474,9 +501,7 @@ export function buildStudyPrompt(
     ...labels.map((part, index) => `- ${part.label}: ${brief.parts[index]}`),
     `Open each part with its label in bold on a line of its own - \`**${labels[0].label}**\` - and start the part's content on the next line, never on the label's line.`,
     "",
-    `\`traditional_chinese\`: the whole \`guide\` again in Traditional Chinese as written in Hong Kong - the same parts in the same order, each opening with its bold label on a line of its own (${labels
-      .map((part) => `**${part.chinese}**`)
-      .join(", ")}), with the same Markdown and the same \`$...$\` math. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. The student is taught in English, so give the English term in brackets after a technical term the first time it appears, for example 動量方程 (momentum equation).`,
+    ...brief.chinese(labels.map((part) => `**${part.chinese}**`).join(", ")),
     "",
     "Write `guide` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$Q = A_1 V_1$`), `$$...$$` for a displayed equation - never as plain text such as Q = A1 V1; lists as `- ` bullet lines or numbered `1.` lines; no headings, backticks or code blocks.",
     UNIT_RULE,
