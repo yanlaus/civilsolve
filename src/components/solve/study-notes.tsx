@@ -11,7 +11,7 @@ import { ChevronDown, Compass, GraduationCap, Languages, Lightbulb, Sparkles } f
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
-  DEFAULT_STUDY_WRITER,
+  DEFAULT_STUDY_WRITERS,
   MODEL_CHOICES,
   parseChoice,
   PROVIDER_KEYS,
@@ -45,7 +45,15 @@ import {
 
 const KINDS: Record<
   StudyKind,
-  { title: string; chinese: string; blurb: string; Icon: typeof Compass; placeholder: string }
+  {
+    title: string;
+    chinese: string;
+    blurb: string;
+    Icon: typeof Compass;
+    placeholder: string;
+    /** The fold with the Chinese version: written Chinese, or spoken Cantonese. */
+    chineseFold: string;
+  }
 > = {
   approach: {
     title: "Problem type & approach",
@@ -53,13 +61,16 @@ const KINDS: Record<
     blurb: "What type of problem this is, how problems of this type are solved, and the key formulas.",
     Icon: Compass,
     placeholder: "e.g. Compare it with the Bernoulli-only approach. Add the formula for the force on a vane.",
+    chineseFold: "繁體中文 · Traditional Chinese",
   },
   explain: {
     title: "Explained simply",
     chinese: "淺白講解",
-    blurb: "The question and its solution in plain words, for a student new to the subject.",
+    blurb:
+      "The question and its solution talked through like a tutor would - plain words, everyday pictures, what every number means. The Chinese is in Cantonese.",
     Icon: Lightbulb,
     placeholder: "e.g. Explain why the pressure force points into the control volume. Use a garden-hose analogy.",
+    chineseFold: "廣東話 · In Cantonese",
   },
 };
 
@@ -205,7 +216,7 @@ function StudyCard({
   onStop: () => void;
   onRefine: (instructions: string) => void;
 }) {
-  const { title, chinese, blurb, Icon, placeholder } = KINDS[kind];
+  const { title, chinese, blurb, Icon, placeholder, chineseFold } = KINDS[kind];
   const configured = (key: ProviderKey) =>
     providerStatus ? providerStatus[key]?.configured !== false : true;
   const writers = MODEL_CHOICES.filter((choice) => configured(choice.provider));
@@ -222,7 +233,8 @@ function StudyCard({
   // band (ChatGPT runs at high or max).
   const [pick, setPick] = useState<ModelChoice | null>(null);
   const writer: ModelChoice =
-    pick ?? (run.status !== "idle" ? { provider: run.provider, variant: run.variant } : DEFAULT_STUDY_WRITER);
+    pick ??
+    (run.status !== "idle" ? { provider: run.provider, variant: run.variant } : DEFAULT_STUDY_WRITERS[kind]);
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
   const { inBand, clamp } = effortBand(providerStatus?.[writer.provider]);
   const effort = clamp(effortPick);
@@ -374,7 +386,7 @@ function StudyCard({
             <details className="group/zh mt-3 rounded-cs border border-cs-line-soft bg-cs-muted">
               <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
                 <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-                繁體中文 · Traditional Chinese
+                {chineseFold}
                 <ChevronDown
                   className="ml-auto h-3.5 w-3.5 transition group-open/zh:rotate-180"
                   aria-label="Show or hide the Traditional Chinese"

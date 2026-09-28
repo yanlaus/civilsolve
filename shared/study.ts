@@ -45,11 +45,13 @@ export const STUDY_PARTS: Record<StudyKind, ReadonlyArray<{ label: string; chine
     { label: "Key formulas", chinese: "關鍵公式" },
     { label: "Common mistakes", chinese: "常見錯誤" },
   ],
+  // A tutor's run-through, and in Cantonese in the Chinese (the owner's
+  // example of 28 September 2026 - see the explain brief in prompt.ts).
   explain: [
-    { label: "What is going on", chinese: "發生甚麼事" },
-    { label: "Ideas you need", chinese: "需要知道的概念" },
-    { label: "The solution, step by step", chinese: "逐步解題" },
-    { label: "Does the answer make sense?", chinese: "答案合理嗎？" },
+    { label: "What's going on", chinese: "發生咩事" },
+    { label: "The key idea", chinese: "關鍵諗法" },
+    { label: "Step by step", chinese: "逐步計" },
+    { label: "Wrap-up", chinese: "總結" },
   ],
 };
 
