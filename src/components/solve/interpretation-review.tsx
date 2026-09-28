@@ -6,10 +6,10 @@
 // reconciler can be asked for the reading again, with the user's instructions.
 
 import { lazy, Suspense, useState } from "react";
-import { Check, Eye, Languages, Loader2, Pencil, Square, TriangleAlert, X } from "lucide-react";
+import { Check, Eye, Languages, Pencil, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
 import { formatClock, useNow } from "@/lib/progress";
-import { STOP_BUTTON_CLASS } from "./interpret-progress";
+import { StatusRow } from "./interpret-progress";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 
 // The math renderer (katex, marked, dompurify) stays out of the first bundle.
@@ -206,18 +206,10 @@ export function InterpretationReview({
 
       <div className="mt-4">
         {revising ? (
-          <div className="flex items-center gap-3 rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs-accent" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words">
+          <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
+            <StatusRow clock={formatClock(now - revising.startedAt)} onStop={onStopRevise}>
               {reviser} is re-generating the reading with your instructions - {revising.status}
-            </span>
-            <span className="shrink-0 font-semibold tabular-nums">
-              {formatClock(now - revising.startedAt)}
-            </span>
-            <button type="button" onClick={onStopRevise} className={STOP_BUTTON_CLASS}>
-              <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-              Stop
-            </button>
+            </StatusRow>
           </div>
         ) : (
           <RevisePanel

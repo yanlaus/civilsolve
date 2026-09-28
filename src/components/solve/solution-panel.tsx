@@ -138,11 +138,12 @@ function InterpretationCard({ interpretation }: { interpretation: ConfirmedInter
       className="cs-panel group mb-8 overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden"
     >
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-5 py-4 sm:px-7">
-        <span className="flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+        <span className="flex flex-1 items-center gap-2 font-display text-lg font-semibold text-cs-ink sm:flex-none">
           <BookOpen className="h-4 w-4 text-cs-accent" aria-hidden="true" />
           Interpreted question
         </span>
-        <span className="min-w-0 flex-1 text-xs text-cs-ink-3">
+        {/* On a phone the remark goes under the heading, not squeezed beside it. */}
+        <span className="order-last basis-full text-xs text-cs-ink-3 sm:order-none sm:basis-0 sm:flex-1">
           confirmed by you{credit ? ` · read by ${credit}` : ""} · what the solvers were given
         </span>
         <ChevronDown
@@ -876,9 +877,10 @@ function JudgementCard({
       {/* Open to begin with (the owner's call, 27 September 2026); the
           chevron folds it away. */}
       <details open className="group mt-4 rounded-cs border border-cs-line-soft">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm font-semibold text-cs-accent">
+        <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-sm font-semibold text-cs-accent">
           <span className="min-w-0 flex-1">Full verdict · 完整評語</span>
-          <span className="text-xs font-normal text-cs-ink-3 group-open:hidden">
+          {/* Folded: on a phone the remark goes under the heading. */}
+          <span className="order-last basis-full text-xs font-normal text-cs-ink-3 group-open:hidden sm:order-none sm:basis-auto">
             what each solution got right and wrong, and why
           </span>
           <ChevronDown

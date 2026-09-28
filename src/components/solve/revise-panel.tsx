@@ -47,7 +47,10 @@ export function RevisePanel({
           aria-label="Your instructions"
           className="w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
         />
-        <div className="mt-2 flex flex-wrap items-center gap-3">
+        {/* The hint goes under the button. Beside it, as flex-1, it never
+            wrapped: on an iPhone it was squeezed into a column a word or two
+            wide next to the button (the owner, 29 September 2026). */}
+        <div className="mt-2 flex flex-col items-start gap-2">
           <button
             type="button"
             disabled={Boolean(disabledReason) || !wanted}
@@ -60,7 +63,7 @@ export function RevisePanel({
             <RotateCw className="h-4 w-4" aria-hidden="true" />
             {buttonLabel}
           </button>
-          <span className="min-w-0 flex-1 text-xs text-cs-ink-3">{disabledReason || hint}</span>
+          <span className="text-xs text-cs-ink-3">{disabledReason || hint}</span>
         </div>
       </div>
     </details>

@@ -3,10 +3,9 @@
 // a failure, a timeout and a stop. Shared by the solutions, the verdict and
 // the study notes.
 
-import { Loader2, Square } from "lucide-react";
 import { formatDuration } from "../../../shared/stream-protocol";
 import { formatClock, type Progress } from "@/lib/progress";
-import { STOP_BUTTON_CLASS } from "./interpret-progress";
+import { StatusRow } from "./interpret-progress";
 
 // A task that ran out of time and returned nothing is shown in orange, apart
 // from the red of a real failure: nothing went wrong that a rerun could not fix.
@@ -66,21 +65,14 @@ export function ProgressBox({
   const elapsed = progress ? now - progress.startedAt : 0;
   return (
     <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
-      <div className="flex items-center gap-3">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cs-accent" />
-        <span className="min-w-0 flex-1 break-words">{line}</span>
-        {progress ? (
-          <span className="shrink-0 font-semibold tabular-nums" title="Time since the request was sent">
-            {formatClock(elapsed)}
-          </span>
-        ) : null}
-        {onStop ? (
-          <button type="button" onClick={onStop} title={stopTitle} className={STOP_BUTTON_CLASS}>
-            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-            Stop
-          </button>
-        ) : null}
-      </div>
+      <StatusRow
+        clock={progress ? formatClock(elapsed) : undefined}
+        clockTitle="Time since the request was sent"
+        onStop={onStop}
+        stopTitle={stopTitle}
+      >
+        {line}
+      </StatusRow>
       <EventLog progress={progress} current={line} />
     </div>
   );
