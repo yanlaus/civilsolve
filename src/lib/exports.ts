@@ -1,7 +1,7 @@
-// Client-side solution export: print-to-PDF. The old server compiled PDFs
-// with pdflatex; on Cloudflare the browser does the work instead. The .tex
-// download and "Open in Overleaf" were removed on 25 September 2026 - users
-// only save PDFs.
+// The browser's print dialog: "Print instead", for when the server cannot
+// make the PDF ("Generate PDF", worker/pdf.ts, since 29 September 2026 - it
+// was the only way to a PDF before). The .tex download and "Open in
+// Overleaf" were removed on 25 September 2026 - users only save PDFs.
 
 function slugify(value: string) {
   return (

@@ -43,7 +43,9 @@ The solve flow is **streaming over Server-Sent Events**, with each task running 
 
 **After a run, without uploading again:** a failed, timed-out or cancelled tab has a **Retry** button, and a panel under the solutions offers **Add a solver** (any configured provider not yet in the run) and **Run the cross-check** (again) over the finished solutions you tick, with the judge you pick and how hard it thinks (**High** by default; levels the judge's route does not offer - ChatGPT runs at high or max - are greyed out, and the verdict card says which level it ran at). All three reuse the run's images, notes, thinking level and confirmed reading. A verdict given before a solver was added or retried says which solutions it did not grade. The cross-check waits for every solver still running.
 
-**The cross-check is started from the solutions, never from the upload form** (since 26 September 2026): once the answers are in, the user ticks which ones to grade and picks the judge. The judge gets the question as uploaded (every page image and the additional instructions), the confirmed interpretation when there was one, and the chosen solutions. The verdict card sits at the bottom, under those controls, and leads with the verdict itself - one line per solution, **Correct 正確** or **Wrong 錯誤** - then the headline and the verified final answer; each solution's assessment, the reasoning and the Traditional Chinese version are under "Full verdict", which is open to begin with and folds away with its chevron (since 27 September 2026). Each assessment is a list of bullet points with the same points in Traditional Chinese under it (`assessments_chinese`), and **Save as PDF** beside the verified final answer prints that answer alone. Every PDF, a solution's or the answer's, is printed on white: the print styles clear the theme's page colour, which browsers that print backgrounds (Safari on iPhone) used to put behind it.
+**The cross-check is started from the solutions, never from the upload form** (since 26 September 2026): once the answers are in, the user ticks which ones to grade and picks the judge. The judge gets the question as uploaded (every page image and the additional instructions), the confirmed interpretation when there was one, and the chosen solutions. The verdict card sits at the bottom, under those controls, and leads with the verdict itself - one line per solution, **Correct 正確** or **Wrong 錯誤** - then the headline and the verified final answer; each solution's assessment, the reasoning and the Traditional Chinese version are under "Full verdict", which is open to begin with and folds away with its chevron (since 27 September 2026). Each assessment is a list of bullet points with the same points in Traditional Chinese under it (`assessments_chinese`), and **Generate PDF** beside the verified final answer makes a PDF of that answer alone (see below).
+
+**PDFs are made by the server** (since 29 September 2026, the owner's call; it was the browser's print dialog, which on an iPhone meant going through the share sheet). **Generate PDF** - on a solution, and beside the verdict's verified final answer - asks `GET /api/pdf/:id` for the answer's job; the Worker renders it with the page's own Markdown + KaTeX pipeline (`shared/markdown.ts`) and Cloudflare's headless Chrome (Browser Rendering) prints it to A4 with page numbers. The button then offers **Open PDF** (the link; on an iPhone it opens in Safari's PDF viewer, and Share → Save to Files keeps it) and **Copy link**. Nothing new is stored: the link works for as long as the job keeps its answer (24 hours), and the edge cache keeps the file that long so opening it again costs nothing. If the server cannot make one - the month's allowance used up, the browser service down - the button says why and offers **Print instead**, the old print dialog, which prints on white whatever the theme.
 
 **Anything a model wrote can be asked for again, with your instructions** (since 27 September 2026). Under each finished solution, under the reading in the review step, and under the verdict there is a fold - "Not right? Give ... instructions and re-generate" - with a box for what to change and a **Re-generate** button. The same model gets everything the first request had plus its last version and your instructions, and writes a complete new version: a solution gets the question images, notes, lecture notes and confirmed reading; the reading gets the images, notes, the reading as you left it (your edits included) and both readers' readings; the verdict gets the images, notes, confirmed reading and the graded solutions as they are now. The prompts tell the model to follow the instructions but, where one contradicts the images or the engineering, to do what they require and say why (in `assumptions`, `discrepancies` or `comparison`). The new version says "Re-generated with your instructions: ...". While it runs there is a Stop, and if it fails or is stopped the previous version stays on the page with a note saying so. A solution re-generated after the verdict loses its ✓/✗ on the tab, and the verdict says it graded the version before - re-generate the verdict (or run the cross-check again) to grade the new one.
 
@@ -124,7 +126,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 | Math | KaTeX (lazy-loaded chunk) |
 | Markdown | marked + DOMPurify (lazy-loaded chunk) |
 | PDF input | pdfjs-dist (lazy-loaded, browser-side rasterization) |
-| PDF export | Browser print stylesheet (`Save as PDF`) |
+| PDF export | Cloudflare Browser Rendering (`@cloudflare/puppeteer`, `GET /api/pdf/:id`); the browser print stylesheet as the fallback |
 | LLM access | Poe Responses API, OpenCode Go (Responses + chat completions), Google Generative Language API, MiniMax API (chat completions) |
 
 ### File structure
@@ -134,6 +136,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── index.ts            # Hono app: rate limit, validation, task endpoints, /api/jobs/:id
 │   ├── tasks.ts            # Request body -> task, for solve / interpret / judge / study
 │   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
+│   ├── pdf.ts              # GET /api/pdf/:id: an answer rendered and printed by Browser Rendering; PdfBudget
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
 │   └── run.ts              # Heartbeats, timeout, retry/downgrade, SSE events to a sink
 ├── shared/                 # Pure logic shared by worker and client
@@ -143,6 +146,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── judgement.ts        # Answer cross-check (judge) schema and parsing
 │   ├── study.ts            # Study notes (approach, simple explanation): schema, part labels, parsing
 │   ├── prompt.ts           # Solve, interpret/verify, judge and study-notes prompts, shape contract
+│   ├── markdown.ts         # Markdown + KaTeX rendering pipeline (page and PDF), sanitizer supplied by the caller
 │   └── stream-protocol.ts  # SSE event types + request limits
 ├── src/
 │   ├── pages/civil-answer-app.tsx      # Page composition
@@ -155,6 +159,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   │   ├── provider-logo.tsx           # Official provider logo (src/assets/providers/*.svg)
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
 │   │   ├── solution-panel.tsx          # Kept reading, tabs, streaming states, Stop, verdict card, exports (lazy)
+│   │   ├── pdf-button.tsx              # Generate PDF -> Open PDF / Copy link, or Print instead
 │   │   ├── study-notes.tsx             # The two optional study-notes cards under the verdict (lazy)
 │   │   ├── task-status.tsx             # Progress box, status log and failure colours, shared
 │   │   ├── math-prose.tsx              # Markdown + KaTeX for the reading and the verdict (lazy)
@@ -171,13 +176,13 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │       ├── upload-store.ts             # Last run's request body (images) in IndexedDB (24 h)
 │       ├── progress.ts                 # Per-task timeline: start, deadline, statuses, end
 │       ├── effort-band.ts              # The thinking levels a model's route offers, for a picker
-│       ├── math-markdown.ts            # Math normalization, sanitize, render
+│       ├── math-markdown.ts            # The shared renderer + DOMPurify + KaTeX's stylesheet
 │       ├── attachments.ts              # File -> JPEG data URL conversion
 │       ├── page-range.ts               # "1-3, 5" -> the PDF pages to send
 │       ├── lecture-notes.ts            # Reference payload from notes files
 │       ├── pdf-to-images.ts            # pdf.js page count + rasterization (dynamic import)
-│       └── exports.ts                  # Save as PDF (browser print)
-├── wrangler.jsonc          # Worker config (assets, JOBS binding, run_worker_first); vars only to override
+│       └── exports.ts                  # "Print instead": the browser's print dialog
+├── wrangler.jsonc          # Worker config (assets, JOBS / PDF_BUDGET / BROWSER bindings, limiters); vars only to override
 ├── .dev.vars.example       # Local secrets template (copy to .dev.vars)
 ├── .npmrc                  # min-release-age=3: skip package versions under 3 days old
 └── vite.config.ts          # @cloudflare/vite-plugin + manualChunks
@@ -247,6 +252,12 @@ Nothing in the platform forces these numbers. Cloudflare enforces no wall-clock 
 ### `POST /api/study/:provider`
 
 Optional, the **study notes** (`shared/study.ts`). Body: `{ kind: "approach" | "explain", images, notes, interpretation?, solutions: [text, ...], verdict?, effort?, variant?, revision? }`. The notes start from what the user picked on the card: one solver's solution (`solutions` holds exactly that one, as `artifactToText` writes it), or the cross-check's verified answer - `verdict` as text (`judgementToText`) with the one to four solutions it graded, in its order so its letters still match, and a placeholder for a graded one that is no longer on the page. Without a verdict, more than one solution is a 400. The prompt builds on the verdict's verified answer and the method of the solutions it found correct, or on the one solution, following the correct engineering where it has a clear error - though a misread question is not one it catches: started from the B.8 solution that read the inlet pressure as 200 kPa, DeepSeek explained its wrong −460 N faithfully. `effort` defaults to `medium`: the notes explain a solution, they do not derive one. Returns the same SSE shape with `done → { study }`: `{ guide, traditional_chinese }`. Each part of the notes opens with its bold label on a line of its own (`STUDY_PARTS`: Problem type, Approach, Key formulas, Common mistakes; or What's going on, The key idea, Step by step, Wrap-up - each with its Chinese label, 發生咩事, 關鍵諗法, 逐步計 and 總結 for the Cantonese one); `openStudyLabels` puts every label on a line of its own, spelled as in `STUDY_PARTS`, with a blank line around it: models ran the part on after the label (DeepSeek wrote `**Approach** - 1. Identify ...`, which cut the numbered steps' list in two), wrote variants ("Key idea" for "The key idea"), and put "Wrap-up" straight under the numbered steps with no blank line, where Markdown reads it as more of the last step and indents it like one - the owner saw that on every explanation. The parser runs it, and the page again when it renders, for notes stored before. It runs on the provider's normal solve route, like the judge, and the notes are never sent to `/api/judge`. Measured on 28 September 2026 with saved solutions as input: given a verdict, DeepSeek at `low` wrote the approach notes in 103-126 s with B's double-counted pressure force among the common mistakes; the beam explained simply took 59 s (7,077 characters, 3,532 in Chinese); ChatGPT at `high` explained B.8 from one solution in 66 s; a re-generation with instructions took 28 s.
+
+### `GET /api/pdf/:id`
+
+A finished solution, or the verdict's verified final answer, as an A4 PDF (`worker/pdf.ts`), for the job id the page has for it. It answers `application/pdf` inline with a file name from the solution's title, `cache-control: public, max-age` up to the job's remaining retention, and puts the file in the edge cache (the Cache API does nothing on `workers.dev`: there every request renders). On a cache miss it takes a `PDF_LIMITER` slot (10 per client IP per minute), reads the job's stored final event (`GET /result` on the TaskJob), and asks `PdfBudget` whether the month's browser time is under `PDF_MONTHLY_MS`. It then builds the document with the shared renderer, sanitizes it with `HTMLRewriter` (no script, style, link, frame, embed, form, image, `on*` handler or `href`/`src`), and prints it in a headless browser with JavaScript off that may fetch nothing but KaTeX's stylesheet and fonts from jsDelivr - the worst a hostile answer can do is change how its own PDF looks. Errors: 404 (bad id, answer gone, or a job with no PDF - a reading, study notes), 429 (per-IP limit, or the month's allowance used up), 503 (Browser Rendering refused or failed). Measured on 29 September 2026 through `npm run dev` (the remote browser adds a little): a 2-page beam solution in 13.8 s, a one-page verdict answer in 8.5 s, 0.01 s from the cache; KaTeX's fonts embedded, body text in Liberation Sans.
+
+Cost: Browser Rendering on Workers Paid includes 10 browser hours a month, then US$0.09 an hour (and 10 concurrent browsers, averaged monthly, then US$2 each). `PdfBudget`, one Durable Object for the account, adds up the time from launching each browser to closing it and refuses past 9 hours in the calendar month (UTC), so PDFs never bill beyond the plan - three PDFs used 36.8 s, so the cap is some 2,700 PDFs a month at that rate, more on production.
 
 ### Jobs: `GET /api/jobs/:id` and `DELETE /api/jobs/:id`
 
@@ -323,6 +334,9 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 |---|---|---|
 | `JOBS` | `TaskJob` (`worker/jobs.ts`), SQLite-backed, migration `v1` | One Durable Object per task, so it finishes after the page leaves and keeps its answer 24 hours. Available on Workers Free and Paid; each job is billed for the time it is active (≈ 128 MB × run time), comfortably inside the Paid plan's 400,000 GB-s a month. Remove it and tasks run inline again |
 | `TASK_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2609`) | 20 model-calling requests (solve, interpret, judge) per client IP per minute. A whole run with every option on is about a dozen, so it only stops a runaway client. Re-attaching and cancelling are not counted. Remove it and nothing is limited |
+| `BROWSER` | Browser Rendering (`browser`, `remote: true`) | The headless Chrome that prints PDFs (`worker/pdf.ts`); needs the `nodejs_compat` flag for `@cloudflare/puppeteer`. There is no local browser: `npm run dev` uses Cloudflare's, over `npx wrangler login`, and it cannot open `localhost` pages - which is why the Worker hands it the finished HTML instead of a URL. Remove it and `GET /api/pdf` answers 503 |
+| `PDF_BUDGET` | `PdfBudget` (`worker/pdf.ts`), SQLite-backed, migration `v2` | The month's browser time for PDFs, one object for the account; refuses past `PDF_MONTHLY_MS` (9 of the 10 included hours) |
+| `PDF_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2610`) | 10 PDFs made per client IP per minute; one served from the cache is not counted |
 
 ### Vars (optional overrides, non-secret)
 
@@ -401,7 +415,7 @@ Add an entry under that provider in `ROUTES` (`worker/channels.ts`) naming the d
 
 ```bash
 npm install
-npm run dev        # Vite dev server + Worker in workerd, with HMR
+npm run dev        # Vite dev server + Worker in workerd, with HMR (Generate PDF uses Cloudflare's browser: npx wrangler login first)
 npm run check      # tsc --noEmit for both the SPA and the worker
 npm run build      # production build (dist/client + worker bundle)
 npm run preview    # serve the production build locally
@@ -453,7 +467,7 @@ Accepted: JPEG, PNG, WebP, GIF, PDF. HEIC/HEIF/TIFF are no longer accepted (the 
 
 Provider responses can be messy despite `strict: true`. The pipeline in `shared/solution.ts` handles: control-character stripping, alternate JSON field names, `problems[]`-array shapes (every problem kept under its own heading, with steps, givens and formulas accepted as lists or objects - a whole exam paper comes back this way from models that ignore the schema), `<think>` reasoning left in the content, JSON-blob-inside-a-field repair, plain-text synthesis, LaTeX fence stripping, LaTeX-body-preferred display repair, labels such as "Given:" moved onto a line of their own only when they are run into a sentence (never out of a bullet or a bold), LaTeX commands whose backslash a JSON escape swallowed (`\rho` read as a carriage return and "ho" - `restoreSwallowedCommands`), and line breaks escaped twice (`\\n` in the JSON, which showed on the page as a literal "\n" with the lines run into one paragraph - `fixEscapedNewlines`, which leaves `\nu`, `\neq` and LaTeX's `\\` alone). A provider failure only fails that provider's tab.
 
-Model output is also **untrusted input** — the uploaded images are user-supplied, so anything in them can steer what a model writes. Rendered markdown is sanitized with DOMPurify before it reaches the DOM (`src/lib/math-markdown.ts`); KaTeX output is spliced in afterwards from placeholders so the sanitizer never mangles generated math.
+Model output is also **untrusted input** — the uploaded images are user-supplied, so anything in them can steer what a model writes. Rendered markdown is sanitized with DOMPurify before it reaches the DOM (`src/lib/math-markdown.ts`), and with `HTMLRewriter` before the PDF browser gets it (`worker/pdf.ts`, which also runs that browser with JavaScript off and fetching nothing but KaTeX); KaTeX output is spliced in afterwards from placeholders (`shared/markdown.ts`) so the sanitizer never mangles generated math.
 
 ## Maintenance rules
 

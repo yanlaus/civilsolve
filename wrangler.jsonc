@@ -3,6 +3,8 @@
   "name": "civilsolve",
   "main": "worker/index.ts",
   "compatibility_date": "2026-07-01",
+  // node:buffer, for @cloudflare/puppeteer (worker/pdf.ts).
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
@@ -29,10 +31,24 @@
   // hours even when the page that asked has gone away (a phone putting the
   // browser in the background). SQLite-backed: the class stores only the
   // task's final event, never the uploaded images.
+  // PdfBudget (worker/pdf.ts): one object for the account, counting the
+  // browser time PDFs used this month.
   "durable_objects": {
-    "bindings": [{ "name": "JOBS", "class_name": "TaskJob" }]
+    "bindings": [
+      { "name": "JOBS", "class_name": "TaskJob" },
+      { "name": "PDF_BUDGET", "class_name": "PdfBudget" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskJob"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TaskJob"] },
+    { "tag": "v2", "new_sqlite_classes": ["PdfBudget"] }
+  ],
+  // Browser Rendering: the headless Chrome that prints solutions to PDF
+  // (GET /api/pdf/:id, worker/pdf.ts). Workers Paid includes 10 browser
+  // hours a month, then US$0.09 an hour; PdfBudget stops at 9. "remote"
+  // only matters to `npm run dev`: there is no local browser, so the dev
+  // server uses Cloudflare's (it needs `npx wrangler login`).
+  "browser": { "binding": "BROWSER", "remote": true },
   // Workers Rate Limiting: at most 20 model-calling requests (solve,
   // interpret, judge) per client IP per minute. One run with every option
   // on is about a dozen - eight solvers, two readers, a reconciler, a judge
@@ -45,6 +61,13 @@
       "name": "TASK_LIMITER",
       "namespace_id": "2609",
       "simple": { "limit": 20, "period": 60 }
+    },
+    // At most 10 PDFs made per client IP per minute; one from the cache is
+    // not counted.
+    {
+      "name": "PDF_LIMITER",
+      "namespace_id": "2610",
+      "simple": { "limit": 10, "period": 60 }
     }
   ],
   "observability": {
