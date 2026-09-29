@@ -30,7 +30,8 @@ export type ProviderKey =
 
 /**
  * Every provider, in picker order - the order of the solver cards, the
- * reader and judge lists, the solution tabs and the letters the judge sees.
+ * reader and judge lists, the solution tabs (after Muse Spark's, always first -
+ * solution-panel.tsx) and the letters the judge sees.
  * The two dearest (Grok, Claude) close the solvers. The solver cards use
  * SOLVER_KEYS, which leaves out the review-only providers.
  */

@@ -4,7 +4,7 @@ import { MAX_BODY_BYTES } from "../shared/stream-protocol";
 import { routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
-import { pdfContentOf, pdfDocument, pdfFileName, printPdf } from "./pdf";
+import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
 
 export { TaskJob } from "./jobs";
 export { PdfBudget } from "./pdf";
@@ -152,10 +152,12 @@ app.get("/api/jobs/:id", (c) => {
 });
 
 // A finished solution, or the verdict's verified answer, as a PDF made by
-// the server (worker/pdf.ts): what "Generate PDF" opens, and a link that
-// works for as long as the job keeps its answer. Served from the edge cache
-// when it has it; otherwise rendered, within the per-IP limit and the
-// month's browser-time allowance.
+// the server (worker/pdf.ts): what "Generate PDF" opens. The first request
+// renders it - within the per-IP limit and the month's browser-time
+// allowance - and keeps it in R2 for good, so the link works after the job's
+// answer is gone; later ones are served from the edge cache or from R2.
+// `x-pdf-kept` tells the page which: "forever", or "24h" when the bucket is
+// missing or full and only the cache has it.
 app.get("/api/pdf/:id", async (c) => {
   const id = c.req.param("id");
   const jobs = c.env.JOBS;
@@ -166,6 +168,22 @@ app.get("/api/pdf/:id", async (c) => {
   const cacheKey = new Request(new URL(`/api/pdf/${id}`, c.req.url).toString());
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
+
+  // Made before: kept in R2.
+  const bucket = c.env.PDFS;
+  const kept = bucket ? await bucket.get(pdfKey(id)) : null;
+  if (kept) {
+    const response = new Response(kept.body, {
+      headers: {
+        "content-type": "application/pdf",
+        "content-disposition": `inline; filename="${kept.customMetadata?.fileName || "solution.pdf"}"`,
+        "cache-control": "public, max-age=604800",
+        "x-pdf-kept": "forever",
+      },
+    });
+    c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  }
 
   const browser = c.env.BROWSER;
   const budgets = c.env.PDF_BUDGET;
@@ -200,14 +218,34 @@ app.get("/api/pdf/:id", async (c) => {
     c.executionCtx.waitUntil(budget.add(Date.now() - started));
   }
 
-  // Kept as long as the job keeps its answer (at most a day), so opening
-  // the link again costs no browser time.
-  const maxAge = Math.max(60, Math.min(86_400, Math.floor((expiresAt - Date.now()) / 1000)));
+  // Kept for good in R2, while the bucket has room. Awaited: the link has to
+  // work once the page says so, even if it is closed at once.
+  const fileName = pdfFileName(content);
+  let forever = false;
+  if (bucket && (await budget.canStore(pdf.byteLength))) {
+    try {
+      await bucket.put(pdfKey(id), pdf, {
+        httpMetadata: { contentType: "application/pdf" },
+        customMetadata: { fileName, title: pdfTitle(content), kind: content.kind, madeAt: new Date().toISOString() },
+      });
+      forever = true;
+      c.executionCtx.waitUntil(budget.addStored(pdf.byteLength));
+    } catch {
+      // Not stored: still served, and cached for as long as the answer lives.
+    }
+  }
+
+  // The edge cache keeps it too, so opening the link again costs nothing:
+  // a week for one in R2, else as long as the job keeps its answer.
+  const maxAge = forever
+    ? 604_800
+    : Math.max(60, Math.min(86_400, Math.floor((expiresAt - Date.now()) / 1000)));
   const response = new Response(pdf, {
     headers: {
       "content-type": "application/pdf",
-      "content-disposition": `inline; filename="${pdfFileName(content)}"`,
+      "content-disposition": `inline; filename="${fileName}"`,
       "cache-control": `public, max-age=${maxAge}`,
+      "x-pdf-kept": forever ? "forever" : "24h",
     },
   });
   c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));

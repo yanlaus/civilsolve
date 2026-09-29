@@ -61,6 +61,12 @@ import {
 } from "./task-status";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
+/** The solution tabs' order: Muse Spark first, then picker order. */
+const SOLUTION_TAB_ORDER = [
+  ...PROVIDER_OPTIONS.filter((provider) => provider.key === "muse"),
+  ...PROVIDER_OPTIONS.filter((provider) => provider.key !== "muse"),
+];
+
 type ViewKey = "problem" | "assumptions" | "steps" | "answer";
 
 const VIEWS: Array<{ key: ViewKey; label: string }> = [
@@ -238,8 +244,9 @@ export default function SolutionPanel({
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
 
-  // Picker order: the order the solvers were ticked in, and the judge's A, B...
-  const visibleProviders = PROVIDER_OPTIONS.filter(
+  // Muse Spark's tab first, then the rest in picker order (the owner's call,
+  // 30 September 2026). The judge's A, B... stay in picker order.
+  const visibleProviders = SOLUTION_TAB_ORDER.filter(
     (provider) => runs[provider.key].status !== "idle",
   );
   // "Gemini (3.1 Pro)" when the run picked one of a provider's models.

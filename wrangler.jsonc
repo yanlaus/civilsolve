@@ -49,6 +49,11 @@
   // only matters to `npm run dev`: there is no local browser, so the dev
   // server uses Cloudflare's (it needs `npx wrangler login`).
   "browser": { "binding": "BROWSER", "remote": true },
+  // Every PDF someone asked for, kept for good (worker/pdf.ts; since
+  // 30 September 2026). R2 includes 10 GB-month free; PdfBudget stops
+  // storing at 9 GB. Location hint Asia-Pacific. `npm run dev` uses a local
+  // stand-in for the bucket, in .wrangler/state.
+  "r2_buckets": [{ "binding": "PDFS", "bucket_name": "civilsolve-pdfs" }],
   // Workers Rate Limiting: at most 20 model-calling requests (solve,
   // interpret, judge) per client IP per minute. One run with every option
   // on is about a dozen - eight solvers, two readers, a reconciler, a judge
