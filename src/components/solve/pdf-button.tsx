@@ -2,10 +2,12 @@
 // worker/pdf.ts) and the page offers the link - which replaced the browser's
 // print dialog (the owner's call, 29 September 2026; on an iPhone printing
 // to PDF was a trip through the share sheet). The PDF is made once, then
-// opened from the link: iOS blocks a new tab opened after the wait, and
-// the server keeps the file in its cache, so opening it costs nothing. If
-// the server cannot make it - the month's allowance used up, the browser
-// service down - printing from the browser is still there.
+// opened from the link: iOS blocks a new tab opened after the wait. The
+// server keeps it for good in R2 (since 30 September 2026), so the link
+// lasts; the page says so, or that it lasts only as long as the answer when
+// the server's storage is full. If the server cannot make it - the month's
+// allowance used up, the browser service down - printing from the browser
+// is still there.
 
 import { useState } from "react";
 import { Check, Copy, Download, ExternalLink, Loader2, Printer } from "lucide-react";
@@ -14,7 +16,8 @@ import { formatClock, useNow } from "@/lib/progress";
 type PdfState =
   | { status: "idle" }
   | { status: "working"; startedAt: number }
-  | { status: "ready"; url: string; copied?: boolean }
+  /** `forever`: the server keeps the file for good; otherwise only while it keeps the answer. */
+  | { status: "ready"; url: string; forever: boolean; copied?: boolean }
   | { status: "error"; message: string };
 
 const DARK_BUTTON =
@@ -50,7 +53,7 @@ export function PdfButton({
       if (response.ok) {
         // Read to the end, so the server has cached the whole file.
         await response.arrayBuffer();
-        setState({ status: "ready", url });
+        setState({ status: "ready", url, forever: response.headers.get("x-pdf-kept") === "forever" });
         return;
       }
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -63,7 +66,7 @@ export function PdfButton({
   async function copyLink(url: string) {
     try {
       await navigator.clipboard.writeText(new URL(url, window.location.href).toString());
-      setState({ status: "ready", url, copied: true });
+      setState({ status: "ready", url, forever: state.status === "ready" && state.forever, copied: true });
     } catch {
       // No clipboard (an old browser, no permission): the link is still there to open.
     }
@@ -71,15 +74,22 @@ export function PdfButton({
 
   if (state.status === "ready") {
     return (
-      <span className="inline-flex flex-wrap items-center gap-2">
-        <a href={state.url} target="_blank" rel="noopener" className={`${DARK_BUTTON} ${size}`}>
-          <ExternalLink className={icon} aria-hidden="true" />
-          Open PDF
-        </a>
-        <button type="button" onClick={() => void copyLink(state.url)} className={`${LIGHT_BUTTON} ${size}`}>
-          {state.copied ? <Check className={icon} aria-hidden="true" /> : <Copy className={icon} aria-hidden="true" />}
-          {state.copied ? "Link copied" : "Copy link"}
-        </button>
+      <span className="inline-flex flex-col items-start gap-1.5">
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <a href={state.url} target="_blank" rel="noopener" className={`${DARK_BUTTON} ${size}`}>
+            <ExternalLink className={icon} aria-hidden="true" />
+            Open PDF
+          </a>
+          <button type="button" onClick={() => void copyLink(state.url)} className={`${LIGHT_BUTTON} ${size}`}>
+            {state.copied ? <Check className={icon} aria-hidden="true" /> : <Copy className={icon} aria-hidden="true" />}
+            {state.copied ? "Link copied" : "Copy link"}
+          </button>
+        </span>
+        <span className="text-xs text-cs-ink-3">
+          {state.forever
+            ? "Saved on the server - the link keeps working."
+            : "The server's PDF storage is full, so this link works only while the answer is kept (24 hours). Save the PDF to keep it."}
+        </span>
       </span>
     );
   }
@@ -91,7 +101,7 @@ export function PdfButton({
         onClick={() => void generate()}
         disabled={state.status === "working"}
         className={`${DARK_BUTTON} ${size}`}
-        title="The server makes the PDF and gives you a link to it (kept 24 hours)"
+        title="The server makes the PDF, keeps it, and gives you a link to it"
       >
         {state.status === "working" ? (
           <Loader2 className={`${icon} animate-spin`} aria-hidden="true" />

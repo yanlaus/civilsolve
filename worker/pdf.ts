@@ -6,9 +6,13 @@
 // (shared/markdown.ts), then Cloudflare's headless Chrome (Browser
 // Rendering, the BROWSER binding) prints it to A4.
 //
-// Nothing new is stored: the answer is the job's, kept 24 hours, and the PDF
-// is made again for anyone who opens the link, unless the edge cache still
-// has it (custom domains only - the Cache API does nothing on workers.dev).
+// A PDF someone asked for is kept for good, in R2 (the PDFS bucket), from
+// 30 September 2026 - the owner's call: the link keeps working after the
+// job's answer is deleted (24 hours), and opening it again costs no browser
+// time. Nothing is made, or stored, until someone taps Generate PDF; the
+// uploaded images are still never stored. Past PDF_STORE_BYTES the PDF is
+// still made, but only the edge cache keeps it, for as long as the answer.
+// The Cache API does nothing on workers.dev, only on custom domains.
 //
 // Model output is untrusted. The HTML is built here and handed to the
 // browser with setContent, never loaded from a URL: it is sanitized with
@@ -30,12 +34,26 @@ import type { ProviderArtifact } from "../shared/solution";
 /** Browser time allowed per calendar month (UTC): 9 of the 10 included hours. */
 export const PDF_MONTHLY_MS = 9 * 60 * 60 * 1000;
 
+/**
+ * PDFs kept in R2, in bytes: 9 of the 10 GB-month R2 includes free, so the
+ * bucket never bills. Past it new PDFs are not stored (see above).
+ */
+export const PDF_STORE_BYTES = 9 * 1000 ** 3;
+
+/** Where a job's PDF lives in the bucket. */
+export function pdfKey(jobId: string) {
+  return `pdf/${jobId}.pdf`;
+}
+
 /** KaTeX's stylesheet and fonts, the one thing the page may fetch. */
 const KATEX_BASE = `https://cdn.jsdelivr.net/npm/katex@${katex.version}/dist/`;
 
 /**
- * Browser time used this month, in one Durable Object for the account. Each
- * PDF asks before it launches a browser and reports what it took after.
+ * Browser time used this month, and the bytes of PDF kept in R2, in one
+ * Durable Object for the account. Each PDF asks before it launches a browser
+ * and reports what it took after, and asks before it is stored. PDFs are
+ * never deleted by the app; one deleted by hand in the dashboard stays
+ * counted, which errs on the safe side.
  */
 export class PdfBudget extends DurableObject {
   private async usage() {
@@ -54,6 +72,19 @@ export class PdfBudget extends DurableObject {
     const { month, ms: used } = await this.usage();
     const total = used + Math.max(0, Math.round(ms));
     await this.ctx.storage.put("usage", { month, ms: total });
+    return total;
+  }
+
+  /** Whether a PDF of `bytes` still fits under PDF_STORE_BYTES. */
+  async canStore(bytes: number): Promise<boolean> {
+    const stored = (await this.ctx.storage.get<number>("storedBytes")) ?? 0;
+    return stored + bytes <= PDF_STORE_BYTES;
+  }
+
+  /** Counts a PDF just stored; returns the total kept. */
+  async addStored(bytes: number): Promise<number> {
+    const total = ((await this.ctx.storage.get<number>("storedBytes")) ?? 0) + Math.max(0, bytes);
+    await this.ctx.storage.put("storedBytes", total);
     return total;
   }
 }

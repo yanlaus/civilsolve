@@ -49,6 +49,12 @@ export type WorkerEnv = {
   PDF_BUDGET?: DurableObjectNamespace<PdfBudget>;
   /** Caps the PDFs each client IP can have made per minute. */
   PDF_LIMITER?: RateLimit;
+  /**
+   * R2 bucket "civilsolve-pdfs": every PDF someone asked for, kept for good
+   * (worker/pdf.ts). Optional - without it PDFs live only in the edge cache,
+   * for as long as the job keeps its answer.
+   */
+  PDFS?: R2Bucket;
 
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
