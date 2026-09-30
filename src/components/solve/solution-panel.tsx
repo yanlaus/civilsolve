@@ -17,6 +17,7 @@ import {
   PROVIDER_KEYS,
   PROVIDER_VARIANTS,
   providerDisplayName,
+  SOLUTION_ORDER,
   type ModelChoice,
   type ModelVariant,
   type ProviderKey,
@@ -24,13 +25,14 @@ import {
 } from "../../../shared/providers";
 import type { EffortKey } from "../../../shared/prompt";
 import type { ProviderArtifact } from "../../../shared/solution";
-import { STUDY_KINDS, type StudyKind } from "../../../shared/study";
+import { isStudyKind, STUDY_KINDS, STUDY_TITLES, studyHtml, type StudyKind } from "../../../shared/study";
 import {
   isJudgeActive,
   isRunActive,
   isStudyActive,
   type ConfirmedInterpretation,
   type JudgeRun,
+  type PdfTarget,
   type ProgressMap,
   type ProviderRuns,
   type RunVariants,
@@ -61,11 +63,10 @@ import {
 } from "./task-status";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
-/** The solution tabs' order: Muse Spark first, then picker order. */
-const SOLUTION_TAB_ORDER = [
-  ...PROVIDER_OPTIONS.filter((provider) => provider.key === "muse"),
-  ...PROVIDER_OPTIONS.filter((provider) => provider.key !== "muse"),
-];
+/** The solution tabs' order: Muse Spark first, then picker order (SOLUTION_ORDER). */
+const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
+  PROVIDER_OPTIONS.filter((provider) => provider.key === key),
+);
 
 type ViewKey = "problem" | "assumptions" | "steps" | "answer";
 
@@ -239,7 +240,7 @@ export default function SolutionPanel({
   onStopStudy: (kind: StudyKind) => void;
   onRefineStudy: (kind: StudyKind, instructions: string) => void;
   /** The job of an answer on the page, for its PDF (use-solve's pdfJobOf). */
-  pdfJobOf: (target: ProviderKey | "verdict") => string | null;
+  pdfJobOf: (target: PdfTarget) => string | null;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -302,11 +303,11 @@ export default function SolutionPanel({
 
   // PDFs are made by the server now ("Generate PDF", pdf-button.tsx). The
   // print dialog stays for when it cannot: "Print instead" prints the open
-  // solution, or the verdict's answer. Set just before printing (flushSync,
-  // so the print area has it when the dialog opens) and left as it is
-  // afterwards - each button sets its own.
-  const [printTarget, setPrintTarget] = useState<"solution" | "verdict">("solution");
-  const printAs = (target: "solution" | "verdict", title: string) => {
+  // solution, the verdict's answer, or one kind of study notes. Set just
+  // before printing (flushSync, so the print area has it when the dialog
+  // opens) and left as it is afterwards - each button sets its own.
+  const [printTarget, setPrintTarget] = useState<"solution" | "verdict" | StudyKind>("solution");
+  const printAs = (target: "solution" | "verdict" | StudyKind, title: string) => {
     flushSync(() => setPrintTarget(target));
     exportPdf(title);
   };
@@ -317,6 +318,14 @@ export default function SolutionPanel({
     if (judgeRun.status !== "done" || !judgeRun.judgement.final_answer) return "";
     return ["<h1>Verified final answer</h1>", renderMarkdown(judgeRun.judgement.final_answer)].join("\n");
   }, [judgeRun]);
+
+  // Study notes, laid out as their PDF lays them out (studyHtml).
+  const studyPrintHtml = useMemo(() => {
+    if (!isStudyKind(printTarget)) return "";
+    const run = studyRuns[printTarget];
+    if (run.status !== "done") return "";
+    return studyHtml(printTarget, run.study, (markdown, chinese) => renderMarkdown(markdown, { chinese }));
+  }, [printTarget, studyRuns]);
 
   const printHtml = useMemo(() => {
     if (!activeArtifact) return "";
@@ -336,6 +345,9 @@ export default function SolutionPanel({
       renderMarkdown(activeArtifact.finalAnswer),
     ].join("\n");
   }, [activeArtifact]);
+
+  const printAreaHtml =
+    printTarget === "verdict" ? verdictPrintHtml : printTarget === "solution" ? printHtml : studyPrintHtml;
 
   if (!visibleProviders.length) return null;
 
@@ -624,16 +636,16 @@ export default function SolutionPanel({
           onWrite={onWriteStudy}
           onStop={onStopStudy}
           onRefine={onRefineStudy}
+          pdfJobOf={pdfJobOf}
+          onPrint={(kind) => printAs(kind, STUDY_TITLES[kind].title)}
         />
       ) : null}
 
       {/* Hidden on screen; the only visible content when printing ("Print instead"). */}
-      {(printTarget === "verdict" ? verdictPrintHtml : printHtml) ? (
+      {printAreaHtml ? (
         <div
           className="print-area solution-content prose prose-stone hidden max-w-none print:block"
-          dangerouslySetInnerHTML={{
-            __html: printTarget === "verdict" ? verdictPrintHtml : printHtml,
-          }}
+          dangerouslySetInnerHTML={{ __html: printAreaHtml }}
         />
       ) : null}
     </section>

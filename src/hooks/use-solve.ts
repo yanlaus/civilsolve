@@ -56,7 +56,7 @@ import {
   type SolveRequestBody,
   type StudyRequestBody,
 } from "../../shared/stream-protocol";
-import { STUDY_KINDS, type StudyKind, type StudyResult } from "../../shared/study";
+import { isStudyKind, STUDY_KINDS, type StudyKind, type StudyResult } from "../../shared/study";
 import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
 import { clearRun, loadRun, saveRun, type SavedRun } from "@/lib/run-store";
 import {
@@ -190,6 +190,9 @@ export type StudyWriter = { provider: ProviderKey; variant?: ModelVariant; effor
 /** What study notes start from: one solver's solution, or the verdict's verified answer. */
 export type StudySource = ProviderKey | "verdict";
 
+/** What a PDF can be made of: a solver's solution, the verdict's verified answer, or one kind of study notes. */
+export type PdfTarget = ProviderKey | "verdict" | StudyKind;
+
 /** What notes were written from: the source, and the solutions it sent (the verdict's A, B, ...). */
 export type StudyBasis = { source: StudySource; solvers: ProviderKey[] };
 
@@ -314,6 +317,8 @@ export function useSolve() {
   /** Each kind of study notes in flight, for its Stop; and each one's last notes. */
   const studyTasksRef = useRef(new Map<StudyKind, RunningTask>());
   const studyDoneRef = useRef(new Map<StudyKind, DoneStudy>());
+  /** The job that holds each kind's notes on the page, for their PDF (like doneJobsRef). */
+  const studyDoneJobRef = useRef(new Map<StudyKind, string>());
   // What the page shows now, read when study notes are asked for: the
   // solutions on it and the verdict under them are what the notes are
   // written from.
@@ -461,6 +466,7 @@ export function useSolve() {
     setStudyRuns(IDLE_STUDY);
     setStudyProgress({});
     studyDoneRef.current = new Map();
+    studyDoneJobRef.current = new Map();
   }, [stopCurrent, setBody]);
 
   /**
@@ -676,6 +682,8 @@ export function useSolve() {
           shown = { ...next, revisedWith: refinement.revision.instructions };
         }
         if (shown.status === "done") studyDoneRef.current.set(kind, shown);
+        // New notes bring their job; the previous ones put back keep theirs.
+        if (next.status === "done" && handle.id) studyDoneJobRef.current.set(kind, handle.id);
         setStudyRuns((current) => ({ ...current, [kind]: shown }));
       };
 
@@ -753,6 +761,7 @@ export function useSolve() {
       setSolutionVersions({});
       const context: RunContext = { run, signal, solutions: solutionsRef.current };
       studyDoneRef.current = new Map();
+      studyDoneJobRef.current = new Map();
       persist();
       setProgress({});
       setJudgeProgress(null);
@@ -1097,12 +1106,16 @@ export function useSolve() {
   }, []);
 
   /**
-   * The job of an answer on the page - a solver's solution, or the verdict -
-   * for GET /api/pdf/:id. Null until one has come in.
+   * The job of an answer on the page - a solver's solution, the verdict, or
+   * one kind of study notes - for GET /api/pdf/:id. Null until one has come in.
    */
   const pdfJobOf = useCallback(
-    (target: ProviderKey | "verdict") =>
-      target === "verdict" ? judgeDoneJobRef.current : (doneJobsRef.current.get(target) ?? null),
+    (target: PdfTarget) =>
+      target === "verdict"
+        ? judgeDoneJobRef.current
+        : isStudyKind(target)
+          ? (studyDoneJobRef.current.get(target) ?? null)
+          : (doneJobsRef.current.get(target) ?? null),
     [],
   );
 

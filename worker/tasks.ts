@@ -393,8 +393,10 @@ function buildStudy(
         schema: studySchema as unknown as Record<string, unknown>,
         images: assignment.images,
       },
+      // The kind is stored with the notes, for their PDF (worker/pdf.ts).
       finalize: (rawText, { lastAttempt }) => ({
         study: parseStudy(rawText, provider, { allowIncomplete: lastAttempt }),
+        kind,
       }),
     },
   };
