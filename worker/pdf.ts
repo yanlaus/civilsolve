@@ -1,8 +1,9 @@
 // Solutions as PDF files, made on the server (29 September 2026, the owner's
 // call: "Generate PDF" replaced the browser's print dialog, which on an
 // iPhone was a trip through the share sheet). GET /api/pdf/:jobId renders
-// the answer a job stored - a solution, or the verdict's verified final
-// answer - with the same Markdown + KaTeX pipeline as the page
+// the answer a job stored - a solution, the verdict's verified final answer,
+// or study notes (since 30 September 2026) - with the same Markdown + KaTeX
+// pipeline as the page
 // (shared/markdown.ts), then Cloudflare's headless Chrome (Browser
 // Rendering, the BROWSER binding) prints it to A4.
 //
@@ -30,6 +31,14 @@ import katex from "katex";
 import type { JudgementResult } from "../shared/judgement";
 import { renderMarkdownWith } from "../shared/markdown";
 import type { ProviderArtifact } from "../shared/solution";
+import {
+  isStudyKind,
+  splitStudyParts,
+  STUDY_TITLES,
+  studyHtml,
+  type StudyKind,
+  type StudyResult,
+} from "../shared/study";
 
 /** Browser time allowed per calendar month (UTC): 9 of the 10 included hours. */
 export const PDF_MONTHLY_MS = 9 * 60 * 60 * 1000;
@@ -89,10 +98,11 @@ export class PdfBudget extends DurableObject {
   }
 }
 
-/** What a PDF is made of: a solver's solution, or the verdict's verified answer. */
+/** What a PDF is made of: a solver's solution, the verdict's verified answer, or study notes. */
 export type PdfContent =
   | { kind: "solution"; solution: ProviderArtifact }
-  | { kind: "verdict"; judgement: JudgementResult };
+  | { kind: "verdict"; judgement: JudgementResult }
+  | { kind: "study"; studyKind: StudyKind; study: StudyResult };
 
 /** The PDF a job's stored final event makes, if any. */
 export function pdfContentOf(terminal: unknown): PdfContent | null {
@@ -107,6 +117,17 @@ export function pdfContentOf(terminal: unknown): PdfContent | null {
   if (judgement && typeof judgement === "object" && judgement.final_answer) {
     return { kind: "verdict", judgement };
   }
+  const study = event.study as StudyResult | undefined;
+  if (study && typeof study === "object" && typeof study.guide === "string" && study.guide.trim()) {
+    // Notes stored before the kind was: the approach notes are the ones
+    // that cut into their parts.
+    const studyKind = isStudyKind(event.kind)
+      ? event.kind
+      : splitStudyParts(study.guide, "approach")
+        ? "approach"
+        : "explain";
+    return { kind: "study", studyKind, study };
+  }
   return null;
 }
 
@@ -116,6 +137,7 @@ function escapeHtml(value: string) {
 
 /** The PDF's title, which is also its file name. */
 export function pdfTitle(content: PdfContent) {
+  if (content.kind === "study") return STUDY_TITLES[content.studyKind].title;
   return content.kind === "solution" ? content.solution.title || "Solution" : "Verified final answer";
 }
 
@@ -178,25 +200,30 @@ hr { border: 0; border-top: 0.5pt solid #999; margin: 10pt 0; }
 /* Each displayed equation comes in a paragraph of its own: without this a
    run of them was spaced like paragraphs of text. */
 p:has(> .katex-display) { margin: 2pt 0; }
+/* Study notes: the Chinese under each part, set off by a rule. */
+.zh { margin: 4pt 0 12pt; padding-left: 9pt; border-left: 1.5pt solid #bbb; }
+.zh-label { font-weight: normal; color: #444; }
 `;
 
 /** The whole document, sanitized, ready for the browser. */
 export async function pdfDocument(content: PdfContent) {
-  const render = (value: string) => renderMarkdownWith(value, {}, (html) => html);
+  const render = (value: string, chinese = false) => renderMarkdownWith(value, { chinese }, (html) => html);
   const sections =
-    content.kind === "solution"
-      ? [
-          `<h1>${escapeHtml(pdfTitle(content))}</h1>`,
-          "<h2>Interpreted Problem</h2>",
-          render(content.solution.interpretedProblem),
-          "<h2>Assumptions</h2>",
-          render(content.solution.assumptions),
-          "<h2>Solution</h2>",
-          render(content.solution.stepByStep),
-          "<h2>Final Answer</h2>",
-          render(content.solution.finalAnswer),
-        ]
-      : ["<h1>Verified final answer</h1>", render(content.judgement.final_answer)];
+    content.kind === "study"
+      ? [studyHtml(content.studyKind, content.study, render)]
+      : content.kind === "solution"
+        ? [
+            `<h1>${escapeHtml(pdfTitle(content))}</h1>`,
+            "<h2>Interpreted Problem</h2>",
+            render(content.solution.interpretedProblem),
+            "<h2>Assumptions</h2>",
+            render(content.solution.assumptions),
+            "<h2>Solution</h2>",
+            render(content.solution.stepByStep),
+            "<h2>Final Answer</h2>",
+            render(content.solution.finalAnswer),
+          ]
+        : ["<h1>Verified final answer</h1>", render(content.judgement.final_answer)];
   const body = await sanitizeHtml(sections.join("\n"));
   return [
     "<!doctype html>",

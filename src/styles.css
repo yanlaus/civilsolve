@@ -397,4 +397,11 @@ body {
   .print-area li {
     break-inside: avoid;
   }
+
+  /* Study notes: the Chinese under each part, set off by a rule. */
+  .print-area .zh {
+    margin: 4pt 0 12pt;
+    padding-left: 9pt;
+    border-left: 1.5pt solid #bbb;
+  }
 }

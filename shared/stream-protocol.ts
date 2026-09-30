@@ -140,7 +140,8 @@ export type JudgeEvent =
 export type StudyEvent =
   | { type: "status"; message: string; at?: number }
   | { type: "delta"; text: string }
-  | { type: "done"; study: StudyResult; at?: number; model?: string }
+  /** `kind`: which notes these are - for their PDF (worker/pdf.ts). Missing on notes stored before 30 September 2026. */
+  | { type: "done"; study: StudyResult; kind?: StudyKind; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
 /** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */

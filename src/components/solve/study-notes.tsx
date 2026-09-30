@@ -6,7 +6,8 @@
 // verified answer. The approach notes come in tabs, one per part, like a
 // solution's, each with its Chinese a fold below; the simple explanation
 // shows its Cantonese first and the English a fold below (the owner's
-// layout, 28 September 2026).
+// layout, 28 September 2026). Each can be made a PDF, like a solution
+// (30 September 2026): every fold open, each part's Chinese under it.
 
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Compass, GraduationCap, Languages, Lightbulb, Sparkles } from "lucide-react";
@@ -15,8 +16,8 @@ import {
   choiceKey,
   MODEL_CHOICES,
   parseChoice,
-  PROVIDER_KEYS,
   providerDisplayName,
+  SOLUTION_ORDER,
   type ModelChoice,
   type ProviderKey,
   type ProviderStatus,
@@ -26,6 +27,7 @@ import {
   splitStudyParts,
   STUDY_KINDS,
   STUDY_PARTS,
+  STUDY_TITLES,
   type StudyKind,
 } from "../../../shared/study";
 import {
@@ -40,6 +42,7 @@ import {
 import { effortBand } from "@/lib/effort-band";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
+import { PdfButton } from "./pdf-button";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { SolutionArticle } from "./solution-article";
 import {
@@ -62,15 +65,13 @@ const KINDS: Record<
   }
 > = {
   approach: {
-    title: "Problem type & approach",
-    chinese: "題型解題思路",
+    ...STUDY_TITLES.approach,
     blurb: "What type of problem this is, how problems of this type are solved, and the key formulas.",
     Icon: Compass,
     placeholder: "e.g. Compare it with the Bernoulli-only approach. Add the formula for the force on a vane.",
   },
   explain: {
-    title: "Explained simply",
-    chinese: "淺白講解",
+    ...STUDY_TITLES.explain,
     blurb:
       "The question and its solution talked through like a tutor would - plain words, everyday pictures, what every number means. In Cantonese, with the English a click below.",
     Icon: Lightbulb,
@@ -105,6 +106,8 @@ export function StudyNotes({
   onWrite,
   onStop,
   onRefine,
+  pdfJobOf,
+  onPrint,
 }: {
   studyRuns: StudyRuns;
   studyProgress: StudyProgress;
@@ -128,14 +131,21 @@ export function StudyNotes({
   onWrite: (kind: StudyKind, choice: ModelChoice, effort: EffortKey, source: StudySource) => void;
   onStop: (kind: StudyKind) => void;
   onRefine: (kind: StudyKind, instructions: string) => void;
+  /** The job that holds a kind's notes, for their PDF (use-solve's pdfJobOf). */
+  pdfJobOf: (kind: StudyKind) => string | null;
+  /** The browser's print dialog for a kind's notes, when the server cannot make the PDF. */
+  onPrint: (kind: StudyKind) => void;
 }) {
-  // What the notes can start from now: the verified answer when the
-  // cross-check has given one - first, as the default - then each finished
-  // solution, in picker order.
+  // What the notes can start from now, the first being the default: Muse
+  // Spark's solution when it has one, as its tab comes first too (the owner's
+  // call, 30 September 2026), then the verified answer when the cross-check
+  // has given one, then each other finished solution, in tab order.
   const judged = judgeRun.status === "done" ? judgeRun : null;
+  const finished = SOLUTION_ORDER.filter((key) => runs[key].status === "done");
   const sources: StudySource[] = [
+    ...finished.filter((key) => key === "muse"),
     ...(judged ? (["verdict"] as const) : []),
-    ...PROVIDER_KEYS.filter((key) => runs[key].status === "done"),
+    ...finished.filter((key) => key !== "muse"),
   ];
   const sourceLabel = (source: StudySource) =>
     source === "verdict" ? `Verified answer (${judgeLabel}'s verdict)` : `${nameOf(source)}'s solution`;
@@ -183,6 +193,8 @@ export function StudyNotes({
             onWrite={(choice, effort, source) => onWrite(kind, choice, effort, source)}
             onStop={() => onStop(kind)}
             onRefine={(instructions) => onRefine(kind, instructions)}
+            pdfJobId={pdfJobOf(kind)}
+            onPrint={() => onPrint(kind)}
           />
         ))}
       </div>
@@ -207,6 +219,8 @@ function StudyCard({
   onWrite,
   onStop,
   onRefine,
+  pdfJobId,
+  onPrint,
 }: {
   kind: StudyKind;
   run: StudyRun;
@@ -225,6 +239,8 @@ function StudyCard({
   onWrite: (choice: ModelChoice, effort: EffortKey, source: StudySource) => void;
   onStop: () => void;
   onRefine: (instructions: string) => void;
+  pdfJobId: string | null;
+  onPrint: () => void;
 }) {
   const { title, chinese, blurb, Icon, placeholder } = KINDS[kind];
   const configured = (key: ProviderKey) =>
@@ -232,7 +248,8 @@ function StudyCard({
   const writers = MODEL_CHOICES.filter((choice) => configured(choice.provider));
 
   // What to start from: the user's pick while it is still on the page, else
-  // the verified answer if there is one, else the first finished solution.
+  // the first in the list - Muse Spark's solution, else the verified answer,
+  // else the first finished solution.
   const [sourcePick, setSourcePick] = useState<StudySource | null>(null);
   const source: StudySource | undefined =
     sourcePick && sources.includes(sourcePick) ? sourcePick : sources[0];
@@ -393,6 +410,9 @@ function StudyCard({
               <RevisionNotice message={run.notice} />
             </div>
           ) : null}
+          <div className="mt-3">
+            <PdfButton small key={pdfJobId ?? kind} jobId={pdfJobId} onPrint={onPrint} />
+          </div>
 
           {kind === "approach" ? (
             <ApproachTabs guide={run.study.guide} chinese={run.study.traditional_chinese} />

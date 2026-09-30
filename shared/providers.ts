@@ -31,7 +31,7 @@ export type ProviderKey =
 /**
  * Every provider, in picker order - the order of the solver cards, the
  * reader and judge lists, the solution tabs (after Muse Spark's, always first -
- * solution-panel.tsx) and the letters the judge sees.
+ * SOLUTION_ORDER) and the letters the judge sees.
  * The two dearest (Grok, Claude) close the solvers. The solver cards use
  * SOLVER_KEYS, which leaves out the review-only providers.
  */
@@ -46,6 +46,16 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "gemini",
   "grok",
   "claude",
+];
+
+/**
+ * The solution tabs' order, which the study notes' "Start from" follows too:
+ * Muse Spark's first, always (the owner's call, 30 September 2026), then
+ * picker order.
+ */
+export const SOLUTION_ORDER: ProviderKey[] = [
+  "muse",
+  ...PROVIDER_KEYS.filter((key) => key !== "muse"),
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
