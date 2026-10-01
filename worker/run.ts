@@ -167,10 +167,12 @@ function errorBodyMessage(body: string): string {
  * Words an upstream uses when the *account* is the problem - a plan that
  * ended, a balance at zero, a revoked key - rather than the request. MiniMax
  * tags its own errors with a code: 1004 authentication, 1008 insufficient
- * balance, 2049 invalid key.
+ * balance, 2049 invalid key. Google answers a deleted key with HTTP 400 "API
+ * key not valid" (API_KEY_INVALID), and a project out of credit with 403
+ * (billing) or 429 RESOURCE_EXHAUSTED naming its quota.
  */
 const ACCOUNT_WORDS =
-  /insufficient[_ ]?balance|balance (is )?(not enough|insufficient)|quota|credit|billing|payment required|subscription|plan (has )?(expired|ended)|expired|authori[sz](ed|ation)_error|login fail|invalid api key|\((1004|1008|2049)\)/i;
+  /insufficient[_ ]?balance|balance (is )?(not enough|insufficient)|quota|credit|billing|payment required|subscription|plan (has )?(expired|ended)|expired|authori[sz](ed|ation)_error|login fail|invalid api key|api key not valid|api_key_invalid|\((1004|1008|2049)\)/i;
 
 /**
  * The upstream turned the account away. A different channel is a different
@@ -462,14 +464,16 @@ export async function runTask(
      * MiniMax token plan, then the OpenCode Go subscription - so everything
      * negotiated against the old one starts over: capabilities, effort band,
      * model chain, retry budgets. The safety timeout does not; it bounds the
-     * whole task.
+     * whole task. A pinned model (Gemini's Pro pick, the interpretation pass)
+     * stays pinned: a pinned route's only fallbacks are backup channels,
+     * which name the same models alike (BACKUP_CHANNELS in channels.ts).
      */
     const switchChannel = async (why: string): Promise<boolean> => {
       const next = channelChain[channelFallbacks];
       if (!next) return false;
       channelFallbacks += 1;
       const previous = route.label;
-      route = resolveRoute(provider, env, { channel: next });
+      route = resolveRoute(provider, env, { channel: next, model: routeOverride?.model });
       effort = route.forceEffort ?? clampEffort(requestedEffort, route);
       caps = startingCapabilities(route, effort);
       streamUpstream = wantsUpstreamStream(route, env);
@@ -611,7 +615,7 @@ export async function runTask(
             lastError.message.replace(`${route.label}: `, "")
           ).slice(0, 140);
           const code = lastError.status ? `HTTP ${lastError.status}: ` : "";
-          const why = `refused the account (${code}${detail}) - the plan may have ended`;
+          const why = `refused the account (${code}${detail}) - its plan or credit may have run out`;
           if (await switchChannel(why)) continue;
         }
 

@@ -61,6 +61,12 @@ export type WorkerEnv = {
   MINIMAX_API_KEY?: string;
   OPENCODE_API_KEY?: string;
   GOOGLE_API_KEY?: string;
+  /**
+   * Gemini's backup account: a second Vertex AI key, on another Google Cloud
+   * project, used when GOOGLE_API_KEY is refused - its credit ran out - or
+   * Vertex stops answering (BACKUP_CHANNELS).
+   */
+  GOOGLE_BACKUP_API_KEY?: string;
 
   // Everything below is an optional override. The production values are the
   // defaults in this file (DEFAULT_CHANNELS, ROUTES, INTERPRET_MODEL_DEFAULT),
@@ -107,6 +113,8 @@ export type WorkerEnv = {
   OPENCODE_BASE_URL?: string;
   MINIMAX_BASE_URL?: string;
   GOOGLE_BASE_URL?: string;
+  /** For an AI Studio key: https://generativelanguage.googleapis.com/v1beta */
+  GOOGLE_BACKUP_BASE_URL?: string;
 
   // --- Behaviour ---------------------------------------------------------
   // Comma-separated provider keys that should use a non-streamed upstream
@@ -310,6 +318,24 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // B.8 at "high" on Vertex: Pro 136 s and 189 s, Flash 160 s.
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
+    // Gemini's backup account (1 October 2026, the owner's second key): Vertex
+    // AI again, with a key from another Google Cloud project and its own
+    // credit. Used after "google" refuses the account - its credit ran out,
+    // the key was revoked - or stops answering, for the Flash and Pro picks
+    // and the interpretation pass alike (BACKUP_CHANNELS). It shares
+    // GOOGLE_GEMINI_MODEL / GOOGLE_GEMINI_PRO_MODEL with "google". An AI Studio
+    // key works too, with GOOGLE_BACKUP_BASE_URL set to AI Studio's endpoint:
+    // it names the models alike.
+    "google-backup": {
+      dialect: "gemini",
+      keyVar: "GOOGLE_BACKUP_API_KEY",
+      modelVar: "GOOGLE_GEMINI_MODEL",
+      defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
+      urlVar: "GOOGLE_BACKUP_BASE_URL",
+      defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
+      effort: GEMINI_LEVEL,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+    },
   },
   deepseek: {
     opencode: {
@@ -495,7 +521,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
 const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
   chatgpt: ["opencode"],
   claude: ["poe"],
-  gemini: ["google"],
+  // Vertex AI on the owner's Google Cloud credit, then the backup key on
+  // another project (BACKUP_CHANNELS). Without GOOGLE_API_KEY, the backup
+  // comes first.
+  gemini: ["google", "google-backup"],
   deepseek: ["opencode"],
   grok: ["opencode"],
   mimo: ["opencode"],
@@ -508,6 +537,18 @@ const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
   minimax: ["minimax", "opencode"],
   kimi: ["opencode"],
   muse: ["opencode"],
+};
+
+/**
+ * Channels that serve the same models under the same ids on another
+ * account: tried after the channel when it refuses the account or stops
+ * answering, even on a route pinned to one model - Gemini's Pro pick, the
+ * interpretation pass - whose pinned model goes with it (switchChannel in
+ * run.ts). Gemini's backup is Vertex AI too (or AI Studio, which names the
+ * models alike).
+ */
+const BACKUP_CHANNELS: Partial<Record<ChannelKey, ChannelKey[]>> = {
+  google: ["google-backup"],
 };
 
 const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
@@ -548,8 +589,8 @@ export type Route = {
   timeoutMs?: number;
   /**
    * Further usable channels for this provider, in order, from a chained
-   * channel var ("minimax,opencode"). Empty for a single channel and for a
-   * pinned route (the interpretation pass).
+   * channel var ("minimax,opencode"), or a pinned channel's backups
+   * (BACKUP_CHANNELS). Empty for a single channel.
    */
   fallbackChannels: ChannelKey[];
   /** False when the upstream cannot stream and keep structured output. */
@@ -612,7 +653,7 @@ export function resolveRoute(
   override?: RouteOverride,
 ): Route {
   const { channels, problem: channelProblem } = override?.channel
-    ? { channels: [override.channel], problem: "" }
+    ? { channels: [override.channel, ...(BACKUP_CHANNELS[override.channel] ?? [])], problem: "" }
     : channelsFor(provider, env);
   // The first channel that can actually serve comes first, so removing a
   // key (a plan that ended) moves the provider down its chain without a
@@ -694,9 +735,9 @@ export function resolveRoute(
 //
 // Gemini reads on Google, free-tier Flash, with a model chain: 3.8-flash
 // first, 3.5-flash when 3.8 is unavailable (it answered 503 "high demand" on
-// four of six solves the day this was added; 3.5 was 3/3). If GOOGLE_API_KEY
-// is not configured the reader falls back to the Poe pin so the pass keeps
-// working.
+// four of six solves the day this was added; 3.5 was 3/3). The backup key
+// backs it up (BACKUP_CHANNELS). If neither Google key is configured the
+// reader falls back to the Poe pin so the pass keeps working.
 const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
   chatgpt: "INTERPRET_CHATGPT_MODEL",
   gemini: "INTERPRET_GEMINI_MODEL",
@@ -724,7 +765,7 @@ export function interpretOverride(
 ): RouteOverride | undefined {
   const channel = INTERPRET_CHANNEL[provider];
   if (!channel) return undefined;
-  if (provider === "gemini" && !readVar(env, "GOOGLE_API_KEY")) {
+  if (provider === "gemini" && !readVar(env, "GOOGLE_API_KEY") && !readVar(env, "GOOGLE_BACKUP_API_KEY")) {
     return { channel: "poe", model: INTERPRET_GEMINI_POE_FALLBACK };
   }
   const varName = INTERPRET_MODEL_VAR[provider];
