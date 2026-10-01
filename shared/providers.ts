@@ -37,9 +37,10 @@ export type ProviderKey =
  */
 export const PROVIDER_KEYS: ProviderKey[] = [
   // The owner's order (26 September 2026): nine cards, three by three.
+  // Muse Spark before DeepSeek since 2 October 2026, at the owner's request.
   "chatgpt",
-  "deepseek",
   "muse",
+  "deepseek",
   "kimi",
   "mimo",
   "minimax",
@@ -192,9 +193,12 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
  * finished, for free. Two is the fewest the answer cross-check can compare.
  * Kimi was ticked too for one day (26 September 2026, in Gemini's place) and
  * was unticked at the owner's request; it misread B.8 at "medium" on
- * production the same day, though it was 2/2 at "high".
+ * production the same day, though it was 2/2 at "high". Gemini is ticked
+ * since 1 October 2026, at the owner's request, on its card's default model
+ * (3.8 Flash): billed per call, but both Google projects are capped at their
+ * monthly AI Pro credit, and the second key backs the first up.
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["deepseek", "muse"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "deepseek", "gemini"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
