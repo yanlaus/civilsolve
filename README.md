@@ -317,8 +317,9 @@ Set the `NO_STREAM` var (production: empty) to make those providers use a non-st
 | Variable | Needed for | Where to get it |
 |---|---|---|
 | `OPENCODE_API_KEY` | ChatGPT, DeepSeek, Muse Spark, Kimi, MiMo, Grok; MiniMax when its own key is missing or refused (the second link of its chain) | <https://opencode.ai/go> |
-| `POE_API_KEY` | Claude; Gemini when `GEMINI_CHANNEL=poe` (and as the interpretation reader when `GOOGLE_API_KEY` is unset); ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
+| `POE_API_KEY` | Claude; Gemini when `GEMINI_CHANNEL=poe` (and as the interpretation reader when neither Google key is set); ChatGPT when `CHATGPT_CHANNEL=poe` | <https://poe.com/api_key> |
 | `GOOGLE_API_KEY` | Gemini (its default channel): a **Google Cloud key allowed to call Vertex AI** - AI Studio's endpoint refuses it (`API_KEY_SERVICE_BLOCKED`) | Google Cloud console → APIs & Services → Credentials |
+| `GOOGLE_BACKUP_API_KEY` | Gemini's backup: a **second Vertex AI key**, from another project, used when `GOOGLE_API_KEY` is refused (credit used up, key revoked) or Vertex stops answering; Gemini's only channel when `GOOGLE_API_KEY` is unset | Google Cloud console (the other project) → Vertex AI Studio, or APIs & Services → Credentials |
 | `MINIMAX_API_KEY` | MiniMax, first in its chain; delete it and MiniMax runs on OpenCode Go | <https://platform.minimaxi.com> |
 
 - Local: copy `.dev.vars.example` to `.dev.vars` and fill in the keys you have. `.dev.vars` is gitignored.
@@ -388,25 +389,27 @@ MINIMAX_CHANNEL=minimax            # the plan only - fail if it refuses
 MINIMAX_CHANNEL=opencode           # Go only - the plan is never touched
 ```
 
-With the default, nothing has to change when the plan ends. The Worker moves a solve down the chain when MiniMax **refuses the account** — HTTP 401/402/403, or a message about balance, quota, credit, billing, an expired plan or an invalid key, including MiniMax's own codes 1004 / 1008 / 2049 and its HTTP-200 `base_resp` envelope — or when it **stops answering** after its transient retry. The tab says which, e.g. "MiniMax (via MiniMax) refused the account (HTTP 401: login fail…) — the plan may have ended. Trying MiniMax (via OpenCode Go)…". The move costs about a second per solve. To stop paying that second once the plan is gone, delete the key — the chain then skips straight to OpenCode Go without a redeploy:
+With the default, nothing has to change when the plan ends. The Worker moves a solve down the chain when MiniMax **refuses the account** — HTTP 401/402/403, or a message about balance, quota, credit, billing, an expired plan or an invalid key, including MiniMax's own codes 1004 / 1008 / 2049 and its HTTP-200 `base_resp` envelope — or when it **stops answering** after its transient retry. The tab says which, e.g. "MiniMax (via MiniMax) refused the account (HTTP 401: login fail…) — its plan or credit may have run out. Trying MiniMax (via OpenCode Go)…". The move costs about a second per solve. To stop paying that second once the plan is gone, delete the key — the chain then skips straight to OpenCode Go without a redeploy:
 
 ```bash
 npx wrangler secret delete MINIMAX_API_KEY
 ```
 
-A channel is a different account and endpoint, so a move starts the new route fresh: capabilities, effort band and retry budgets are renegotiated, and only the safety timeout keeps running. An explicit single channel is respected — `minimax` alone fails with MiniMax's message rather than quietly spending the Go subscription. Any provider's channel var may be a chain; only MiniMax uses one today. Verified against the real APIs on 23 September 2026: a rejected key moved the solve to OpenCode Go 1 s in and it finished correctly; a removed key skipped MiniMax entirely; a `base_resp` 1008 "insufficient balance" reply (from a stand-in server) moved it as well; `minimax` alone failed with the 401; `opencode` alone never called MiniMax.
+A channel is a different account and endpoint, so a move starts the new route fresh: capabilities, effort band and retry budgets are renegotiated, and only the safety timeout keeps running. An explicit single channel is respected — `minimax` alone fails with MiniMax's message rather than quietly spending the Go subscription. Any provider's channel var may be a chain; MiniMax and Gemini (below) use one today. Verified against the real APIs on 23 September 2026: a rejected key moved the solve to OpenCode Go 1 s in and it finished correctly; a removed key skipped MiniMax entirely; a `base_resp` 1008 "insufficient balance" reply (from a stand-in server) moved it as well; `minimax` alone failed with the 401; `opencode` alone never called MiniMax.
 
 Both channels bill as monthly subscriptions the owner already pays for, so the chain is about which quota is spent, not about per-call cost. MiniMax's own endpoint is plain OpenAI chat completions at `https://api.minimaxi.com/v1` and reads images, so nothing else changes — the anthropic-protocol route this provider used until 19 September 2026 is not needed and is not coming back. The model is spelled `MiniMax-M3` there and `minimax-m3` on the gateway; `MiniMax-M3[1m]` selects the 1M-token context. Use `https://api.minimax.io` (`MINIMAX_BASE_URL`) for the international deployment. Verified on both fixtures through the app's own prompt: B.8 correct in 141 s, the beam correct in 27 s, both at `low`.
 
 ### Gemini's channel
 
-Gemini solves, reads and judges on Google Vertex AI by default (`GOOGLE_API_KEY`, a Google Cloud key; Flash or Pro as picked). To move it to Poe's `gemini-3.1-pro` (Pro, paid on Poe):
+Gemini solves, reads and judges on Google Vertex AI by default (`GOOGLE_API_KEY`, a Google Cloud key; Flash or Pro as picked), with a **backup key** (`GOOGLE_BACKUP_API_KEY`, channel `google-backup`, since 1 October 2026): the owner's second Vertex AI key, from another Google Cloud project with its own credit. When the first key is **refused** - its credit ran out (403 billing, 429 quota), the key was revoked or deleted (400 "API key not valid") - or Vertex **stops answering** after its retry, the Worker moves that task to the backup key by itself and the tab says so: "Gemini (via Google Vertex AI) refused the account (HTTP 403: This API method requires billing to be enabled…) - its plan or credit may have run out. Trying Gemini (via Google Vertex AI, backup key)…". It covers the Flash and Pro picks and the interpretation pass alike, with the same model (`BACKUP_CHANNELS` in `worker/channels.ts`). Without `GOOGLE_API_KEY` Gemini runs on the backup alone; without `GOOGLE_BACKUP_API_KEY` there is no backup. The backup only helps with credit if its project bills to a different billing account. An AI Studio key ("AIza…") can be the backup too, with `GOOGLE_BACKUP_BASE_URL=https://generativelanguage.googleapis.com/v1beta` - AI Studio names the models alike - but on the free tier it has no quota for Pro. Both of the owner's keys are `AQ.` keys (Vertex AI Studio in the Cloud console): AI Studio's endpoint blocks them (`API_KEY_SERVICE_BLOCKED`). Verified with a stand-in Google on 1 October 2026: a 403 billing refusal, a 429 quota refusal and a 400 invalid key each moved Flash, Pro and the reader to the backup at once, with the backup key and the same model; a 503 moved it after the retry. Then for real: with the stand-in refusing the first key, the owner's backup key solved the beam on Vertex AI with `gemini-3.8-flash` in 21.8 s.
+
+To move Gemini to Poe's `gemini-3.1-pro` (Pro, paid on Poe):
 
 ```
 GEMINI_CHANNEL=poe
 ```
 
-Without `GOOGLE_API_KEY`, the interpretation pass moves a Gemini reader to Poe by itself (`interpretOverride`); as a judge it shows as unavailable until the Google key is back or `GEMINI_CHANNEL=poe` is set. Either way the dialect, schema translation (Gemini's `responseSchema` rejects `additionalProperties`), and thinking-budget mapping are handled in `worker/channels.ts`.
+Without either Google key, the interpretation pass moves a Gemini reader to Poe by itself (`interpretOverride`); as a judge it shows as unavailable until a Google key is back or `GEMINI_CHANNEL=poe` is set. Either way the dialect, schema translation (Gemini's `responseSchema` rejects `additionalProperties`), and thinking-budget mapping are handled in `worker/channels.ts`.
 
 ### Adding a channel to a provider
 

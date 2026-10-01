@@ -221,9 +221,9 @@ export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
  */
 export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
 
-export type ChannelKey = "poe" | "opencode" | "google" | "minimax";
+export type ChannelKey = "poe" | "opencode" | "google" | "google-backup" | "minimax";
 
-export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "minimax"];
+export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "google-backup", "minimax"];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -234,6 +234,7 @@ export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   poe: "Poe",
   opencode: "OpenCode Go",
   google: "Google Vertex AI",
+  "google-backup": "Google Vertex AI, backup key",
   minimax: "MiniMax",
 };
 

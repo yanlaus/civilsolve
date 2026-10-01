@@ -27,9 +27,16 @@ POE_API_KEY=
 
 # Google Cloud (console -> APIs & Services -> Credentials) - Gemini's
 # default channel, on Vertex AI: a key allowed to call the Vertex AI API.
-# Billed per call to the project. An AI Studio key needs
-# GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta instead.
+# Billed per call to the project.
 GOOGLE_API_KEY=
+
+# Gemini's backup: a second Vertex AI key, from another Google Cloud project
+# with its own credit. Used when GOOGLE_API_KEY is refused (its credit ran
+# out, the key was revoked) or Vertex stops answering, with the same models.
+# Leave it blank for no backup. If GOOGLE_API_KEY is blank, Gemini runs on
+# this one. For an AI Studio key ("AIza...") also set
+# GOOGLE_BACKUP_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GOOGLE_BACKUP_API_KEY=
 
 # MiniMax (https://platform.minimaxi.com) - first in MiniMax's default channel
 # chain (minimax, then opencode). Leave it blank and MiniMax runs on OpenCode
