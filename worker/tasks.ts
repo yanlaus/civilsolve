@@ -7,6 +7,7 @@
 // Durable Object - the request body is, and both sides turn it into the same
 // task here.
 
+import { askSchema, parseAsk } from "../shared/ask";
 import {
   interpretationSchema,
   parseInterpretation,
@@ -14,6 +15,8 @@ import {
 } from "../shared/interpretation";
 import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
 import {
+  ASK_INSTRUCTIONS,
+  buildAskPrompt,
   buildInterpretPrompt,
   buildJudgePrompt,
   buildReviseReadingPrompt,
@@ -40,20 +43,24 @@ import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
 import {
   DATA_URL_PATTERN,
+  MAX_ASK_ANSWER_TEXT,
+  MAX_ASK_HISTORY,
   MAX_IMAGES,
   MAX_INSTRUCTIONS_LENGTH,
   MAX_INTERPRETATION_LENGTH,
   MAX_NOTES_LENGTH,
+  MAX_QUESTION_LENGTH,
   MAX_REFERENCE_IMAGES,
   MAX_REFERENCE_TEXT,
   MAX_SOLUTION_TEXT,
+  MAX_STEP_TEXT,
 } from "../shared/stream-protocol";
 import { interpretOverride, variantOverride, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
-export type TaskKind = "solve" | "interpret" | "judge" | "study";
+export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask";
 
-export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study"];
+export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask"];
 
 export function isTaskKind(value: string): value is TaskKind {
   return (TASK_KINDS as string[]).includes(value);
@@ -137,6 +144,7 @@ export function buildTask(
   if (kind === "solve") return buildSolve(providerName, body, env, variant);
   if (kind === "interpret") return buildInterpret(providerName, body, env, variant);
   if (kind === "study") return buildStudy(providerName, body, env, variant);
+  if (kind === "ask") return buildAsk(providerName, body, env, variant);
   return buildJudge(providerName, body, env, variant);
 }
 
@@ -397,6 +405,67 @@ function buildStudy(
       finalize: (rawText, { lastAttempt }) => ({
         study: parseStudy(rawText, provider, { allowIncomplete: lastAttempt }),
         kind,
+      }),
+    },
+  };
+}
+
+// A student's question about one finished solution (shared/ask.ts): the
+// question images, the solution, the step asked about and the earlier
+// questions go to the model the user picked - by default the one that wrote
+// the solution - on its normal solve route, at "medium": it explains a
+// step, it does not derive the answer again.
+function buildAsk(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
+  const assignment = readAssignment(body);
+  if ("error" in assignment) return { error: assignment.error, status: 400 };
+
+  const solution = readText(body.solution, MAX_SOLUTION_TEXT);
+  const question = readText(body.question, MAX_QUESTION_LENGTH);
+  if (!solution || !question) {
+    return { error: "A question needs the solution it is about and the question itself.", status: 400 };
+  }
+  const step = readText(body.step, MAX_STEP_TEXT);
+  const history = (Array.isArray(body.history) ? body.history : [])
+    .slice(-MAX_ASK_HISTORY)
+    .flatMap((turn) => {
+      const record = (turn ?? {}) as Record<string, unknown>;
+      const asked = readText(record.question, MAX_QUESTION_LENGTH);
+      const answered = readText(record.answer, MAX_ASK_ANSWER_TEXT);
+      return asked && answered ? [{ question: asked, answer: answered }] : [];
+    });
+
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
+
+  return {
+    params: {
+      provider,
+      env,
+      effort,
+      routeOverride: variantOverride(provider, variant, env),
+      task: {
+        session: crypto.randomUUID(),
+        prompt: ({ enforceShape }) =>
+          buildAskPrompt(notes, solution, question, {
+            enforceShape,
+            interpretation: interpretation || undefined,
+            step: step || undefined,
+            history,
+          }),
+        instructions: ASK_INSTRUCTIONS,
+        schemaName: "civil_ask_answer",
+        schema: askSchema as unknown as Record<string, unknown>,
+        images: assignment.images,
+      },
+      finalize: (rawText, { lastAttempt }) => ({
+        answer: parseAsk(rawText, provider, { allowIncomplete: lastAttempt }),
       }),
     },
   };

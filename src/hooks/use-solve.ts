@@ -299,6 +299,8 @@ export function useSolve() {
   const [canRerun, setCanRerun] = useState(false);
   /** The question's pages as the run sent them, for the page to show beside the solutions. */
   const [questionImages, setQuestionImages] = useState<string[]>([]);
+  /** The run on the page (its savedAt), for what hangs off it: questions asked, the history. */
+  const [runId, setRunId] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   /** Every job of the current run, so Stop can cancel them on the server. */
   const handlesRef = useRef<JobHandle[]>([]);
@@ -328,6 +330,9 @@ export function useSolve() {
   runsRef.current = runs;
   const judgeRunRef = useRef(judgeRun);
   judgeRunRef.current = judgeRun;
+
+  /** The run's request body - images, notes, confirmed reading - for a question about a solution. */
+  const getBody = useCallback(() => bodyRef.current, []);
 
   const setBody = useCallback((body: SolveRequestBody | null) => {
     bodyRef.current = body;
@@ -452,6 +457,7 @@ export function useSolve() {
     void clearBody();
     bodySavedRef.current = null;
     runRef.current = null;
+    setRunId(null);
     setBody(null);
     setRuns(IDLE_RUNS);
     setJudgeRun({ status: "idle" });
@@ -755,6 +761,7 @@ export function useSolve() {
       stopCurrent();
       const signal = currentSignal();
       runRef.current = run;
+      setRunId(run.savedAt);
       solutionsRef.current = new Map();
       doneRef.current = new Map();
       judgeDoneRef.current = null;
@@ -1135,6 +1142,8 @@ export function useSolve() {
     solutionVersions,
     canRerun,
     questionImages,
+    runId,
+    getBody,
     start,
     cancel,
     restore,

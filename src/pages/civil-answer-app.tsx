@@ -5,6 +5,7 @@ import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { useAsk } from "@/hooks/use-ask";
 import { useCompletionAlert } from "@/hooks/use-completion-alert";
 import { useHealth } from "@/hooks/use-health";
 import { useInterpret } from "@/hooks/use-interpret";
@@ -65,6 +66,8 @@ export default function CivilAnswerAppPage() {
     solutionVersions,
     canRerun,
     questionImages,
+    runId,
+    getBody,
     start,
     cancel,
     restore,
@@ -83,6 +86,8 @@ export default function CivilAnswerAppPage() {
     pdfJobOf,
   } = useSolve();
   const { providerStatus } = useHealth();
+  // Questions about a solution (問呢一步), answered in jobs of their own.
+  const asks = useAsk({ runId, getBody });
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
@@ -139,12 +144,12 @@ export default function CivilAnswerAppPage() {
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
 
   // A long solve on a phone: keep the screen from locking while it runs.
-  useWakeLock(isSolving || isInterpreting);
+  useWakeLock(isSolving || isInterpreting || asks.active);
 
   // The tab's title counts the solvers; a notification when all is done.
   const solverRuns = Object.values(runs).filter((run) => run.status !== "idle");
   const { notify, setNotify, notifyAvailable } = useCompletionAlert({
-    running: isSolving,
+    running: isSolving || asks.active,
     finished: solverRuns.filter((run) => run.status === "done" || run.status === "error").length,
     total: solverRuns.length,
     summary: () => {
@@ -411,6 +416,10 @@ export default function CivilAnswerAppPage() {
             onStopProvider={stopProvider}
             onRefineProvider={refineProvider}
             onCrossCheck={crossCheck}
+            askThreads={asks.threads}
+            askProgress={asks.progress}
+            onAsk={asks.ask}
+            onStopAsk={asks.stop}
             onStopJudge={stopJudge}
             onRefineVerdict={refineVerdict}
             studyRuns={studyRuns}
