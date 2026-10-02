@@ -6,6 +6,7 @@
 // answer cross-check, where a judge grades two solvers' work; and the
 // optional study notes written from the solutions (shared/study.ts).
 
+import { ASK_FIELDS } from "./ask";
 import { STUDY_FIELDS, STUDY_PARTS, type StudyKind } from "./study";
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
@@ -30,6 +31,8 @@ export const SOLVE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown 
 export const INTERPRET_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} Do NOT solve the problem — only interpret it. Use English, except in a \`traditional_chinese\` field where one is asked for.`;
 
 export const JUDGE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are grading candidate solutions against the attached assignment; verify, do not trust. Use English, except in the \`traditional_chinese\` field.`;
+
+export const ASK_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor answering a student's question about a worked solution. Answer in the language the student asked in.`;
 
 export const STUDY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor writing study notes on an assignment that has already been solved. Use English, except in the \`traditional_chinese\` field.`;
 
@@ -540,6 +543,74 @@ export function buildStudyPrompt(
 
   if (extras.enforceShape) {
     sections.push(...shapeContract(STUDY_FIELDS));
+  }
+
+  return sections.join("\n");
+}
+
+export type AskPromptExtras = {
+  /** Human-confirmed problem statement from the interpretation pass. */
+  interpretation?: string;
+  /** The step of the working the question is about. */
+  step?: string;
+  /** Earlier questions about the same solution, oldest first. */
+  history?: Array<{ question: string; answer: string }>;
+  enforceShape?: boolean;
+};
+
+/**
+ * A student's question about one finished solution (shared/ask.ts). The
+ * model explains what was asked, at the student's level, in the student's
+ * language - Cantonese the way a Hong Kong tutor talks when the question is
+ * in Chinese, like the simple explanation notes. It does not write the
+ * solution again, and it says so plainly if the question exposes a mistake.
+ */
+export function buildAskPrompt(
+  userNotes: string,
+  solution: string,
+  question: string,
+  extras: AskPromptExtras = {},
+) {
+  const sections = [
+    "A student is working through the worked solution below to the attached civil engineering assignment images, and has a question about it. Answer the question.",
+    "- Answer what was asked, directly, as a patient tutor would: the idea behind the step, why the term or sign is there, where a number comes from. Use the solution's own numbers and symbols.",
+    "- Do not write the whole solution again. Show a short calculation only when it is what the student asked about.",
+    "- If the question shows that the solution has a mistake, say so plainly, explain what it should be and why, and give the corrected value. Do not invent a mistake to agree with the student.",
+    "- Keep it short: a few short paragraphs or a short list. No headings.",
+    "",
+    "`answer`: in the language of the student's question. If the student wrote in Chinese, answer for a Hong Kong student the way a Hong Kong tutor talks - spoken Cantonese written in Traditional Chinese characters (係、嘅、咗、咁、佢、即係話), not formal written Chinese; keep each engineering term in English with its Chinese in brackets the first time, for example Continuity (連續方程). Otherwise answer in English.",
+    "Write `answer` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline, `$$...$$` for a displayed equation - never as plain text; lists as `- ` lines; no headings, backticks or code blocks.",
+    UNIT_RULE,
+    "Return JSON matching the required schema exactly.",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  ];
+
+  if (extras.interpretation) {
+    sections.push(
+      "",
+      "Confirmed problem interpretation (cross-checked by two readers and reviewed by the user):",
+      extras.interpretation,
+    );
+  }
+
+  sections.push("", "The worked solution:", solution);
+
+  if (extras.history?.length) {
+    sections.push("", "The student's earlier questions about this solution, and the answers given:");
+    extras.history.forEach((turn, index) => {
+      sections.push("", `Question ${index + 1}:`, turn.question, `Answer ${index + 1}:`, turn.answer);
+    });
+  }
+
+  if (extras.step) {
+    sections.push("", "The step of the solution the question is about:", extras.step);
+  }
+
+  sections.push("", "The student's question:", question);
+
+  if (extras.enforceShape) {
+    sections.push(...shapeContract(ASK_FIELDS));
   }
 
   return sections.join("\n");

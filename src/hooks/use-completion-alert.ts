@@ -53,7 +53,13 @@ export function useCompletionAlert({
   /** What the notification says, read when the run ends. */
   summary: () => string;
 }) {
-  const baseTitle = useRef(typeof document === "undefined" ? "CivilSolve" : document.title);
+  // The page's own title, without a count or "✓ Done" this hook added before
+  // it was mounted again.
+  const baseTitle = useRef(
+    typeof document === "undefined"
+      ? "CivilSolve"
+      : document.title.replace(/^(?:\(\d+\/\d+\)\s*|✓ Done · )+/, "") || "CivilSolve",
+  );
   const wasRunning = useRef(false);
   const [notify, setNotifyState] = useState(loadNotify);
   const [supported, setSupported] = useState(notificationsSupported);

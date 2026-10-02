@@ -1,8 +1,9 @@
-// App-level SSE protocol for POST /api/solve, /api/interpret, /api/judge and
-// /api/study.
+// App-level SSE protocol for POST /api/solve, /api/interpret, /api/judge,
+// /api/study and /api/ask.
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
+import type { AskResult } from "./ask";
 import type { InterpretationResult } from "./interpretation";
 import type { JudgementResult } from "./judgement";
 import type { EffortKey } from "./prompt";
@@ -98,6 +99,33 @@ export type StudyRequestBody = {
   revision?: RevisionRequest;
 };
 
+/** One earlier question about the same solution, and its answer. */
+export type AskTurn = { question: string; answer: string };
+
+/**
+ * A student's question about one finished solution ("問呢一步", 3 October
+ * 2026): the question as uploaded, the solution as text, the step the
+ * question is about when there is one, and the earlier questions and
+ * answers about it.
+ */
+export type AskRequestBody = {
+  images: string[];
+  notes: string;
+  /** Human-confirmed problem statement from the optional interpretation pass. */
+  interpretation?: string;
+  /** The solution asked about, as text (`artifactToText`). */
+  solution: string;
+  question: string;
+  /** The step of the working the question is about, as its title and text. */
+  step?: string;
+  /** The earlier questions about this solution, oldest first - at most MAX_ASK_HISTORY. */
+  history?: AskTurn[];
+  /** Reasoning level. Defaults to "medium": it explains, it does not derive. */
+  effort?: EffortKey;
+  /** Which of the provider's models, when it offers several. */
+  variant?: ModelVariant;
+};
+
 /**
  * The first event of every job's stream (worker/jobs.ts), on the first
  * connection and on every re-attach. Times are the server's clock, in ms;
@@ -144,6 +172,12 @@ export type StudyEvent =
   | { type: "done"; study: StudyResult; kind?: StudyKind; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
+export type AskEvent =
+  | { type: "status"; message: string; at?: number }
+  | { type: "delta"; text: string }
+  | { type: "done"; answer: AskResult; at?: number; model?: string }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
+
 /** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */
 export function formatDuration(ms: number) {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -164,6 +198,12 @@ export const MAX_INTERPRETATION_LENGTH = 8_000;
 export const MAX_SOLUTION_TEXT = 24_000;
 /** The user's instructions for a re-generation. */
 export const MAX_INSTRUCTIONS_LENGTH = 4_000;
+/** A student's question about a solution, and the step it quotes. */
+export const MAX_QUESTION_LENGTH = 2_000;
+export const MAX_STEP_TEXT = 6_000;
+/** Earlier questions sent with a new one, and how much of each answer. */
+export const MAX_ASK_HISTORY = 6;
+export const MAX_ASK_ANSWER_TEXT = 4_000;
 
 export const DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 

@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Languages,
   Loader2,
+  MessageCircleQuestion,
   RotateCw,
   Scale,
   TriangleAlert,
@@ -27,6 +28,7 @@ import {
 } from "../../../shared/providers";
 import type { EffortKey } from "../../../shared/prompt";
 import type { ProviderArtifact } from "../../../shared/solution";
+import { splitSolutionSteps, type SolutionStep } from "../../../shared/steps";
 import { isStudyKind, STUDY_KINDS, STUDY_TITLES, studyHtml, type StudyKind } from "../../../shared/study";
 import {
   isJudgeActive,
@@ -46,7 +48,9 @@ import {
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
+import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { AnswerSummary } from "./answer-summary";
+import { AskPanel } from "./ask-panel";
 import { HintStepper } from "./hint-stepper";
 import MathProse from "./math-prose";
 import { PdfButton } from "./pdf-button";
@@ -105,8 +109,41 @@ function saveHintMode(on: boolean) {
   }
 }
 
+/** Something to put beside a step of the working, such as asking about it. */
+type StepAction = (step: SolutionStep) => React.ReactNode;
+
+/**
+ * The working, with `stepAction` beside each step when it can be cut into
+ * steps (shared/steps.ts); rendered whole, as before, when it cannot.
+ */
+function StepsArticle({ source, stepAction }: { source: string; stepAction?: StepAction }) {
+  const parts = useMemo(() => (stepAction ? splitSolutionSteps(source) : null), [source, stepAction]);
+  if (!parts) return <SolutionArticle source={source} compact />;
+  return (
+    <div>
+      {parts.map((part, partIndex) => (
+        <div key={partIndex}>
+          {part.heading ? (
+            <div className="px-4 pt-4 font-display text-base font-semibold text-cs-ink sm:px-7">{part.heading}</div>
+          ) : null}
+          {part.intro ? <SolutionArticle source={part.intro} compact /> : null}
+          {part.steps.map((step, stepIndex) => (
+            <div key={stepIndex}>
+              <div className="flex flex-wrap items-center gap-2 px-4 pt-3 sm:px-7">
+                <span className="font-display text-base font-semibold text-cs-ink">{step.title}</span>
+                {stepAction?.(step)}
+              </div>
+              <SolutionArticle source={step.body} compact />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The "All" view: the final answer first, then the rest of the solution in order. */
-function AllView({ artifact }: { artifact: ProviderArtifact }) {
+function AllView({ artifact, stepAction }: { artifact: ProviderArtifact; stepAction?: StepAction }) {
   const sections: Array<{ label: string; source: string }> = [
     { label: "Problem", source: artifact.interpretedProblem },
     { label: "Assumptions", source: artifact.assumptions },
@@ -127,7 +164,11 @@ function AllView({ artifact }: { artifact: ProviderArtifact }) {
             <div className="px-4 pt-4 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3 sm:px-7">
               {section.label}
             </div>
-            <SolutionArticle source={section.source} compact />
+            {section.label === "Solution" ? (
+              <StepsArticle source={section.source} stepAction={stepAction} />
+            ) : (
+              <SolutionArticle source={section.source} compact />
+            )}
           </div>
         ))}
     </div>
@@ -259,6 +300,10 @@ export default function SolutionPanel({
   onStopProvider,
   onRefineProvider,
   onCrossCheck,
+  askThreads,
+  askProgress,
+  onAsk,
+  onStopAsk,
   onStopJudge,
   onRefineVerdict,
   studyRuns,
@@ -290,6 +335,18 @@ export default function SolutionPanel({
   /** Re-generates one finished solution with the user's instructions. */
   onRefineProvider: (provider: ProviderKey, instructions: string) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** Questions about each solution, and their answers (hooks/use-ask.ts). */
+  askThreads: AskThreads;
+  askProgress: Record<string, Progress>;
+  onAsk: (
+    provider: ProviderKey,
+    solution: ProviderArtifact,
+    version: number,
+    question: string,
+    writer: AskWriter,
+    step?: SolutionStep,
+  ) => void;
+  onStopAsk: (provider: ProviderKey, id: string) => void;
   onStopJudge: () => void;
   /** Re-generates the verdict with the user's instructions. */
   onRefineVerdict: (instructions: string) => void;
@@ -312,6 +369,8 @@ export default function SolutionPanel({
   // How far the hints have got on each solution version, so a tab switch
   // does not start over (hint-stepper.tsx).
   const [revealed, setRevealed] = useState<Record<string, number>>({});
+  // The step a question will quote, picked from beside the working.
+  const [askStep, setAskStep] = useState<{ provider: ProviderKey; step: SolutionStep } | null>(null);
 
   // Muse Spark's tab first, then the rest in picker order (the owner's call,
   // 30 September 2026). The judge's A, B... stay in picker order.
@@ -363,6 +422,29 @@ export default function SolutionPanel({
   const activeArtifact = activeRun.status === "done" ? activeRun.solution : null;
   const activeLabel = nameOf(activeProvider);
   const hintKey = `${activeProvider}:${solutionVersions[activeProvider] ?? 0}`;
+  const askBlocked = !canRerun
+    ? "Asking needs this run's images, which this browser no longer has. Upload the question again to ask."
+    : locked
+      ? "Waits until the new upload is ready."
+      : undefined;
+  // "Ask about this step" beside each step of the working (ask-panel.tsx).
+  const askAction = useMemo<StepAction | undefined>(
+    () =>
+      askBlocked
+        ? undefined
+        : (step: SolutionStep) => (
+            <button
+              type="button"
+              onClick={() => setAskStep({ provider: activeProvider, step })}
+              className="inline-flex items-center gap-1 rounded-full border border-cs-line px-2 py-0.5 text-[0.7rem] font-semibold text-cs-ink-3 transition hover:border-cs-accent hover:text-cs-accent"
+              title="Ask a question about this step"
+            >
+              <MessageCircleQuestion className="h-3 w-3" aria-hidden="true" />
+              問呢一步 · Ask
+            </button>
+          ),
+    [askBlocked, activeProvider],
+  );
   const activeProgress = progress[activeProvider];
   // Ticks every second while anything is still running, for the clocks.
   const solving = visibleProviders.some((provider) => isRunActive(runs[provider.key]));
@@ -603,12 +685,37 @@ export default function SolutionPanel({
                 revealed={revealed[hintKey] ?? 0}
                 onReveal={(next) => setRevealed((current) => ({ ...current, [hintKey]: next }))}
                 onShowAll={() => setHintMode(false)}
+                stepAction={askAction}
               />
             ) : activeView === "all" ? (
-              <AllView artifact={activeArtifact} />
+              <AllView artifact={activeArtifact} stepAction={askAction} />
+            ) : activeView === "steps" ? (
+              <StepsArticle source={activeArtifact.stepByStep} stepAction={askAction} />
             ) : (
               <SolutionArticle source={viewSource(activeArtifact, activeView)} />
             )}
+
+            <div className="border-t border-cs-line-soft px-4 pt-4 sm:px-7">
+              <AskPanel
+                key={activeProvider}
+                provider={activeProvider}
+                label={activeLabel}
+                solution={activeArtifact}
+                version={solutionVersions[activeProvider] ?? 0}
+                threads={askThreads}
+                progress={askProgress}
+                now={now}
+                defaultModel={studyModel({ provider: activeProvider, variant: variants.solvers[activeProvider] })}
+                providerStatus={providerStatus}
+                disabledReason={askBlocked}
+                step={askStep?.provider === activeProvider ? askStep.step : null}
+                onClearStep={() => setAskStep(null)}
+                onAsk={(question, writer, step) =>
+                  onAsk(activeProvider, activeArtifact, solutionVersions[activeProvider] ?? 0, question, writer, step)
+                }
+                onStop={(id) => onStopAsk(activeProvider, id)}
+              />
+            </div>
 
             <div className="border-t border-cs-line-soft px-4 py-4 sm:px-7">
               <RevisePanel
