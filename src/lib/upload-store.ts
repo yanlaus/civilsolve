@@ -15,10 +15,9 @@
 // page then works as before, only without those actions after a reload.
 
 import type { SolveRequestBody } from "../../shared/stream-protocol";
+import { inStore } from "./idb";
 import { RETENTION_MS } from "./run-store";
 
-const DB_NAME = "civilsolve";
-const STORE = "uploads";
 const KEY = "last-run";
 
 /**
@@ -42,36 +41,6 @@ type StoredBody = {
   extras?: InterpretationExtras;
 };
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("IndexedDB is blocked."));
-  });
-}
-
-async function inStore<T>(
-  mode: IDBTransactionMode,
-  operation: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T> {
-  const db = await openDb();
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const transaction = db.transaction(STORE, mode);
-      const request = operation(transaction.objectStore(STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 /** Keeps `body` as the body of the run saved at `savedAt`. */
 export async function saveBody(
   savedAt: number,
@@ -80,7 +49,7 @@ export async function saveBody(
 ): Promise<void> {
   try {
     const record: StoredBody = { savedAt, storedAt: Date.now(), body, ...(extras ? { extras } : {}) };
-    await inStore("readwrite", (store) => store.put(record, KEY));
+    await inStore("uploads", "readwrite", (store) => store.put(record, KEY));
   } catch {
     // Without it, only the actions after a reload are lost.
   }
@@ -91,7 +60,7 @@ export async function loadBody(
   savedAt: number,
 ): Promise<{ body: SolveRequestBody; extras?: InterpretationExtras } | null> {
   try {
-    const record = await inStore<StoredBody | undefined>("readonly", (store) => store.get(KEY));
+    const record = await inStore<StoredBody | undefined>("uploads", "readonly", (store) => store.get(KEY));
     if (!record) return null;
     const usable =
       record.savedAt === savedAt &&
@@ -111,7 +80,7 @@ export async function loadBody(
 
 export async function clearBody(): Promise<void> {
   try {
-    await inStore("readwrite", (store) => store.delete(KEY));
+    await inStore("uploads", "readwrite", (store) => store.delete(KEY));
   } catch {
     // Nothing to clear.
   }

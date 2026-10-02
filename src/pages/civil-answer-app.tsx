@@ -8,6 +8,7 @@ import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form
 import { useAsk } from "@/hooks/use-ask";
 import { useCompletionAlert } from "@/hooks/use-completion-alert";
 import { useHealth } from "@/hooks/use-health";
+import { useHistory } from "@/hooks/use-history";
 import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, isStudyActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
@@ -25,6 +26,8 @@ import {
 } from "../../shared/stream-protocol";
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
+// The history renders kept solutions, so it comes with the math chunk too.
+const HistoryDrawer = lazy(() => import("@/components/history-drawer"));
 
 /** The form's automatic cross-check as the judge `start` takes. */
 function judgeOf(autoCheck: SolveSubmission["autoCheck"]) {
@@ -88,6 +91,19 @@ export default function CivilAnswerAppPage() {
   const { providerStatus } = useHealth();
   // Questions about a solution (問呢一步), answered in jobs of their own.
   const asks = useAsk({ runId, getBody });
+  // Every question solved, kept in this browser for revision.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  useHistory({
+    runId,
+    runs,
+    judgeRun,
+    studyRuns,
+    variants: runVariants,
+    interpretation: confirmedInterpretation,
+    questionImages,
+    notes: getBody()?.notes ?? "",
+    pdfJobOf,
+  });
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
@@ -296,9 +312,22 @@ export default function CivilAnswerAppPage() {
   return (
     <main className="cs-backdrop min-h-screen text-cs-ink">
       <div className="mx-auto w-full max-w-[860px] px-5 pb-16 pt-6 sm:px-6">
-        <div className="flex justify-end print:hidden">
+        <div className="flex items-center justify-end gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-cs border border-cs-line bg-cs-surface px-3 py-1.5 text-xs font-semibold text-cs-ink-2 transition hover:border-cs-accent hover:text-cs-accent"
+          >
+            <History className="h-3.5 w-3.5" aria-hidden="true" />
+            History · 紀錄
+          </button>
           <ThemeSwitcher />
         </div>
+        {historyOpen ? (
+          <Suspense fallback={null}>
+            <HistoryDrawer onClose={() => setHistoryOpen(false)} />
+          </Suspense>
+        ) : null}
         <header className="pb-9 pt-4 text-center print:hidden">
           {theme === "unicorn" ? <UnicornCrest /> : null}
           <div className="mb-2 inline-flex items-center gap-3">
