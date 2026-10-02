@@ -793,7 +793,8 @@ export function useSolve() {
     (
       providers: ProviderKey[],
       body: SolveRequestBody,
-      judge: ModelChoice | null = null,
+      /** A judge to cross-check the solutions once they are in, at its level (high when unset). */
+      judge: (ModelChoice & { effort?: EffortKey }) | null = null,
       picked: Partial<Record<ProviderKey, ModelVariant>> = {},
       extras?: InterpretationExtras,
     ) => {
@@ -813,7 +814,9 @@ export function useSolve() {
           savedAt: Date.now(),
           providers,
           solveJobs: {},
-          judge: judge ? { provider: judge.provider, variant: judge.variant } : null,
+          judge: judge
+            ? { provider: judge.provider, variant: judge.variant, ...(judge.effort ? { effort: judge.effort } : {}) }
+            : null,
           variants: Object.fromEntries(
             providers.filter((provider) => picked[provider]).map((provider) => [provider, picked[provider]]),
           ),

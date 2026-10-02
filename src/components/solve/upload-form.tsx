@@ -11,6 +11,8 @@ import {
   Flame,
   Loader2,
   PenSquare,
+  Scale,
+  SlidersHorizontal,
   Upload,
   X,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import {
   CHINA_PROVIDERS,
   choiceKey,
   DEFAULT_INTERPRETERS,
+  DEFAULT_JUDGE,
   DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
   HIGHER_CREDIT_PROVIDERS,
@@ -40,6 +43,7 @@ import {
 } from "../../../shared/providers";
 import { isAcceptedUpload, isPdfFile, type UploadItem } from "@/lib/attachments";
 import { parsePageSpec } from "@/lib/page-range";
+import { loadMode, MODES, PRESETS, saveMode, type Preset, type SolveMode } from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
 
 type QueuedFile = {
@@ -67,7 +71,19 @@ export type SolveSubmission = {
   verify: InterpretConfig | null;
   /** The model picked for each selected solver that offers several (Gemini Flash or Pro). */
   variants: Partial<Record<ProviderKey, ModelVariant>>;
+  /** The judge that cross-checks the solutions once they are in; null for none. */
+  autoCheck: { judge: ModelChoice; effort: EffortKey } | null;
 };
+
+/** Each provider's first model (Gemini: Flash). */
+const DEFAULT_VARIANTS: Partial<Record<ProviderKey, ModelVariant>> = Object.fromEntries(
+  Object.entries(PROVIDER_VARIANTS).map(([provider, list]) => [provider, list![0].key]),
+);
+
+/** The preset a saved mode stands for, or null for Custom. */
+function presetOf(mode: SolveMode): Preset | null {
+  return mode === "custom" ? null : PRESETS[mode];
+}
 
 const MAX_FILES = 10;
 const MAX_LECTURE_FILES = 6;
@@ -132,7 +148,10 @@ export function UploadForm({
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
-  const [verifyEnabled, setVerifyEnabled] = useState(false);
+  // Careful, Quick or Custom (lib/presets.ts): a preset fills in the settings
+  // below and hides them; Custom shows them all.
+  const [mode, setMode] = useState<SolveMode>(loadMode);
+  const [verifyEnabled, setVerifyEnabled] = useState(() => presetOf(loadMode())?.verify ?? false);
   const [interpreterA, setInterpreterA] = useState<ModelChoice>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
@@ -144,13 +163,28 @@ export function UploadForm({
   );
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
-  const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(() =>
-    Object.fromEntries(
-      Object.entries(PROVIDER_VARIANTS).map(([provider, list]) => [provider, list![0].key]),
-    ),
+  const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(DEFAULT_VARIANTS);
+  const [effort, setEffort] = useState<EffortKey>(() => presetOf(loadMode())?.effort ?? "high");
+  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(
+    () => presetOf(loadMode())?.providers ?? DEFAULT_SOLVERS,
   );
-  const [effort, setEffort] = useState<EffortKey>("high");
-  const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(DEFAULT_SOLVERS);
+  // The cross-check, run by itself once the solutions are in (3 October
+  // 2026; until then it was started from the solutions only).
+  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(loadMode())?.autoCheck ?? false);
+  const [autoJudge, setAutoJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
+  const [autoJudgeEffortPick, setAutoJudgeEffortPick] = useState<EffortKey>("high");
+  /** The Custom settings, kept while a preset is picked, for when the user comes back. */
+  const customSnapshot = useRef<{
+    providers: ProviderKey[];
+    effort: EffortKey;
+    verify: boolean;
+    interpreters: [ModelChoice, ModelChoice, ModelChoice];
+    passEfforts: Record<PassRole, EffortKey>;
+    variants: Partial<Record<ProviderKey, ModelVariant>>;
+    autoCheck: boolean;
+    judge: ModelChoice;
+    judgeEffort: EffortKey;
+  } | null>(null);
   const [fileError, setFileError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -239,6 +273,66 @@ export function UploadForm({
   const passEffort = (role: PassRole, choice: ModelChoice) =>
     effortBand(choice.provider).clamp(passEffortPicks[role]);
   const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
+  const autoJudgeEffort = effortBand(autoJudge.provider).clamp(autoJudgeEffortPick);
+  // The cross-check needs two solutions to compare.
+  const autoCheckOn = autoCheckEnabled && selectedProviders.length >= 2;
+  const callCount = selectedProviders.length + (verifyEnabled ? 3 : 0) + (autoCheckOn ? 1 : 0);
+
+  /** Fills in every setting from a preset - its own defaults for the rest. */
+  function applyPreset(preset: Preset) {
+    setSelectedProviders(preset.providers.filter(isAvailable));
+    setEffort(preset.effort);
+    setVerifyEnabled(preset.verify);
+    setInterpreterA(DEFAULT_INTERPRETERS[0]);
+    setInterpreterB(DEFAULT_INTERPRETERS[1]);
+    setVerifier(DEFAULT_VERIFIER);
+    setPassEffortPicks(PASS_DEFAULT_EFFORT);
+    setVariants(DEFAULT_VARIANTS);
+    setAutoCheckEnabled(preset.autoCheck);
+    setAutoJudge(DEFAULT_JUDGE);
+    setAutoJudgeEffortPick("high");
+  }
+
+  /**
+   * Picks a mode. A preset fills in the settings; Custom brings back the
+   * user's own settings from before they picked a preset, or - with
+   * `fromPreset`, the "Customise" link - starts from the preset's.
+   */
+  function chooseMode(next: SolveMode, fromPreset = false) {
+    if (next === mode && !fromPreset) return;
+    if (mode === "custom" && next !== "custom") {
+      customSnapshot.current = {
+        providers: selectedProviders,
+        effort,
+        verify: verifyEnabled,
+        interpreters: [interpreterA, interpreterB, verifier],
+        passEfforts: passEffortPicks,
+        variants,
+        autoCheck: autoCheckEnabled,
+        judge: autoJudge,
+        judgeEffort: autoJudgeEffortPick,
+      };
+    }
+    const preset = presetOf(next);
+    if (preset) {
+      applyPreset(preset);
+    } else if (!fromPreset && customSnapshot.current) {
+      const saved = customSnapshot.current;
+      setSelectedProviders(saved.providers.filter(isAvailable));
+      setEffort(saved.effort);
+      setVerifyEnabled(saved.verify);
+      setInterpreterA(saved.interpreters[0]);
+      setInterpreterB(saved.interpreters[1]);
+      setVerifier(saved.interpreters[2]);
+      setPassEffortPicks(saved.passEfforts);
+      setVariants(saved.variants);
+      setAutoCheckEnabled(saved.autoCheck);
+      setAutoJudge(saved.judge);
+      setAutoJudgeEffortPick(saved.judgeEffort);
+    }
+    setMode(next);
+    saveMode(next);
+  }
 
   // A floor above a ceiling leaves no level that suits every solver. Nothing
   // is clamped or disabled then - the run is blocked instead (below), so the
@@ -466,6 +560,7 @@ export function UploadForm({
       variants: Object.fromEntries(
         selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
       ),
+      autoCheck: autoCheckOn ? { judge: autoJudge, effort: autoJudgeEffort } : null,
     });
   }
 
@@ -682,272 +777,400 @@ export function UploadForm({
 
       <section>
         <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
-          <Calculator className="h-4 w-4 text-cs-accent" />
-          AI Providers
-          <span className="font-sans text-sm font-normal text-cs-ink-3">
-            (pick one or more - they solve together)
-          </span>
+          <SlidersHorizontal className="h-4 w-4 text-cs-accent" />
+          How should it solve?
+          <span className="font-sans text-sm font-normal text-cs-ink-3">解題模式</span>
         </p>
-        {/* Three by three - nine solvers - on every screen, at the owner's request. */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          {SOLVER_OPTIONS.map((provider) => {
-            const status = providerStatus?.[provider.key];
-            const available = isAvailable(provider.key);
-            const checked = selectedProviders.includes(provider.key) && available;
-            const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
-            const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
-            const china = CHINA_PROVIDERS.has(provider.key);
-            const hasBadge = higherCredit || lowerCredit || china;
-            const models = PROVIDER_VARIANTS[provider.key];
-            const variant = variants[provider.key];
-            // Brand, account, model - nothing else. Effort floors are shown
-            // under Thinking Effort, and a model chain announces itself in the
-            // status line when it actually switches.
-            const note = status
-              ? status.configured
-                ? `${CHANNEL_LABELS[status.channel]} · ${(variant && status.variants?.[variant]) || status.model}`
-                : `${CHANNEL_LABELS[status.channel]} key not configured`
-              : "checking...";
-            return (
-              <label
-                key={provider.key}
-                className={`flex min-w-0 flex-col gap-2 rounded-cs border-2 bg-cs-surface p-2.5 transition sm:p-3.5 ${
-                  available ? "cursor-pointer" : "cursor-not-allowed opacity-55"
-                } ${
-                  checked
-                    ? "border-cs-accent shadow-[0_0_0_4px_var(--cs-ring)]"
-                    : "border-cs-line hover:border-cs-accent"
-                }`}
-              >
-                <span className="flex items-start justify-between gap-2">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-cs border border-cs-line-soft bg-white sm:h-10 sm:w-10">
-                    <ProviderLogo provider={provider.key} className="h-5 w-5 sm:h-6 sm:w-6" />
-                  </span>
-                  <input
-                    type="checkbox"
-                    name="providers"
-                    value={provider.key}
-                    checked={checked}
-                    disabled={!available}
-                    onChange={() => toggleProvider(provider.key)}
-                    className="mt-0.5 h-4 w-4 accent-cs-accent disabled:cursor-not-allowed"
-                  />
-                </span>
-                <span className="text-sm font-semibold text-cs-ink">{provider.label}</span>
-                {models ? (
-                  // Buttons inside the card's <label> do not toggle its checkbox.
-                  <span className="flex w-fit overflow-hidden rounded-full border border-cs-line text-[0.7rem] font-semibold">
-                    {models.map((model) => (
-                      <button
-                        key={model.key}
-                        type="button"
-                        aria-pressed={variant === model.key}
-                        title={`${provider.label} ${model.label}`}
-                        disabled={!available}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          setVariants((current) => ({ ...current, [provider.key]: model.key }));
-                        }}
-                        className={`px-2 py-0.5 transition ${
-                          variant === model.key
-                            ? "bg-cs-accent text-cs-on-accent"
-                            : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
-                        }`}
-                      >
-                        {model.key === "flash" ? "Flash" : "Pro"}
-                      </button>
-                    ))}
-                  </span>
-                ) : null}
-                {hasBadge ? (
-                  <span className="flex flex-wrap gap-1">
-                    {higherCredit ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e]"
-                        title={`${provider.label} draws more credit per solve than the other providers.`}
-                      >
-                        <Flame className="h-3 w-3" aria-hidden="true" />
-                        More credit
-                      </span>
-                    ) : null}
-                    {lowerCredit ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a]"
-                        title={`${provider.label} draws less credit per solve than the other providers.`}
-                      >
-                        <Feather className="h-3 w-3" aria-hidden="true" />
-                        Less credit
-                      </span>
-                    ) : null}
-                    {china ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040]"
-                        title={`${provider.label} is developed and served in mainland China.`}
-                      >
-                        <Flag className="h-3 w-3" aria-hidden="true" />
-                        China model
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
-                <span className="mt-auto block break-words text-xs text-cs-ink-3">{note}</span>
-              </label>
-            );
-          })}
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="How should it solve?">
+          {MODES.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              role="radio"
+              aria-checked={mode === option.key}
+              onClick={() => chooseMode(option.key)}
+              className={`rounded-cs border-2 px-2 py-2.5 text-center transition ${
+                mode === option.key
+                  ? "border-cs-accent bg-cs-accent text-cs-on-accent shadow-[0_2px_10px_var(--cs-ring)]"
+                  : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
+              }`}
+            >
+              <span className="block text-sm font-semibold">{option.chinese}</span>
+              <span className="block text-xs">{option.title}</span>
+            </button>
+          ))}
         </div>
-        {noneConfigured ? (
-          <p className="mt-3 text-sm text-cs-danger">
-            No provider keys are configured on the server. Add at least one key
-            (OPENCODE_API_KEY, POE_API_KEY, or GOOGLE_API_KEY) and restart.
-          </p>
-        ) : null}
-      </section>
-
-      <section>
-        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
-          <Brain className="h-4 w-4 text-cs-accent" />
-          Thinking Effort
-          <span className="font-sans text-sm font-normal text-cs-ink-3">(guides solution depth)</span>
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {EFFORT_OPTIONS.map((option) => {
-            const locked = isEffortLocked(option.key);
-            return (
-              <button
-                key={option.key}
-                type="button"
-                disabled={locked}
-                title={
-                  !locked
-                    ? undefined
-                    : EFFORT_KEYS.indexOf(option.key) > ceilingIndex
-                      ? `${ceilingLabels} cannot finish above ${effortCeiling} thinking on this route.`
-                      : `${floorLabels} runs at ${effortFloor} thinking or above on this route.`
-                }
-                onClick={() => setEffort(option.key)}
-                className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
-                  effort === option.key
-                    ? "border-cs-accent bg-cs-accent text-cs-on-accent shadow-[0_2px_10px_var(--cs-ring)]"
-                    : locked
-                      ? "cursor-not-allowed border-cs-line bg-cs-surface text-cs-ink-2 opacity-45"
-                      : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
-                }`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-        {effortFloor && !bandIsEmpty ? (
-          <p className="mt-3 text-xs text-cs-accent">
-            {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
-            lower levels are disabled for every solver in this run.
-          </p>
-        ) : null}
-        {effortCeiling && !bandIsEmpty ? (
-          <p className="mt-3 text-xs text-cs-accent">
-            {ceilingLabels} cannot finish above <strong>{effortCeiling}</strong> on this route
-            — it thinks past the time limit — so higher levels are disabled.
-          </p>
-        ) : null}
-        <p className="mt-3 text-xs text-cs-ink-3">
-          Each model has its own reasoning scale, so the level is mapped per provider.
-          Levels a model does not offer fall back to its own default (Gemini Pro, for
-          example, cannot switch thinking off).
-        </p>
-      </section>
-
-
-      <section>
-        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
-          <Eye className="h-4 w-4 text-cs-accent" />
-          Question Interpretation
-          <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
-        </p>
-
-        <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
-          <input
-            type="checkbox"
-            checked={verifyEnabled}
-            onChange={(event) => setVerifyEnabled(event.target.checked)}
-            className="mt-1 h-4 w-4 accent-cs-accent"
-          />
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-cs-ink">
-              Check the diagram reading before solving
+        <p className="mt-2 text-xs text-cs-ink-3">{MODES.find((option) => option.key === mode)?.blurb}</p>
+        {mode !== "custom" ? (
+          // What the preset will run, in one line, and the way into the details.
+          <div className="mt-3 rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
+            <span className="font-semibold text-cs-ink">
+              {selectedProviders.map((key) => providerDisplayName(key, variants[key])).join(", ") ||
+                "No solver available"}
             </span>
-            <span className="mt-1 block text-xs text-cs-ink-3">
-              Two models read the question independently, a third reconciles them, and you get to
-              correct the result before any solving starts. Catches misread diagrams — at the cost
-              of three extra model calls and a wait before the solutions begin.
-            </span>
-          </span>
-        </label>
-
-        {verifyEnabled ? (
-          // One column per model: which model, and under it how hard it
-          // thinks.
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            {passRoles.map((role) => {
-              const band = effortBand(role.value.provider);
-              const effort = passEffort(role.key, role.value);
-              return (
-                <div key={role.key} className="min-w-0 space-y-2">
-                  <label className="block text-xs text-cs-ink-3">
-                    {role.label}
-                    <select
-                      value={choiceKey(role.value)}
-                      onChange={(event) => {
-                        const picked = parseChoice(event.target.value);
-                        if (picked) role.set(picked);
-                      }}
-                      className={PASS_SELECT_CLASS}
-                    >
-                      {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
-                        <option key={choiceKey(choice)} value={choiceKey(choice)}>
-                          {providerDisplayName(choice.provider, choice.variant)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block text-xs text-cs-ink-3">
-                    Thinking
-                    <select
-                      value={effort}
-                      aria-label={`${role.label}'s thinking`}
-                      onChange={(event) =>
-                        setPassEffortPicks((current) => ({
-                          ...current,
-                          [role.key]: event.target.value as EffortKey,
-                        }))
-                      }
-                      className={PASS_SELECT_CLASS}
-                    >
-                      {EFFORT_OPTIONS.map((option) => (
-                        <option key={option.key} value={option.key} disabled={!band.inBand(option.key)}>
-                          {option.label}
-                          {option.key === PASS_DEFAULT_EFFORT[role.key] ? " (default)" : ""}
-                          {band.inBand(option.key) ? "" : " - not offered"}
-                        </option>
-                      ))}
-                    </select>
-                    {effort === "max" ? (
-                      <span className="mt-1 block text-[0.7rem] text-[#a85a12]">
-                        {role.key === "v"
-                          ? "Max can take 4-6 minutes before you can review the reading."
-                          : "Max is slower, and the reconciler waits for both readers."}
-                      </span>
-                    ) : null}
-                  </label>
-                </div>
-              );
-            })}
+            {" · "}
+            {EFFORT_OPTIONS.find((option) => option.key === effort)?.label} thinking
+            {verifyEnabled
+              ? ` · reading checked first (${providerDisplayName(interpreterA.provider, interpreterA.variant)} and ${providerDisplayName(interpreterB.provider, interpreterB.variant)}, then ${providerDisplayName(verifier.provider, verifier.variant)})`
+              : ""}
+            {autoCheckOn
+              ? ` · cross-checked by ${providerDisplayName(autoJudge.provider, autoJudge.variant)}`
+              : ""}
+            <button
+              type="button"
+              onClick={() => chooseMode("custom", true)}
+              className="ml-2 font-semibold text-cs-accent underline-offset-2 hover:underline"
+            >
+              Customise · 自訂設定
+            </button>
           </div>
         ) : null}
+        <p className="mt-2 text-xs text-cs-ink-3">
+          This run makes {callCount} model call{callCount === 1 ? "" : "s"} · 呢次會用 {callCount} 個 model call
+        </p>
       </section>
 
-      {/* The answer cross-check is not chosen here any more: it runs from the
-          solutions, once they are in (run-actions.tsx), over the ones picked. */}
+      {mode === "custom" ? (
+        <>
+          <section>
+            <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+              <Calculator className="h-4 w-4 text-cs-accent" />
+              AI Providers
+              <span className="font-sans text-sm font-normal text-cs-ink-3">
+                (pick one or more - they solve together)
+              </span>
+            </p>
+            {/* Three by three - nine solvers - on every screen, at the owner's request. */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {SOLVER_OPTIONS.map((provider) => {
+                const status = providerStatus?.[provider.key];
+                const available = isAvailable(provider.key);
+                const checked = selectedProviders.includes(provider.key) && available;
+                const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
+                const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
+                const china = CHINA_PROVIDERS.has(provider.key);
+                const hasBadge = higherCredit || lowerCredit || china;
+                const models = PROVIDER_VARIANTS[provider.key];
+                const variant = variants[provider.key];
+                // Brand, account, model - nothing else. Effort floors are shown
+                // under Thinking Effort, and a model chain announces itself in the
+                // status line when it actually switches.
+                const note = status
+                  ? status.configured
+                    ? `${CHANNEL_LABELS[status.channel]} · ${(variant && status.variants?.[variant]) || status.model}`
+                    : `${CHANNEL_LABELS[status.channel]} key not configured`
+                  : "checking...";
+                return (
+                  <label
+                    key={provider.key}
+                    className={`flex min-w-0 flex-col gap-2 rounded-cs border-2 bg-cs-surface p-2.5 transition sm:p-3.5 ${
+                      available ? "cursor-pointer" : "cursor-not-allowed opacity-55"
+                    } ${
+                      checked
+                        ? "border-cs-accent shadow-[0_0_0_4px_var(--cs-ring)]"
+                        : "border-cs-line hover:border-cs-accent"
+                    }`}
+                  >
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-cs border border-cs-line-soft bg-white sm:h-10 sm:w-10">
+                        <ProviderLogo provider={provider.key} className="h-5 w-5 sm:h-6 sm:w-6" />
+                      </span>
+                      <input
+                        type="checkbox"
+                        name="providers"
+                        value={provider.key}
+                        checked={checked}
+                        disabled={!available}
+                        onChange={() => toggleProvider(provider.key)}
+                        className="mt-0.5 h-4 w-4 accent-cs-accent disabled:cursor-not-allowed"
+                      />
+                    </span>
+                    <span className="text-sm font-semibold text-cs-ink">{provider.label}</span>
+                    {models ? (
+                      // Buttons inside the card's <label> do not toggle its checkbox.
+                      <span className="flex w-fit overflow-hidden rounded-full border border-cs-line text-[0.7rem] font-semibold">
+                        {models.map((model) => (
+                          <button
+                            key={model.key}
+                            type="button"
+                            aria-pressed={variant === model.key}
+                            title={`${provider.label} ${model.label}`}
+                            disabled={!available}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              setVariants((current) => ({ ...current, [provider.key]: model.key }));
+                            }}
+                            className={`px-2 py-0.5 transition ${
+                              variant === model.key
+                                ? "bg-cs-accent text-cs-on-accent"
+                                : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
+                            }`}
+                          >
+                            {model.key === "flash" ? "Flash" : "Pro"}
+                          </button>
+                        ))}
+                      </span>
+                    ) : null}
+                    {hasBadge ? (
+                      <span className="flex flex-wrap gap-1">
+                        {higherCredit ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e]"
+                            title={`${provider.label} draws more credit per solve than the other providers.`}
+                          >
+                            <Flame className="h-3 w-3" aria-hidden="true" />
+                            More credit
+                          </span>
+                        ) : null}
+                        {lowerCredit ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-[#c9dcc4] bg-[#eef6ea] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#3f7a3a]"
+                            title={`${provider.label} draws less credit per solve than the other providers.`}
+                          >
+                            <Feather className="h-3 w-3" aria-hidden="true" />
+                            Less credit
+                          </span>
+                        ) : null}
+                        {china ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-[#d9c2c2] bg-[#f7eeee] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#8a4040]"
+                            title={`${provider.label} is developed and served in mainland China.`}
+                          >
+                            <Flag className="h-3 w-3" aria-hidden="true" />
+                            China model
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    <span className="mt-auto block break-words text-xs text-cs-ink-3">{note}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {noneConfigured ? (
+              <p className="mt-3 text-sm text-cs-danger">
+                No provider keys are configured on the server. Add at least one key
+                (OPENCODE_API_KEY, POE_API_KEY, or GOOGLE_API_KEY) and restart.
+              </p>
+            ) : null}
+          </section>
+
+          <section>
+            <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+              <Brain className="h-4 w-4 text-cs-accent" />
+              Thinking Effort
+              <span className="font-sans text-sm font-normal text-cs-ink-3">(guides solution depth)</span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {EFFORT_OPTIONS.map((option) => {
+                const locked = isEffortLocked(option.key);
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    disabled={locked}
+                    title={
+                      !locked
+                        ? undefined
+                        : EFFORT_KEYS.indexOf(option.key) > ceilingIndex
+                          ? `${ceilingLabels} cannot finish above ${effortCeiling} thinking on this route.`
+                          : `${floorLabels} runs at ${effortFloor} thinking or above on this route.`
+                    }
+                    onClick={() => setEffort(option.key)}
+                    className={`rounded-full border-2 px-4 py-2 text-sm font-semibold transition ${
+                      effort === option.key
+                        ? "border-cs-accent bg-cs-accent text-cs-on-accent shadow-[0_2px_10px_var(--cs-ring)]"
+                        : locked
+                          ? "cursor-not-allowed border-cs-line bg-cs-surface text-cs-ink-2 opacity-45"
+                          : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            {effortFloor && !bandIsEmpty ? (
+              <p className="mt-3 text-xs text-cs-accent">
+                {floorLabels} runs at <strong>{effortFloor} or above</strong> on this route, so
+                lower levels are disabled for every solver in this run.
+              </p>
+            ) : null}
+            {effortCeiling && !bandIsEmpty ? (
+              <p className="mt-3 text-xs text-cs-accent">
+                {ceilingLabels} cannot finish above <strong>{effortCeiling}</strong> on this route
+                — it thinks past the time limit — so higher levels are disabled.
+              </p>
+            ) : null}
+            <p className="mt-3 text-xs text-cs-ink-3">
+              Each model has its own reasoning scale, so the level is mapped per provider.
+              Levels a model does not offer fall back to its own default (Gemini Pro, for
+              example, cannot switch thinking off).
+            </p>
+          </section>
+
+
+          <section>
+            <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+              <Eye className="h-4 w-4 text-cs-accent" />
+              Question Interpretation
+              <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
+            </p>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
+              <input
+                type="checkbox"
+                checked={verifyEnabled}
+                onChange={(event) => setVerifyEnabled(event.target.checked)}
+                className="mt-1 h-4 w-4 accent-cs-accent"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-cs-ink">
+                  Check the diagram reading before solving
+                </span>
+                <span className="mt-1 block text-xs text-cs-ink-3">
+                  Two models read the question independently, a third reconciles them, and you get to
+                  correct the result before any solving starts. Catches misread diagrams — at the cost
+                  of three extra model calls and a wait before the solutions begin.
+                </span>
+              </span>
+            </label>
+
+            {verifyEnabled ? (
+              // One column per model: which model, and under it how hard it
+              // thinks.
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                {passRoles.map((role) => {
+                  const band = effortBand(role.value.provider);
+                  const effort = passEffort(role.key, role.value);
+                  return (
+                    <div key={role.key} className="min-w-0 space-y-2">
+                      <label className="block text-xs text-cs-ink-3">
+                        {role.label}
+                        <select
+                          value={choiceKey(role.value)}
+                          onChange={(event) => {
+                            const picked = parseChoice(event.target.value);
+                            if (picked) role.set(picked);
+                          }}
+                          className={PASS_SELECT_CLASS}
+                        >
+                          {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                            <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                              {providerDisplayName(choice.provider, choice.variant)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block text-xs text-cs-ink-3">
+                        Thinking
+                        <select
+                          value={effort}
+                          aria-label={`${role.label}'s thinking`}
+                          onChange={(event) =>
+                            setPassEffortPicks((current) => ({
+                              ...current,
+                              [role.key]: event.target.value as EffortKey,
+                            }))
+                          }
+                          className={PASS_SELECT_CLASS}
+                        >
+                          {EFFORT_OPTIONS.map((option) => (
+                            <option key={option.key} value={option.key} disabled={!band.inBand(option.key)}>
+                              {option.label}
+                              {option.key === PASS_DEFAULT_EFFORT[role.key] ? " (default)" : ""}
+                              {band.inBand(option.key) ? "" : " - not offered"}
+                            </option>
+                          ))}
+                        </select>
+                        {effort === "max" ? (
+                          <span className="mt-1 block text-[0.7rem] text-[#a85a12]">
+                            {role.key === "v"
+                              ? "Max can take 4-6 minutes before you can review the reading."
+                              : "Max is slower, and the reconciler waits for both readers."}
+                          </span>
+                        ) : null}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
+          <section>
+            <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+              <Scale className="h-4 w-4 text-cs-accent" />
+              Answer Cross-check
+              <span className="font-sans text-sm font-normal text-cs-ink-3">(optional)</span>
+            </p>
+            <label className="flex cursor-pointer items-start gap-3 rounded-cs border-2 border-cs-line bg-cs-surface p-4 transition hover:border-cs-accent">
+              <input
+                type="checkbox"
+                checked={autoCheckEnabled}
+                onChange={(event) => setAutoCheckEnabled(event.target.checked)}
+                className="mt-1 h-4 w-4 accent-cs-accent"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-cs-ink">
+                  Cross-check the answers when the solvers finish
+                </span>
+                <span className="mt-1 block text-xs text-cs-ink-3">
+                  A judge re-derives the numbers from the question and says which solutions are
+                  right. One extra model call, after the slowest solver. Needs two or more solvers -
+                  you can always run it, or run it again, from the solutions instead.
+                </span>
+              </span>
+            </label>
+            {autoCheckEnabled ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-cs-ink-3">
+                  Judge
+                  <select
+                    value={choiceKey(autoJudge)}
+                    onChange={(event) => {
+                      const picked = parseChoice(event.target.value);
+                      if (picked) setAutoJudge(picked);
+                    }}
+                    className={PASS_SELECT_CLASS}
+                  >
+                    {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                      <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                        {providerDisplayName(choice.provider, choice.variant)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs text-cs-ink-3">
+                  Judge&apos;s thinking
+                  <select
+                    value={autoJudgeEffort}
+                    onChange={(event) => setAutoJudgeEffortPick(event.target.value as EffortKey)}
+                    className={PASS_SELECT_CLASS}
+                  >
+                    {EFFORT_OPTIONS.map((option) => (
+                      <option
+                        key={option.key}
+                        value={option.key}
+                        disabled={!effortBand(autoJudge.provider).inBand(option.key)}
+                      >
+                        {option.label}
+                        {option.key === "high" ? " (default)" : ""}
+                        {effortBand(autoJudge.provider).inBand(option.key) ? "" : " - not offered"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedProviders.length < 2 ? (
+                  <p className="text-xs text-[#a85a12] sm:col-span-2">
+                    Tick two or more solvers above - with one there is nothing to compare.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        </>
+      ) : null}
 
       {bannerError ? (
         <div className="rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger">

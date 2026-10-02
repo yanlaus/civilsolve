@@ -25,6 +25,11 @@ import {
 
 const SolutionPanel = lazy(() => import("@/components/solve/solution-panel"));
 
+/** The form's automatic cross-check as the judge `start` takes. */
+function judgeOf(autoCheck: SolveSubmission["autoCheck"]) {
+  return autoCheck ? { ...autoCheck.judge, effort: autoCheck.effort } : null;
+}
+
 /** The Unicorn theme's V-fin, over the wordmark. */
 function UnicornCrest() {
   return (
@@ -37,12 +42,13 @@ function UnicornCrest() {
 }
 
 // Prepared at submit time and needed again once the user confirms the
-// reviewed interpretation - nothing is solved before that. The cross-check
-// is not part of it: it runs from the solutions once they are in.
+// reviewed interpretation - nothing is solved before that. The automatic
+// cross-check, when the form asked for one, follows the solvers.
 type PendingSolve = {
   providers: ProviderKey[];
   body: SolveRequestBody;
   variants: Partial<Record<ProviderKey, ModelVariant>>;
+  autoCheck: SolveSubmission["autoCheck"];
   /** The reconciler, which also re-generates the reading when asked. */
   verifierLabel: string;
 };
@@ -199,6 +205,7 @@ export default function CivilAnswerAppPage() {
     effort,
     verify,
     variants,
+    autoCheck,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
@@ -249,6 +256,7 @@ export default function CivilAnswerAppPage() {
           providers,
           body,
           variants,
+          autoCheck,
           verifierLabel: providerDisplayName(verify.verifier.provider, verify.verifier.variant),
         });
         setPrepStatus("");
@@ -256,7 +264,7 @@ export default function CivilAnswerAppPage() {
         return;
       }
 
-      start(providers, body, null, variants);
+      start(providers, body, judgeOf(autoCheck), variants);
     } catch (prepError) {
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
@@ -268,7 +276,7 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve || pipeline.status !== "review") return;
-    const { providers, body, variants } = pendingSolve;
+    const { providers, body, variants, autoCheck } = pendingSolve;
     // Kept above the solutions: the Chinese and who read it go with the run.
     const extras = {
       chinese: pipeline.interpretation.traditional_chinese?.trim() || undefined,
@@ -277,7 +285,7 @@ export default function CivilAnswerAppPage() {
     };
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, null, variants, extras);
+    start(providers, { ...body, interpretation: confirmedText }, judgeOf(autoCheck), variants, extras);
   }
 
   return (
