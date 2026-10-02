@@ -1,10 +1,13 @@
 // What can still be done with a run's upload once its solvers have
-// answered, without uploading again: solve it with another provider, or run
-// the answer cross-check over the finished solutions - one that was not
-// switched on, that failed, or whose verdict came before a solver was added
-// or retried. Both reuse the run's images, notes, thinking level and
-// confirmed reading, which the page keeps in memory and in this browser's
-// IndexedDB (lib/upload-store.ts), so they work after a reload too.
+// answered, without uploading again: solve it with another provider (Add a
+// solver, a card of its own under the solutions), or run the answer
+// cross-check over the finished solutions (the controls at the top of the
+// cross-check section, above its verdict) - one that was not switched on,
+// that failed, or whose verdict came before a solver was added or retried.
+// The two were one panel until 3 October 2026 (the owner's call). Both reuse
+// the run's images, notes, thinking level and confirmed reading, which the
+// page keeps in memory and in this browser's IndexedDB
+// (lib/upload-store.ts), so they work after a reload too.
 
 import { useState } from "react";
 import { Plus, Scale } from "lucide-react";
@@ -32,20 +35,115 @@ import {
 } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
 
+const PANEL_CLASS =
+  "cs-panel rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)] print:hidden";
 const SELECT_CLASS =
   "mt-1 w-full rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent disabled:opacity-50";
 const BUTTON_CLASS =
   "cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50";
 const HINT_CLASS = "mt-2 text-[0.7rem] text-cs-ink-3";
+const NO_IMAGES_CLASS =
+  "rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-xs text-cs-ink-3 print:hidden";
 
-export function RunActions({
+function configuredIn(providerStatus: Record<ProviderKey, ProviderStatus> | null) {
+  return (key: ProviderKey) => (providerStatus ? providerStatus[key]?.configured !== false : true);
+}
+
+/** Solve this run's upload with one more provider. */
+export function AddSolver({
+  runs,
+  judgeRun,
+  providerStatus,
+  canRerun,
+  locked,
+  onSolveProvider,
+}: {
+  runs: ProviderRuns;
+  judgeRun: JudgeRun;
+  providerStatus: Record<ProviderKey, ProviderStatus> | null;
+  /** Whether the run's images are still at hand to send again. */
+  canRerun: boolean;
+  /** True while the page prepares or reads a new upload. */
+  locked: boolean;
+  onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
+}) {
+  const configured = configuredIn(providerStatus);
+  // Every configured solver not already in this run - one entry per model
+  // where a provider offers several (Gemini Flash, Gemini Pro).
+  const addable = MODEL_CHOICES.filter(
+    (choice) =>
+      SOLVER_KEYS.includes(choice.provider) &&
+      runs[choice.provider].status === "idle" &&
+      configured(choice.provider),
+  );
+  const [addPick, setAddPick] = useState<string | null>(null);
+  const toAdd =
+    addable.find((choice) => choiceKey(choice) === addPick) ?? (addable[0] as ModelChoice | undefined);
+  const judging = isJudgeActive(judgeRun);
+
+  if (!canRerun) {
+    return (
+      <p className={`mt-4 ${NO_IMAGES_CLASS}`}>
+        Adding or retrying a solver needs this run&apos;s images, which this browser no longer has.
+        Upload the question again to do that.
+      </p>
+    );
+  }
+
+  return (
+    <div className={`mt-4 ${PANEL_CLASS}`}>
+      <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
+        <Plus className="h-4 w-4 text-cs-accent" aria-hidden="true" />
+        Add a solver
+      </p>
+      {addable.length ? (
+        <>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <label className="block text-xs text-cs-ink-3">
+              Provider
+              <select
+                value={toAdd ? choiceKey(toAdd) : ""}
+                disabled={locked || judging}
+                onChange={(event) => setAddPick(event.target.value)}
+                className={SELECT_CLASS}
+              >
+                {addable.map((choice) => (
+                  <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                    {providerDisplayName(choice.provider, choice.variant)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className={BUTTON_CLASS}
+              disabled={locked || judging || !toAdd}
+              onClick={() => toAdd && onSolveProvider(toAdd.provider, toAdd.variant)}
+            >
+              Solve with {toAdd ? providerDisplayName(toAdd.provider, toAdd.variant) : ""}
+            </button>
+          </div>
+          <p className={HINT_CLASS}>
+            {judging
+              ? "Waits for the cross-check to finish."
+              : "Same images, notes, thinking level and confirmed reading as this run."}
+          </p>
+        </>
+      ) : (
+        <p className={HINT_CLASS}>Every available provider has already solved this upload.</p>
+      )}
+    </div>
+  );
+}
+
+/** Run the answer cross-check (again) over the finished solutions the user ticks. */
+export function CrossCheckControls({
   runs,
   judgeRun,
   variants,
   providerStatus,
   canRerun,
   locked,
-  onSolveProvider,
   onCrossCheck,
 }: {
   runs: ProviderRuns;
@@ -57,26 +155,12 @@ export function RunActions({
   canRerun: boolean;
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
-  onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
 }) {
-  const configured = (key: ProviderKey) =>
-    providerStatus ? providerStatus[key]?.configured !== false : true;
-
-  // Add a solver: every configured one not already in this run - one entry
-  // per model where a provider offers several (Gemini Flash, Gemini Pro).
-  const addable = MODEL_CHOICES.filter(
-    (choice) =>
-      SOLVER_KEYS.includes(choice.provider) &&
-      runs[choice.provider].status === "idle" &&
-      configured(choice.provider),
-  );
-  const [addPick, setAddPick] = useState<string | null>(null);
-  const toAdd =
-    addable.find((choice) => choiceKey(choice) === addPick) ?? (addable[0] as ModelChoice | undefined);
+  const configured = configuredIn(providerStatus);
   const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
 
-  // Cross-check: the finished solutions, in picker order (the judge's A, B...).
+  // The finished solutions, in picker order (the judge's A, B...).
   const finished = PROVIDER_KEYS.filter((key) => runs[key].status === "done");
   const [picked, setPicked] = useState<ProviderKey[] | null>(null);
   const chosen = (picked ?? finished.slice(0, MAX_JUDGED_SOLUTIONS)).filter((key) =>
@@ -102,9 +186,9 @@ export function RunActions({
 
   if (!canRerun) {
     return (
-      <p className="mt-4 rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-xs text-cs-ink-3 print:hidden">
-        Adding a solver, retrying one or running the cross-check needs this run&apos;s images,
-        which this browser no longer has. Upload the question again to do that.
+      <p className={NO_IMAGES_CLASS}>
+        Running the cross-check needs this run&apos;s images, which this browser no longer has.
+        Upload the question again to do that.
       </p>
     );
   }
@@ -118,7 +202,7 @@ export function RunActions({
     );
   }
 
-  const crossCheckBlocked =
+  const blocked =
     finished.length < 2
       ? "Needs at least two finished solutions."
       : solving
@@ -130,80 +214,36 @@ export function RunActions({
             : "";
 
   return (
-    <div className="cs-panel mt-4 grid gap-4 rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)] print:hidden sm:grid-cols-2">
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
-          <Plus className="h-4 w-4 text-cs-accent" aria-hidden="true" />
-          Add a solver
-        </p>
-        {addable.length ? (
-          <>
-            <label className="mt-2 block text-xs text-cs-ink-3">
-              Provider
-              <select
-                value={toAdd ? choiceKey(toAdd) : ""}
+    <div className={PANEL_CLASS}>
+      <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
+        <Scale className="h-4 w-4 text-cs-accent" aria-hidden="true" />
+        {hasVerdict ? "Cross-check again" : "Cross-check these solutions"}
+      </p>
+      {finished.length ? (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {finished.map((key) => (
+            <label key={key} className="flex cursor-pointer items-center gap-1.5 text-sm text-cs-ink-2">
+              <input
+                type="checkbox"
+                checked={chosen.includes(key)}
                 disabled={locked || judging}
-                onChange={(event) => setAddPick(event.target.value)}
-                className={SELECT_CLASS}
-              >
-                {addable.map((choice) => (
-                  <option key={choiceKey(choice)} value={choiceKey(choice)}>
-                    {providerDisplayName(choice.provider, choice.variant)}
-                  </option>
-                ))}
-              </select>
+                onChange={() => togglePicked(key)}
+                className="h-4 w-4 accent-cs-accent"
+              />
+              {nameOf(key)}
             </label>
-            <button
-              type="button"
-              className={`${BUTTON_CLASS} mt-3`}
-              disabled={locked || judging || !toAdd}
-              onClick={() => toAdd && onSolveProvider(toAdd.provider, toAdd.variant)}
-            >
-              Solve with {toAdd ? providerDisplayName(toAdd.provider, toAdd.variant) : ""}
-            </button>
-            <p className={HINT_CLASS}>
-              {judging
-                ? "Waits for the cross-check to finish."
-                : "Same images, notes, thinking level and confirmed reading as this run."}
-            </p>
-          </>
-        ) : (
-          <p className={HINT_CLASS}>Every available provider has already solved this upload.</p>
-        )}
-      </div>
-
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 text-sm font-semibold text-cs-ink">
-          <Scale className="h-4 w-4 text-cs-accent" aria-hidden="true" />
-          {hasVerdict ? "Cross-check again" : "Cross-check these solutions"}
-        </p>
-        {finished.length ? (
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            {finished.map((key) => (
-              <label
-                key={key}
-                className="flex cursor-pointer items-center gap-1.5 text-sm text-cs-ink-2"
-              >
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(key)}
-                  disabled={locked || judging}
-                  onChange={() => togglePicked(key)}
-                  className="h-4 w-4 accent-cs-accent"
-                />
-                {nameOf(key)}
-              </label>
-            ))}
-          </div>
-        ) : null}
-        <label className="mt-2 block text-xs text-cs-ink-3">
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] sm:items-end">
+        <label className="block text-xs text-cs-ink-3">
           Judge
           <select
             value={choiceKey(judge)}
             disabled={locked || judging}
             onChange={(event) => {
-              const picked = parseChoice(event.target.value);
-              if (picked) setJudgePick(picked);
+              const next = parseChoice(event.target.value);
+              if (next) setJudgePick(next);
             }}
             className={SELECT_CLASS}
           >
@@ -214,7 +254,7 @@ export function RunActions({
             ))}
           </select>
         </label>
-        <label className="mt-2 block text-xs text-cs-ink-3">
+        <label className="block text-xs text-cs-ink-3">
           Judge&apos;s thinking
           <select
             value={judgeEffort}
@@ -233,17 +273,17 @@ export function RunActions({
         </label>
         <button
           type="button"
-          className={`${BUTTON_CLASS} mt-3`}
-          disabled={locked || judging || Boolean(crossCheckBlocked)}
+          className={BUTTON_CLASS}
+          disabled={locked || judging || Boolean(blocked)}
           onClick={() => onCrossCheck(judge, chosen, judgeEffort)}
         >
           {judging ? "Cross-checking..." : hasVerdict ? "Run the cross-check again" : "Run the cross-check"}
         </button>
-        <p className={HINT_CLASS}>
-          {crossCheckBlocked ||
-            "One extra model call. The judge sees Solution A, B... and never learns which model wrote which."}
-        </p>
       </div>
+      <p className={HINT_CLASS}>
+        {blocked ||
+          "One extra model call. The judge sees Solution A, B... and never learns which model wrote which."}
+      </p>
     </div>
   );
 }

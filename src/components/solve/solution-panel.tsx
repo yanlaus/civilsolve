@@ -48,7 +48,7 @@ import MathProse from "./math-prose";
 import { PdfButton } from "./pdf-button";
 import { ProviderLogo } from "./provider-logo";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
-import { RunActions } from "./run-actions";
+import { AddSolver, CrossCheckControls } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
 import { StudyNotes } from "./study-notes";
 import {
@@ -563,46 +563,69 @@ export default function SolutionPanel({
         )}
       </div>
 
-      <RunActions
+      <AddSolver
         runs={runs}
         judgeRun={judgeRun}
-        variants={variants}
         providerStatus={providerStatus}
         canRerun={canRerun}
         locked={locked}
         onSolveProvider={solveWith}
-        onCrossCheck={onCrossCheck}
       />
 
-      {/* The verdict comes last, under the controls that run it: it is read
-          after the solutions, not before them (the owner's order since
-          26 September 2026). */}
-      {judgeRun.status !== "idle" ? (
-        <div className="mt-4">
-          <JudgementCard
-            judgeRun={judgeRun}
-            runs={runs}
-            variants={variants}
-            solutionVersions={solutionVersions}
-            progress={judgeProgress ?? undefined}
-            now={now}
-            onStop={onStopJudge}
-            refineBlocked={
-              !canRerun
-                ? "Needs this run's images, which this browser no longer has."
-                : locked
-                  ? "Waits until the new upload is ready."
-                  : solving
-                    ? "Waits for every solver to finish."
-                    : undefined
-            }
-            interpretation={Boolean(interpretation)}
-            onRefine={onRefineVerdict}
-            pdfJobId={pdfJobOf("verdict")}
-            onPrint={() => printAs("verdict", "verified final answer")}
-          />
-        </div>
-      ) : null}
+      {/* The cross-check, a section of its own since 3 October 2026 (the
+          owner's call; it shared a panel with Add a solver): its controls,
+          then the verdict under them - read after the solutions, not before
+          them (the owner's order since 26 September 2026). */}
+      <section className="mt-8 print:hidden" aria-labelledby="cross-check-heading">
+        <h2
+          id="cross-check-heading"
+          className="flex flex-wrap items-baseline gap-x-2 font-display text-2xl font-bold text-cs-ink"
+        >
+          <Scale className="h-5 w-5 self-center text-cs-accent" aria-hidden="true" />
+          Cross-check
+          <span className="font-sans text-base font-normal text-cs-ink-3">交叉核對</span>
+        </h2>
+        <p className="mb-3 mt-1 text-xs text-cs-ink-3">
+          Optional - a judge model grades the solutions you tick against the question and gives
+          the verified answer.
+        </p>
+        <CrossCheckControls
+          runs={runs}
+          judgeRun={judgeRun}
+          variants={variants}
+          providerStatus={providerStatus}
+          canRerun={canRerun}
+          locked={locked}
+          onCrossCheck={onCrossCheck}
+        />
+
+        {judgeRun.status !== "idle" ? (
+          <div className="mt-4">
+            <JudgementCard
+              judgeRun={judgeRun}
+              runs={runs}
+              variants={variants}
+              solutionVersions={solutionVersions}
+              progress={judgeProgress ?? undefined}
+              now={now}
+              onStop={onStopJudge}
+              refineBlocked={
+                !canRerun
+                  ? "Needs this run's images, which this browser no longer has."
+                  : locked
+                    ? "Waits until the new upload is ready."
+                    : solving
+                      ? "Waits for every solver to finish."
+                      : undefined
+              }
+              interpretation={Boolean(interpretation)}
+              onRefine={onRefineVerdict}
+              pdfJobId={pdfJobOf("verdict")}
+              onPrint={() => printAs("verdict", "verified final answer")}
+            />
+          </div>
+        ) : null}
+      </section>
 
       {/* Study notes last: written from a solution or the verdict above, as
           picked on each card, and never sent back to the cross-check. */}
