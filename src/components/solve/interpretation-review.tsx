@@ -6,10 +6,11 @@
 // reconciler can be asked for the reading again, with the user's instructions.
 
 import { lazy, Suspense, useState } from "react";
-import { Check, Eye, Languages, Pencil, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, Eye, Image as ImageIcon, Languages, Pencil, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
 import { formatClock, useNow } from "@/lib/progress";
 import { StatusRow } from "./interpret-progress";
+import { QuestionImages } from "./question-images";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 
 // The math renderer (katex, marked, dompurify) stays out of the first bundle.
@@ -36,6 +37,7 @@ function joinNames(names: string[]) {
 const TAB_CLASS = "inline-flex items-center gap-1 px-3 py-1 transition";
 
 export function InterpretationReview({
+  images = [],
   interpretation,
   initialText,
   note,
@@ -49,6 +51,8 @@ export function InterpretationReview({
   onConfirm,
   onCancel,
 }: {
+  /** The question's pages as uploaded, to check the reading against. */
+  images?: string[];
   interpretation: InterpretationResult;
   initialText: string;
   /** Set when only one reader's reading arrived, so nothing cross-checked it. */
@@ -129,80 +133,96 @@ export function InterpretationReview({
         </div>
       ) : null}
 
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-          English — sent to the solvers
-        </span>
-        <span
-          className="flex overflow-hidden rounded-full border border-cs-line text-xs font-semibold"
-          role="tablist"
-          aria-label="Show the reading or edit it"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!editing}
-            onClick={() => setEditing(false)}
-            className={`${TAB_CLASS} ${
-              editing ? "bg-cs-surface text-cs-ink-2 hover:text-cs-accent" : "bg-cs-accent text-cs-on-accent"
-            }`}
-          >
-            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-            Preview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={editing}
-            onClick={() => setEditing(true)}
-            className={`${TAB_CLASS} ${
-              editing ? "bg-cs-accent text-cs-on-accent" : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
-            }`}
-          >
-            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-            Edit
-          </button>
-        </span>
-      </div>
-      {editing ? (
-        <>
-          <textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            rows={12}
-            aria-label="Verified problem interpretation"
-            className="min-h-48 w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-4 py-3 font-mono text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
-          />
-          <p className="mt-1 text-[0.7rem] text-cs-ink-3">
-            Formulas are LaTeX between dollar signs, such as{" "}
-            <code>{"$F_x = 10\\,\\text{N}$"}</code>. Switch to Preview to see them typeset.
-          </p>
-        </>
-      ) : (
-        <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-2">
-          {text.trim() ? (
-            <RenderedText source={text} />
+      {/* The question beside its reading (3 October 2026): two columns on a
+          wide screen, the pages above the reading on a phone. */}
+      <div className={images.length ? "lg:grid lg:grid-cols-2 lg:items-start lg:gap-5" : ""}>
+        {images.length ? (
+          <details open className="group/img mb-3 lg:sticky lg:top-4 lg:mb-0">
+            <summary className="mb-2 flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+              <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              The question · 題目原圖
+              <ChevronDown className="h-3.5 w-3.5 transition group-open/img:rotate-180" aria-hidden="true" />
+            </summary>
+            <QuestionImages images={images} />
+          </details>
+        ) : null}
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+              English — sent to the solvers
+            </span>
+            <span
+              className="flex overflow-hidden rounded-full border border-cs-line text-xs font-semibold"
+              role="tablist"
+              aria-label="Show the reading or edit it"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!editing}
+                onClick={() => setEditing(false)}
+                className={`${TAB_CLASS} ${
+                  editing ? "bg-cs-surface text-cs-ink-2 hover:text-cs-accent" : "bg-cs-accent text-cs-on-accent"
+                }`}
+              >
+                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                Preview
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={editing}
+                onClick={() => setEditing(true)}
+                className={`${TAB_CLASS} ${
+                  editing ? "bg-cs-accent text-cs-on-accent" : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
+                }`}
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Edit
+              </button>
+            </span>
+          </div>
+          {editing ? (
+            <>
+              <textarea
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                rows={12}
+                aria-label="Verified problem interpretation"
+                className="min-h-48 w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-4 py-3 font-mono text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
+              />
+              <p className="mt-1 text-[0.7rem] text-cs-ink-3">
+                Formulas are LaTeX between dollar signs, such as{" "}
+                <code>{"$F_x = 10\\,\\text{N}$"}</code>. Switch to Preview to see them typeset.
+              </p>
+            </>
           ) : (
-            <p className="py-2 text-sm text-cs-ink-3">Empty - switch to Edit to write the question.</p>
+            <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-2">
+              {text.trim() ? (
+                <RenderedText source={text} />
+              ) : (
+                <p className="py-2 text-sm text-cs-ink-3">Empty - switch to Edit to write the question.</p>
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {chinese ? (
-        <div className="mt-3">
-          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-            繁體中文 · Traditional Chinese — for reference
-          </div>
-          <div className="max-h-96 overflow-y-auto rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-2">
-            <RenderedText source={chinese} chinese />
-          </div>
-          <p className="mt-1 text-[0.7rem] text-cs-ink-3">
-            Written by the reconciler from its own reading. The solvers get the English above,
-            so correct mistakes there - edits to the English do not update this translation.
-          </p>
+          {chinese ? (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+                繁體中文 · Traditional Chinese — for reference
+              </div>
+              <div className="max-h-96 overflow-y-auto rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-2">
+                <RenderedText source={chinese} chinese />
+              </div>
+              <p className="mt-1 text-[0.7rem] text-cs-ink-3">
+                Written by the reconciler from its own reading. The solvers get the English above,
+                so correct mistakes there - edits to the English do not update this translation.
+              </p>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
       <div className="mt-4">
         {revising ? (

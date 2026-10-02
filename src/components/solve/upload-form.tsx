@@ -112,6 +112,7 @@ export function UploadForm({
   error,
   onSolve,
   onCancel,
+  footer,
 }: {
   /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
@@ -125,6 +126,8 @@ export function UploadForm({
   error: string;
   onSolve: (submission: SolveSubmission) => void;
   onCancel: () => void;
+  /** Under the buttons: the "Notify me when it's done" toggle. */
+  footer?: React.ReactNode;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
@@ -986,6 +989,7 @@ export function UploadForm({
           </button>
         ) : null}
       </div>
+      {footer}
     </form>
   );
 }

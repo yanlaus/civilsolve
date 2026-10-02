@@ -5,6 +5,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  GraduationCap,
+  Image as ImageIcon,
   Languages,
   Loader2,
   RotateCw,
@@ -44,9 +46,12 @@ import {
 import { exportPdf } from "@/lib/exports";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
+import { AnswerSummary } from "./answer-summary";
+import { HintStepper } from "./hint-stepper";
 import MathProse from "./math-prose";
 import { PdfButton } from "./pdf-button";
 import { ProviderLogo } from "./provider-logo";
+import { QuestionImages } from "./question-images";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { AddSolver, CrossCheckControls } from "./run-actions";
 import { SolutionArticle } from "./solution-article";
@@ -67,15 +72,67 @@ import { PROVIDER_OPTIONS } from "./upload-form";
 const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
   PROVIDER_OPTIONS.filter((provider) => provider.key === key),
 );
+const SOLUTION_TAB_KEYS = SOLUTION_TAB_ORDER.map((provider) => provider.key);
 
-type ViewKey = "problem" | "assumptions" | "steps" | "answer";
+type ViewKey = "all" | "problem" | "assumptions" | "steps" | "answer";
 
+// "All" first and open by default (3 October 2026): the whole solution in
+// one scroll with the final answer on top, so a phone needs no tab-hopping.
 const VIEWS: Array<{ key: ViewKey; label: string }> = [
+  { key: "all", label: "All 全部" },
   { key: "problem", label: "Problem" },
   { key: "assumptions", label: "Assumptions" },
   { key: "steps", label: "Solution" },
   { key: "answer", label: "Final Answer" },
 ];
+
+/** The "Try it yourself" hints' on/off, remembered in this browser (off at first). */
+const HINT_MODE_KEY = "civilsolve:hint-mode";
+
+function loadHintMode() {
+  try {
+    return window.localStorage.getItem(HINT_MODE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function saveHintMode(on: boolean) {
+  try {
+    window.localStorage.setItem(HINT_MODE_KEY, on ? "on" : "off");
+  } catch {
+    // Only the preference is lost.
+  }
+}
+
+/** The "All" view: the final answer first, then the rest of the solution in order. */
+function AllView({ artifact }: { artifact: ProviderArtifact }) {
+  const sections: Array<{ label: string; source: string }> = [
+    { label: "Problem", source: artifact.interpretedProblem },
+    { label: "Assumptions", source: artifact.assumptions },
+    { label: "Solution", source: artifact.stepByStep },
+  ];
+  return (
+    <div className="pb-4">
+      <div className="mx-4 mt-4 rounded-cs border-2 border-cs-accent bg-cs-muted sm:mx-7">
+        <div className="px-4 pt-3 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3 sm:px-7">
+          Final answer · 答案
+        </div>
+        <SolutionArticle source={artifact.finalAnswer} compact />
+      </div>
+      {sections
+        .filter((section) => section.source.trim())
+        .map((section) => (
+          <div key={section.label} className="mt-2">
+            <div className="px-4 pt-4 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3 sm:px-7">
+              {section.label}
+            </div>
+            <SolutionArticle source={section.source} compact />
+          </div>
+        ))}
+    </div>
+  );
+}
 
 function viewSource(artifact: ProviderArtifact, view: ViewKey) {
   return view === "problem"
@@ -196,6 +253,7 @@ export default function SolutionPanel({
   solutionVersions,
   providerStatus,
   canRerun,
+  questionImages,
   locked,
   onSolveProvider,
   onStopProvider,
@@ -223,6 +281,8 @@ export default function SolutionPanel({
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
   /** Whether the run's images are still at hand, for a retry, another solver or a cross-check. */
   canRerun: boolean;
+  /** The question's pages as the run sent them; empty when this browser no longer has them. */
+  questionImages: string[];
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
   onSolveProvider: (provider: ProviderKey, variant?: ModelVariant) => void;
@@ -243,7 +303,15 @@ export default function SolutionPanel({
   pdfJobOf: (target: PdfTarget) => string | null;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
-  const [activeView, setActiveView] = useState<ViewKey>("steps");
+  const [activeView, setActiveView] = useState<ViewKey>("all");
+  const [hintMode, setHintModeState] = useState(loadHintMode);
+  const setHintMode = (on: boolean) => {
+    setHintModeState(on);
+    saveHintMode(on);
+  };
+  // How far the hints have got on each solution version, so a tab switch
+  // does not start over (hint-stepper.tsx).
+  const [revealed, setRevealed] = useState<Record<string, number>>({});
 
   // Muse Spark's tab first, then the rest in picker order (the owner's call,
   // 30 September 2026). The judge's A, B... stay in picker order.
@@ -294,6 +362,7 @@ export default function SolutionPanel({
   const activeRun = runs[activeProvider];
   const activeArtifact = activeRun.status === "done" ? activeRun.solution : null;
   const activeLabel = nameOf(activeProvider);
+  const hintKey = `${activeProvider}:${solutionVersions[activeProvider] ?? 0}`;
   const activeProgress = progress[activeProvider];
   // Ticks every second while anything is still running, for the clocks.
   const solving = visibleProviders.some((provider) => isRunActive(runs[provider.key]));
@@ -355,12 +424,43 @@ export default function SolutionPanel({
     <section className="mt-10">
       {interpretation ? <InterpretationCard interpretation={interpretation} /> : null}
 
+      {/* The question as uploaded, a fold away while reading the solutions. */}
+      {questionImages.length ? (
+        <details className="cs-panel group mb-6 rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] print:hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-sm font-semibold text-cs-ink sm:px-7">
+            <ImageIcon className="h-4 w-4 text-cs-accent" aria-hidden="true" />
+            The question · 題目原圖
+            <span className="text-xs font-normal text-cs-ink-3">
+              {questionImages.length} page{questionImages.length === 1 ? "" : "s"}
+            </span>
+            <ChevronDown className="ml-auto h-4 w-4 text-cs-ink-3 transition group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="border-t border-cs-line-soft px-5 py-4 sm:px-7">
+            <QuestionImages images={questionImages} />
+          </div>
+        </details>
+      ) : null}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-cs-ink">
           <CheckCircle2 className="h-5 w-5 text-cs-success" />
           Solutions
         </h2>
       </div>
+
+      <AnswerSummary
+        order={SOLUTION_TAB_KEYS}
+        runs={runs}
+        judgeRun={judgeRun}
+        nameOf={nameOf}
+        judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
+        markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
+        providerStatus={providerStatus}
+        canRerun={canRerun}
+        locked={locked}
+        onPick={pickProvider}
+        onCrossCheck={onCrossCheck}
+      />
 
       <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">
         <div className="border-b-2 border-cs-line-soft px-2 pt-1">
@@ -457,15 +557,16 @@ export default function SolutionPanel({
               </div>
             </div>
 
-            <div className="border-b-2 border-cs-line-soft px-2 pt-1">
-              <div className="flex overflow-x-auto">
+            <div className="flex flex-wrap items-end justify-between gap-x-2 border-b-2 border-cs-line-soft px-2 pt-1">
+              <div className={`flex overflow-x-auto ${hintMode ? "opacity-40" : ""}`}>
                 {VIEWS.map((view) => (
                   <button
                     key={view.key}
                     type="button"
+                    disabled={hintMode}
                     onClick={() => setActiveView(view.key)}
-                    className={`relative shrink-0 px-4 py-3 text-sm font-semibold transition ${
-                      activeView === view.key
+                    className={`relative shrink-0 px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed ${
+                      activeView === view.key && !hintMode
                         ? "text-cs-accent"
                         : "text-cs-ink-3 hover:text-cs-ink"
                     }`}
@@ -473,15 +574,41 @@ export default function SolutionPanel({
                     {view.label}
                     <span
                       className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
-                        activeView === view.key ? "bg-cs-accent" : "bg-transparent"
+                        activeView === view.key && !hintMode ? "bg-cs-accent" : "bg-transparent"
                       }`}
                     />
                   </button>
                 ))}
               </div>
+              {/* The hints: the solution a step at a time (hint-stepper.tsx). */}
+              <button
+                type="button"
+                aria-pressed={hintMode}
+                onClick={() => setHintMode(!hintMode)}
+                title="Show the solution a step at a time, so you can try each step first"
+                className={`mb-2 mr-2 inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  hintMode
+                    ? "border-cs-accent bg-cs-accent text-cs-on-accent"
+                    : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
+                }`}
+              >
+                <GraduationCap className="h-3.5 w-3.5" aria-hidden="true" />
+                Try it yourself · 先自己諗
+              </button>
             </div>
 
-            <SolutionArticle source={viewSource(activeArtifact, activeView)} />
+            {hintMode ? (
+              <HintStepper
+                artifact={activeArtifact}
+                revealed={revealed[hintKey] ?? 0}
+                onReveal={(next) => setRevealed((current) => ({ ...current, [hintKey]: next }))}
+                onShowAll={() => setHintMode(false)}
+              />
+            ) : activeView === "all" ? (
+              <AllView artifact={activeArtifact} />
+            ) : (
+              <SolutionArticle source={viewSource(activeArtifact, activeView)} />
+            )}
 
             <div className="border-t border-cs-line-soft px-4 py-4 sm:px-7">
               <RevisePanel
