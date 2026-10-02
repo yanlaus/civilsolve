@@ -5,6 +5,7 @@ import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { useCompletionAlert } from "@/hooks/use-completion-alert";
 import { useHealth } from "@/hooks/use-health";
 import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, isStudyActive, useSolve } from "@/hooks/use-solve";
@@ -12,6 +13,7 @@ import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
+import { extractQuantities, groupAnswers } from "../../shared/answers";
 import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
@@ -56,6 +58,7 @@ export default function CivilAnswerAppPage() {
     interpretation: confirmedInterpretation,
     solutionVersions,
     canRerun,
+    questionImages,
     start,
     cancel,
     restore,
@@ -131,6 +134,23 @@ export default function CivilAnswerAppPage() {
 
   // A long solve on a phone: keep the screen from locking while it runs.
   useWakeLock(isSolving || isInterpreting);
+
+  // The tab's title counts the solvers; a notification when all is done.
+  const solverRuns = Object.values(runs).filter((run) => run.status !== "idle");
+  const { notify, setNotify, notifyAvailable } = useCompletionAlert({
+    running: isSolving,
+    finished: solverRuns.filter((run) => run.status === "done" || run.status === "error").length,
+    total: solverRuns.length,
+    summary: () => {
+      const answers = Object.entries(runs).flatMap(([key, run]) =>
+        run.status === "done" ? [{ key, quantities: extractQuantities(run.solution.finalAnswer) }] : [],
+      );
+      const largest = groupAnswers(answers).groups[0]?.length ?? 0;
+      const ready = `${answers.length} solution${answers.length === 1 ? "" : "s"} ready`;
+      if (judgeRun.status === "done") return `${ready} · the cross-check has its verdict`;
+      return answers.length > 1 && largest > 1 ? `${ready} · ${largest} agree` : ready;
+    },
+  });
 
   // The interpretation step in progress: the step, a running clock, and a
   // line per model, so a slow reader is visibly still working.
@@ -296,12 +316,26 @@ export default function CivilAnswerAppPage() {
           error={bannerError}
           onSolve={handleSolve}
           onCancel={cancelAll}
+          footer={
+            notifyAvailable ? (
+              <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 text-xs text-cs-ink-3">
+                <input
+                  type="checkbox"
+                  checked={notify}
+                  onChange={(event) => void setNotify(event.target.checked)}
+                  className="h-3.5 w-3.5 accent-cs-accent"
+                />
+                Notify me when it&apos;s done · 完成時通知我
+              </label>
+            ) : null
+          }
         />
 
         {pipeline.status === "review" ? (
           <InterpretationReview
             // A re-generated reading starts the review afresh from itself.
             key={pipeline.version}
+            images={pendingSolve?.body.images ?? []}
             interpretation={pipeline.interpretation}
             initialText={pipeline.text}
             note={pipeline.note}
@@ -363,6 +397,7 @@ export default function CivilAnswerAppPage() {
             solutionVersions={solutionVersions}
             providerStatus={providerStatus}
             canRerun={canRerun}
+            questionImages={questionImages}
             locked={isInterpreting || Boolean(prepStatus)}
             onSolveProvider={solveProvider}
             onStopProvider={stopProvider}

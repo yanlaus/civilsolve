@@ -297,6 +297,8 @@ export function useSolve() {
   const judgeDoneJobRef = useRef<string | null>(null);
   /** Whether the run's request body is at hand, so it can be sent again. */
   const [canRerun, setCanRerun] = useState(false);
+  /** The question's pages as the run sent them, for the page to show beside the solutions. */
+  const [questionImages, setQuestionImages] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   /** Every job of the current run, so Stop can cancel them on the server. */
   const handlesRef = useRef<JobHandle[]>([]);
@@ -330,6 +332,7 @@ export function useSolve() {
   const setBody = useCallback((body: SolveRequestBody | null) => {
     bodyRef.current = body;
     setCanRerun(body !== null);
+    setQuestionImages(body?.images ?? []);
   }, []);
 
   /** The signal of the work in progress, or a fresh one after Stop. */
@@ -1128,6 +1131,7 @@ export function useSolve() {
     interpretation,
     solutionVersions,
     canRerun,
+    questionImages,
     start,
     cancel,
     restore,

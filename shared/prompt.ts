@@ -184,6 +184,12 @@ export function buildTutorPrompt(
     "- Final answer with units",
     "- In `final_answer`, each answer on a line of its own, as a `- ` bullet (one per part or quantity), never run together in one paragraph",
     "",
+    // The page's "Try it yourself" hints show the steps' titles as a plan,
+    // then one step at a time (shared/steps.ts reads these lines).
+    "Lay out `step_by_step` in steps a student can follow one at a time:",
+    "- Open every step with a bold line of its own that says what the step finds, numbered from 1 within each problem - for example `**Step 1 - Velocity of the jet**` - with the step's working on the lines below it.",
+    "- When the assignment has several problems or parts, put a `### ` heading with its label before each one's steps (for example `### Q1(a)`).",
+    "",
     "Break `interpreted_problem` and `assumptions` into lines, so they are easy to read - never one long paragraph:",
     "- `interpreted_problem`: one or two short sentences on what the problem is, then the given data and what is asked as `- ` bullet lines, one item per line (a multi-part question gets a line per part).",
     "- `assumptions`: a `- ` bullet line per assumption.",
