@@ -5,7 +5,7 @@
 
 import DOMPurify from "dompurify";
 import "katex/dist/katex.min.css";
-import { renderMarkdownWith, type RenderOptions } from "../../shared/markdown";
+import { renderInlineMath, renderMarkdownWith, type RenderOptions } from "../../shared/markdown";
 
 export type { RenderOptions };
 
@@ -15,4 +15,14 @@ export type { RenderOptions };
  */
 export function renderMarkdown(value: string, options: RenderOptions = {}) {
   return renderMarkdownWith(value, options, (html) => DOMPurify.sanitize(html));
+}
+
+/**
+ * A title - a step's, a problem part's, a solution's - as one line of HTML
+ * with its formulas typeset (shared/markdown.ts): its text escaped, KaTeX
+ * run with trust off, and the whole sanitized by DOMPurify like everything
+ * else set with dangerouslySetInnerHTML (AGENTS.md).
+ */
+export function renderTitle(value: string) {
+  return DOMPurify.sanitize(renderInlineMath(value));
 }

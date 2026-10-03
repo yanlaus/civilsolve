@@ -9,6 +9,7 @@ import { useMemo, type ReactNode } from "react";
 import { Eye, ListOrdered, RotateCcw } from "lucide-react";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { splitSolutionSteps, type SolutionStep } from "../../../shared/steps";
+import { MathTitle } from "./math-title";
 import { SolutionArticle } from "./solution-article";
 
 const NEXT_BUTTON =
@@ -114,9 +115,9 @@ export function HintStepper({
             {steps.map((entry, index) => (
               <li key={index} className="flex flex-wrap gap-x-2">
                 {entry.firstOfPart && entry.part ? (
-                  <span className="basis-full pt-1 text-xs font-semibold text-cs-ink-3">{entry.part}</span>
+                  <MathTitle text={entry.part} className="basis-full pt-1 text-xs font-semibold text-cs-ink-3" />
                 ) : null}
-                <span className={index < shownSteps ? "text-cs-ink" : ""}>{entry.step.title}</span>
+                <MathTitle text={entry.step.title} className={index < shownSteps ? "text-cs-ink" : ""} />
               </li>
             ))}
           </ol>
@@ -125,10 +126,14 @@ export function HintStepper({
 
       {steps.slice(0, shownSteps).map((entry, index) => (
         <div key={index} className="mt-3 border-t border-cs-line-soft">
-          {entry.firstOfPart && entry.part ? <SectionLabel>{entry.part}</SectionLabel> : null}
+          {entry.firstOfPart && entry.part ? (
+            <SectionLabel>
+              <MathTitle text={entry.part} />
+            </SectionLabel>
+          ) : null}
           {entry.intro ? <SolutionArticle source={entry.intro} compact /> : null}
           <div className="flex flex-wrap items-center gap-2 px-4 pt-3 sm:px-7">
-            <span className="font-display text-base font-semibold text-cs-ink">{entry.step.title}</span>
+            <MathTitle text={entry.step.title} className="font-display text-base font-semibold text-cs-ink" />
             {stepAction?.(entry.step, entry.part)}
           </div>
           <SolutionArticle source={entry.step.body} compact />

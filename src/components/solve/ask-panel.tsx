@@ -23,6 +23,7 @@ import { effortBand } from "@/lib/effort-band";
 import { prefersReducedMotion } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
+import { MathTitle } from "./math-title";
 import { ERROR_BOX, ProgressBox, STOPPED_BOX, TIMEOUT_BOX } from "./task-status";
 
 const SELECT_CLASS =
@@ -128,7 +129,9 @@ export function AskPanel({
           <div key={turn.id} className="space-y-2">
             <div className="ml-auto max-w-[90%] rounded-cs bg-cs-muted px-3 py-2 text-sm text-cs-ink">
               {turn.step ? (
-                <div className="mb-1 text-xs font-semibold text-cs-ink-3">About: {turn.step.title}</div>
+                <div className="mb-1 text-xs font-semibold text-cs-ink-3">
+                  About: <MathTitle text={turn.step.title} />
+                </div>
               ) : null}
               <div className="whitespace-pre-wrap">{turn.question}</div>
             </div>
@@ -180,7 +183,7 @@ export function AskPanel({
         {step ? (
           <div className="flex items-start gap-2 rounded-cs border border-cs-accent bg-cs-muted px-3 py-2 text-xs text-cs-ink-2">
             <span className="min-w-0 flex-1">
-              <span className="font-semibold">Asking about:</span> {step.title}
+              <span className="font-semibold">Asking about:</span> <MathTitle text={step.title} />
             </span>
             <button type="button" onClick={onClearStep} aria-label="Ask about the whole solution instead">
               <X className="h-3.5 w-3.5" />

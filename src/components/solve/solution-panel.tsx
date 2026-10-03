@@ -47,13 +47,14 @@ import {
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { STEP_IDS } from "@/lib/journey";
-import { renderMarkdown } from "@/lib/math-markdown";
+import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { AnswerSummary } from "./answer-summary";
 import { AskPanel } from "./ask-panel";
 import { HintStepper } from "./hint-stepper";
 import MathProse from "./math-prose";
+import { MathTitle } from "./math-title";
 import { PdfButton } from "./pdf-button";
 import { ProviderLogo } from "./provider-logo";
 import { QuestionImages } from "./question-images";
@@ -447,12 +448,9 @@ export default function SolutionPanel({
 
   const printHtml = useMemo(() => {
     if (!activeArtifact) return "";
-    const escapedTitle = activeArtifact.title
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
     return [
-      `<h1>${escapedTitle}</h1>`,
+      // Escaped, with its formulas typeset.
+      `<h1>${renderTitle(activeArtifact.title)}</h1>`,
       "<h2>Interpreted Problem</h2>",
       renderMarkdown(activeArtifact.interpretedProblem),
       "<h2>Assumptions</h2>",
@@ -596,9 +594,7 @@ export default function SolutionPanel({
                   </span>
                 ) : null}
               </div>
-              <div className="font-display text-2xl font-semibold text-cs-ink">
-                {activeArtifact.title}
-              </div>
+              <MathTitle text={activeArtifact.title} className="block font-display text-2xl font-semibold text-cs-ink" />
               {activeRun.status === "done" && activeRun.revisedWith ? (
                 <RevisedWith instructions={activeRun.revisedWith} />
               ) : null}

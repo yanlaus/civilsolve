@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { splitSolutionSteps, type SolutionStep } from "../../../shared/steps";
+import { MathTitle } from "./math-title";
 import { SolutionArticle } from "./solution-article";
 
 /** Something to put beside a step of the working, such as asking about it. */
@@ -24,13 +25,16 @@ export function StepsArticle({ source, stepAction }: { source: string; stepActio
       {parts.map((part, partIndex) => (
         <div key={partIndex}>
           {part.heading ? (
-            <div className="px-4 pt-4 font-display text-base font-semibold text-cs-ink sm:px-7">{part.heading}</div>
+            <MathTitle
+              text={part.heading}
+              className="block px-4 pt-4 font-display text-base font-semibold text-cs-ink sm:px-7"
+            />
           ) : null}
           {part.intro ? <SolutionArticle source={part.intro} compact /> : null}
           {part.steps.map((step, stepIndex) => (
             <div key={stepIndex}>
               <div className="flex flex-wrap items-center gap-2 px-4 pt-3 sm:px-7">
-                <span className="font-display text-base font-semibold text-cs-ink">{step.title}</span>
+                <MathTitle text={step.title} className="font-display text-base font-semibold text-cs-ink" />
                 {stepAction?.(step)}
               </div>
               <SolutionArticle source={step.body} compact />
