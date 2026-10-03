@@ -1,11 +1,14 @@
 // The answer summary at the top of the solutions (3 October 2026): every
 // solver's final answer side by side, and the cross-check in one tap until
-// there is a verdict - then its verified answer and a ✓ or ✗ per solver.
-// It makes no judgement of its own: the answers were compared on the page,
-// number by number, until 4 October 2026, when the owner asked for no check
-// before the verdict - on B.8 four models agreed on the same wrong answer.
+// there is a verdict - then its verified answer, a ✓ or ✗ per solver, and
+// how far the answers agree, worked out on the page from the numbers and
+// units each one states (shared/answers.ts, no model call). Nothing is
+// compared before the verdict (the owner, 4 October 2026): agreement is no
+// proof - on B.8 four models agreed on the same wrong answer.
 
+import { useMemo } from "react";
 import { Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
+import { extractQuantities, groupAnswers, type Agreement } from "../../../shared/answers";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
 import {
@@ -21,6 +24,33 @@ import { effortBand } from "@/lib/effort-band";
 import { scrollToStep, STEP_IDS } from "@/lib/journey";
 import MathProse from "./math-prose";
 import { ProviderLogo } from "./provider-logo";
+
+// Status colours stay fixed on purpose, like the credit badges (CLAUDE.md).
+const CHIP: Record<Agreement, { label: string; className: string; title: string }> = {
+  agree: {
+    label: "一致 Agree",
+    className: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a]",
+    title: "Its numbers match the most common answer.",
+  },
+  partial: {
+    label: "部分一致 Partly",
+    className: "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
+    title: "Some of its numbers match, or only the signs differ - a sign convention, perhaps.",
+  },
+  differ: {
+    label: "唔同 Differs",
+    className: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b]",
+    title: "Its numbers do not match the other answers.",
+  },
+  unknown: {
+    label: "無法比較 Can't compare",
+    className: "border-cs-line bg-cs-muted text-cs-ink-3",
+    title: "No number with a unit to compare in its final answer.",
+  },
+};
+
+const CHIP_BASE =
+  "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.7rem] font-medium leading-none";
 
 export function AnswerSummary({
   order,
@@ -62,6 +92,17 @@ export function AnswerSummary({
   const finished = shown.filter((key) => runs[key].status === "done");
   const running = shown.filter((key) => isRunActive(runs[key]));
 
+  // Re-read only when a solution changes, not on every tick of the clocks.
+  const { groups, status } = useMemo(() => {
+    const entries = PROVIDER_KEYS.flatMap((key) => {
+      const run = runs[key];
+      return run.status === "done"
+        ? [{ key, quantities: extractQuantities(run.solution.finalAnswer) }]
+        : [];
+    });
+    return groupAnswers(entries);
+  }, [runs]);
+
   // Shown from the start of a run: the cross-check can be asked for before
   // any answer is in.
   if (!finished.length && !running.length) return null;
@@ -72,6 +113,20 @@ export function AnswerSummary({
     : verdict
       ? `Cross-checked: ${verdict.judgement.correct.length} of ${verdict.solvers.length} correct · 已核對：${verdict.solvers.length} 個有 ${verdict.judgement.correct.length} 個啱`
       : `${finished.length} answer${finished.length === 1 ? "" : "s"} · ${finished.length} 個答案`;
+
+  // How far the answers agree - shown once there is a verdict, never before.
+  const comparable = finished.filter((key) => status.get(key) !== "unknown");
+  const largest = groups[0] ?? [];
+  const agreement =
+    !verdict || finished.length < 2
+      ? ""
+      : comparable.length < 2
+        ? "Not enough numbers to compare · 無法自動比較"
+        : largest.length === comparable.length
+          ? `The answers: all ${comparable.length} agree · 全部一致`
+          : largest.length >= 2
+            ? `The answers: ${largest.length} of ${comparable.length} agree · ${comparable.length} 個有 ${largest.length} 個一致`
+            : "The answers differ · 答案各有不同";
 
   // The one-tap cross-check: the default judge, at high (or the nearest level
   // its route offers), over the first finished solutions in picker order -
@@ -114,6 +169,8 @@ export function AnswerSummary({
         ) : null}
       </p>
 
+      {agreement ? <p className="mt-0.5 text-sm text-cs-ink-2">{agreement}</p> : null}
+
       {hasVerdict && judgeRun.judgement.final_answer ? (
         <div className="mt-3 rounded-cs border-2 border-cs-accent bg-cs-muted px-3 py-2">
           <div className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
@@ -127,6 +184,7 @@ export function AnswerSummary({
         {shown.map((key) => {
           const run = runs[key];
           const mark = markOf(key);
+          const agrees = verdict && run.status === "done" && finished.length > 1 ? status.get(key) : undefined;
           return (
             <li key={key} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-start sm:gap-3">
               <button
@@ -155,10 +213,22 @@ export function AnswerSummary({
                   <span className="text-xs text-cs-ink-3">No answer</span>
                 )}
               </div>
+              {agrees ? (
+                <span className={`${CHIP_BASE} ${CHIP[agrees].className} self-start`} title={CHIP[agrees].title}>
+                  {CHIP[agrees].label}
+                </span>
+              ) : null}
             </li>
           );
         })}
       </ul>
+
+      {verdict && finished.length > 1 ? (
+        <p className="mt-2 text-xs text-cs-ink-3">
+          ✓ / ✗ is the judge&apos;s verdict. 一致 / 唔同 only compares the numbers and units in each final
+          answer, worked out on the page.
+        </p>
+      ) : null}
 
       {queued ? (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-cs border border-dashed border-cs-accent bg-cs-muted px-3 py-2 text-sm text-cs-ink-2">
@@ -178,7 +248,8 @@ export function AnswerSummary({
           ) : null}
         </div>
       ) : !hasVerdict && (finished.length > 1 || queueable) ? (
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="mt-3 flex flex-col gap-2">
+          {/* The button on a line of its own, its description under it (the owner, 4 October 2026). */}
           <button
             type="button"
             disabled={judging || Boolean(blocked)}
@@ -187,7 +258,7 @@ export function AnswerSummary({
                 ? onQueueCrossCheck?.(DEFAULT_JUDGE, judgeEffort)
                 : onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)
             }
-            className="cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="cs-primary flex w-full items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2.5 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Scale className="h-4 w-4" aria-hidden="true" />
             {judging
