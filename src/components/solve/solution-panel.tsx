@@ -169,14 +169,31 @@ function verdictHeadline(labels: string[], correct: number[]) {
  * The confirmed interpretation, kept above the solutions for as long as they
  * are on the page - it used to vanish on Confirm & Solve (the owner asked for
  * it to stay, 26 September 2026). Rendered like a solution; the Traditional
- * Chinese is a fold away. Folded since 3 October 2026: open, it filled the
- * screen where the student had just confirmed it, and the solutions under it
- * went unnoticed. The step bar's "Check reading" opens it.
+ * Chinese is a fold away. Open while the solvers work - there is nothing
+ * else to read yet - and folded once the first solution is in (the owner's
+ * call, 3 October 2026: open, it pushed the solutions out of sight). A run
+ * picked back up with its solutions in starts folded. The step bar's "Check
+ * reading" opens it.
  */
-function InterpretationCard({ interpretation }: { interpretation: ConfirmedInterpretation }) {
+function InterpretationCard({
+  interpretation,
+  solved,
+}: {
+  interpretation: ConfirmedInterpretation;
+  /** Whether any solver has returned a solution. */
+  solved: boolean;
+}) {
   const { text, chinese, credit, note } = interpretation;
+  const [open, setOpen] = useState(!solved);
+  const wasSolved = useRef(solved);
+  useEffect(() => {
+    if (solved && !wasSolved.current) setOpen(false);
+    wasSolved.current = solved;
+  }, [solved]);
   return (
     <details
+      open={open}
+      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
       id={STEP_IDS.reading}
       tabIndex={-1}
       className="cs-panel group mb-3 scroll-mt-28 overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] outline-none sm:scroll-mt-20 print:hidden"
@@ -313,7 +330,9 @@ export default function SolutionPanel({
   // does not start over (hint-stepper.tsx).
   const [revealed, setRevealed] = useState<Record<string, number>>({});
   // The step a question will quote, picked from beside the working.
-  const [askStep, setAskStep] = useState<{ provider: ProviderKey; step: SolutionStep } | null>(null);
+  // `at`: when the step was picked - picking the same step again still takes
+  // the student back to the question box.
+  const [askStep, setAskStep] = useState<{ provider: ProviderKey; step: SolutionStep; at: number } | null>(null);
 
   // Muse Spark's tab first, then the rest in picker order (the owner's call,
   // 30 September 2026). The judge's A, B... stay in picker order.
@@ -378,7 +397,7 @@ export default function SolutionPanel({
         : (step: SolutionStep) => (
             <button
               type="button"
-              onClick={() => setAskStep({ provider: activeProvider, step })}
+              onClick={() => setAskStep({ provider: activeProvider, step, at: Date.now() })}
               className="inline-flex items-center gap-1 rounded-full border border-cs-line px-2 py-0.5 text-[0.7rem] font-semibold text-cs-ink-3 transition hover:border-cs-accent hover:text-cs-accent"
               title="Ask a question about this step"
             >
@@ -447,7 +466,12 @@ export default function SolutionPanel({
 
   return (
     <section className="mt-6">
-      {interpretation ? <InterpretationCard interpretation={interpretation} /> : null}
+      {interpretation ? (
+        <InterpretationCard
+          interpretation={interpretation}
+          solved={Object.values(runs).some((run) => run.status === "done")}
+        />
+      ) : null}
 
       {/* The question as uploaded, a fold away while reading the solutions. */}
       {questionImages.length ? (
@@ -655,6 +679,7 @@ export default function SolutionPanel({
                 providerStatus={providerStatus}
                 disabledReason={askBlocked}
                 step={askStep?.provider === activeProvider ? askStep.step : null}
+                stepPickedAt={askStep?.provider === activeProvider ? askStep.at : undefined}
                 onClearStep={() => setAskStep(null)}
                 onAsk={(question, writer, step) =>
                   onAsk(activeProvider, activeArtifact, solutionVersions[activeProvider] ?? 0, question, writer, step)
@@ -870,12 +895,14 @@ const CONFIDENCE_CLASS = {
 
 
 function Assessment({
+  provider,
   label,
   letter,
   text,
   chinese,
   correct,
 }: {
+  provider: ProviderKey;
   label: string;
   letter: string;
   text: string;
@@ -891,6 +918,7 @@ function Assessment({
         ) : (
           <X className="h-3.5 w-3.5 text-cs-danger" aria-hidden="true" />
         )}
+        <ProviderLogo provider={provider} className="h-4 w-4 shrink-0" />
         Solution {letter} · {label}
       </div>
       {text ? <MathProse source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
@@ -1048,6 +1076,10 @@ function JudgementCard({
               ) : (
                 <X className="h-4 w-4 shrink-0" aria-hidden="true" />
               )}
+              {/* Each model's logo on its verdict (the owner's request, 3 October 2026). */}
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cs-line-soft bg-cs-surface">
+                <ProviderLogo provider={provider} className="h-4 w-4" />
+              </span>
               <span className="min-w-0 flex-1 truncate">
                 {SOLUTION_LETTERS[index] ?? String(index + 1)} · {nameOf(provider)}
               </span>
@@ -1120,6 +1152,7 @@ function JudgementCard({
             {solvers.map((provider, index) => (
               <Assessment
                 key={provider}
+                provider={provider}
                 label={nameOf(provider)}
                 letter={SOLUTION_LETTERS[index] ?? String(index + 1)}
                 text={judgement.assessments[index] ?? ""}
