@@ -135,20 +135,19 @@ export function AnswerSummary({
   const judging = isJudgeActive(judgeRun);
   const toJudge = PROVIDER_KEYS.filter((key) => runs[key].status === "done").slice(0, MAX_JUDGED_SOLUTIONS);
   const judgeEffort = effortBand(providerStatus?.[DEFAULT_JUDGE.provider]).clamp("high");
-  // Asked for while the solvers run, it is sent once, when they are done
-  // (3 October 2026: the cross-check runs only when the student taps it).
+  // Greyed out until two solutions are in (the owner, 4 October 2026). A tap
+  // while other solvers still run is queued: sent once, when they are done,
+  // so the verdict grades them all.
   const queued = judgeRun.status === "waiting" && judgeRun.message === JUDGE_QUEUED;
   const queueable = running.length > 0 && canQueue && Boolean(onQueueCrossCheck);
   const blocked = !canRerun
     ? "Needs this run's images, which this browser no longer has."
     : locked
       ? "Waits until the new upload is ready."
-      : running.length
-        ? queueable
-          ? ""
-          : "Waits for the solvers still running."
-        : toJudge.length < 2
-          ? "Needs at least two finished solutions."
+      : toJudge.length < 2
+        ? "Needs at least two finished solutions."
+        : running.length && !queueable
+          ? "Waits for the solvers still running."
           : "";
   const judgeName = providerDisplayName(DEFAULT_JUDGE.provider, DEFAULT_JUDGE.variant);
   // Clear of the sticky step bar (lib/journey.ts).
@@ -247,7 +246,7 @@ export function AnswerSummary({
             </button>
           ) : null}
         </div>
-      ) : !hasVerdict && (finished.length > 1 || queueable) ? (
+      ) : !hasVerdict ? (
         <div className="mt-3 flex flex-col gap-2">
           {/* The button on a line of its own, its description under it (the owner, 4 October 2026). */}
           <button
@@ -258,19 +257,19 @@ export function AnswerSummary({
                 ? onQueueCrossCheck?.(DEFAULT_JUDGE, judgeEffort)
                 : onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)
             }
-            className="cs-primary flex w-full items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2.5 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className={`flex w-full items-center justify-center gap-2 rounded-cs px-4 py-2.5 text-sm font-semibold transition ${
+              judging || blocked
+                ? "cursor-not-allowed bg-cs-sunken text-cs-ink-3"
+                : "cs-primary bg-cs-accent text-cs-on-accent hover:bg-cs-accent-hover"
+            }`}
           >
             <Scale className="h-4 w-4" aria-hidden="true" />
-            {judging
-              ? "Cross-checking..."
-              : queueable
-                ? "核對答案 · Cross-check when they are in"
-                : "核對答案 · Run the cross-check"}
+            {judging ? "Cross-checking..." : "核對答案 · Run the cross-check"}
           </button>
           <span className="text-xs text-cs-ink-3">
-            {blocked ||
+            {(blocked && `${blocked} `) ||
               (queueable
-                ? `${judgeName} grades the answers once they are all in - one model call. `
+                ? `${judgeName} grades the solutions once every solver is done - one model call. `
                 : `${judgeName} grades ${toJudge.length} solutions - one model call. `)}
             <button type="button" onClick={scrollToCrossCheck} className="font-semibold text-cs-accent underline-offset-2 hover:underline">
               Choose the judge
