@@ -29,7 +29,7 @@ import puppeteer from "@cloudflare/puppeteer";
 import { DurableObject } from "cloudflare:workers";
 import katex from "katex";
 import type { JudgementResult } from "../shared/judgement";
-import { renderMarkdownWith } from "../shared/markdown";
+import { renderInlineMath, renderMarkdownWith } from "../shared/markdown";
 import type { ProviderArtifact } from "../shared/solution";
 import {
   isStudyKind,
@@ -213,7 +213,8 @@ export async function pdfDocument(content: PdfContent) {
       ? [studyHtml(content.studyKind, content.study, render)]
       : content.kind === "solution"
         ? [
-            `<h1>${escapeHtml(pdfTitle(content))}</h1>`,
+            // Escaped, with its formulas typeset (a title can hold $...$).
+            `<h1>${renderInlineMath(pdfTitle(content))}</h1>`,
             "<h2>Interpreted Problem</h2>",
             render(content.solution.interpretedProblem),
             "<h2>Assumptions</h2>",

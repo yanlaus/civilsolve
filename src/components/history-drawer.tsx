@@ -14,6 +14,7 @@ import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib
 import MathProse from "./solve/math-prose";
 import { ProviderLogo } from "./solve/provider-logo";
 import { AllView } from "./solve/solution-views";
+import { MathTitle } from "./solve/math-title";
 
 function formatWhen(savedAt: number) {
   try {
@@ -92,7 +93,7 @@ function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: (
           <img src={entry.thumbnail} alt="The question's first page" className="h-24 w-auto shrink-0 rounded-cs border border-cs-line bg-white" />
         ) : null}
         <div className="min-w-0">
-          <div className="font-display text-xl font-semibold text-cs-ink">{entry.title}</div>
+          <MathTitle text={entry.title} className="block font-display text-xl font-semibold text-cs-ink" />
           <div className="text-xs text-cs-ink-3">{formatWhen(entry.savedAt)}</div>
           {entry.notes ? <div className="mt-1 text-xs text-cs-ink-3">Your notes: {entry.notes}</div> : null}
         </div>
@@ -153,7 +154,7 @@ function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: (
           {solution ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:px-7">
-                <span className="font-display text-lg font-semibold text-cs-ink">{solution.artifact.title}</span>
+                <MathTitle text={solution.artifact.title} className="font-display text-lg font-semibold text-cs-ink" />
                 <PdfLink jobId={solution.jobId} />
               </div>
               <AllView artifact={solution.artifact} />
@@ -263,7 +264,7 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
                         <span className="h-14 w-14 shrink-0 rounded-cs bg-cs-muted" />
                       )}
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-cs-ink">{entry.title}</span>
+                        <MathTitle text={entry.title} className="block truncate text-sm font-semibold text-cs-ink" />
                         <span className="block text-xs text-cs-ink-3">{formatWhen(entry.savedAt)}</span>
                         <span className="block text-xs text-cs-ink-2">{summaryOf(entry)}</span>
                       </span>

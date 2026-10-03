@@ -510,3 +510,34 @@ export function renderMarkdownWith(
     return `<pre>${escaped}</pre>`;
   }
 }
+
+function escapeHtml(text: string) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * One line of model text as HTML, its `$...$` and `\(...\)` formulas typeset
+ * inline and everything else escaped: the titles of steps, problem parts and
+ * solutions, which the page shows as headings rather than as Markdown - so
+ * their formulas came out as raw LaTeX, "Step 3 - Compute $p_1 - p_2$" (the
+ * owner, 3 October 2026). Bold markers in a title are dropped.
+ */
+export function renderInlineMath(value: string) {
+  const text = sanitizeText(value).replace(/\*\*|__/g, "").replace(/\s+/g, " ").trim();
+  return text
+    .split(/(\$\$[^$]+\$\$|\$[^$\n]+\$|\\\(.+?\\\))/)
+    .map((part, index) => {
+      if (index % 2 === 0) return escapeHtml(part);
+      const expression = part.startsWith("$$")
+        ? part.slice(2, -2)
+        : part.startsWith("$")
+          ? part.slice(1, -1)
+          : part.slice(2, -2);
+      try {
+        return renderMathExpression(expression, false);
+      } catch {
+        return escapeHtml(part);
+      }
+    })
+    .join("");
+}
