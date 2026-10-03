@@ -122,11 +122,11 @@ export function buildJourney({ preparing, pipeline, plan, interpretation, runs, 
             ? judgeRun.message.startsWith("Cross-check skipped") || judgeRun.stopped
               ? { state: "skipped", detail: ["Skipped", "略過"] }
               : { state: "failed", detail: ["Failed", "失敗"] }
-            : // Nothing to say while it waits for a tap (the owner, 4 October
-              // 2026); Custom's automatic cross-check says so.
+            : // Careful and Quick wait for a tap; Custom's automatic
+              // cross-check says so instead.
               !total && plan.autoCheck
               ? { state: "todo", detail: ["Automatic", "自動"] }
-              : { state: "todo" }),
+              : { state: "todo", detail: ["Optional", "可選"] }),
   };
 
   const steps = [upload, reading, answers, check];
