@@ -3,6 +3,7 @@ import {
   BookOpen,
   Brain,
   Calculator,
+  ChevronUp,
   Eye,
   Feather,
   FileImage,
@@ -11,6 +12,8 @@ import {
   Flame,
   Loader2,
   PenSquare,
+  Pencil,
+  RotateCcw,
   Scale,
   SlidersHorizontal,
   Upload,
@@ -44,6 +47,7 @@ import {
 } from "../../../shared/providers";
 import { isAcceptedUpload, isPdfFile, type UploadItem } from "@/lib/attachments";
 import { parsePageSpec } from "@/lib/page-range";
+import { STEP_IDS } from "@/lib/journey";
 import { loadMode, MODES, PRESETS, saveMode, type Preset, type SolveMode } from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
 
@@ -130,6 +134,12 @@ export function UploadForm({
   onSolve,
   onCancel,
   footer,
+  collapsed = false,
+  pageImages = [],
+  onExpand,
+  onCollapse,
+  onNewQuestion,
+  onPlanChange,
 }: {
   /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
@@ -145,6 +155,21 @@ export function UploadForm({
   onCancel: () => void;
   /** Under the buttons: the "Notify me when it's done" toggle. */
   footer?: React.ReactNode;
+  /**
+   * Once a run starts the form folds into one line - the question's pages,
+   * Edit and New question - so the steps after it are what the student sees
+   * (3 October 2026). Its files and settings stay as they were.
+   */
+  collapsed?: boolean;
+  /** The question's pages as sent, for the folded line's thumbnails. */
+  pageImages?: string[];
+  onExpand?: () => void;
+  /** Set while there is a run below the form to fold it back over. */
+  onCollapse?: () => void;
+  /** The form is cleared of the question (not its settings); the page clears the run. */
+  onNewQuestion?: () => void;
+  /** What the form will run - the reading check and the cross-check - for the step bar. */
+  onPlanChange?: (plan: { verify: boolean; autoCheck: boolean }) => void;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
@@ -277,6 +302,9 @@ export function UploadForm({
   const autoJudgeEffort = effortBand(autoJudge.provider).clamp(autoJudgeEffortPick);
   // The cross-check needs two solutions to compare.
   const autoCheckOn = autoCheckEnabled && selectedProviders.length >= 2;
+  useEffect(() => {
+    onPlanChange?.({ verify: verifyEnabled, autoCheck: autoCheckOn });
+  }, [onPlanChange, verifyEnabled, autoCheckOn]);
   const callCount = selectedProviders.length + (verifyEnabled ? 3 : 0) + (autoCheckOn ? 1 : 0);
 
   /** Fills in every setting from a preset - its own defaults for the rest. */
@@ -568,8 +596,111 @@ export function UploadForm({
   const bannerError =
     error || fileError || pageConfigError || verifyConfigError || solverConfigError;
 
+  /** Clears the question for the next one; the mode and settings stay. */
+  function newQuestion() {
+    setQueuedFiles([]);
+    setNotes("");
+    setFileError("");
+    onNewQuestion?.();
+  }
+
+  const statusBox = status ? (
+    <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">{status}</div>
+  ) : null;
+
+  if (collapsed) {
+    const pages = pageImages.length || queuedFiles.length;
+    const names = queuedFiles.map((item) => item.file.name).join(", ");
+    return (
+      <div id={STEP_IDS.upload} tabIndex={-1} className="scroll-mt-28 space-y-3 outline-none sm:scroll-mt-20 print:hidden">
+        <div className="cs-panel flex flex-wrap items-center gap-3 rounded-cs-lg border border-cs-line-soft bg-cs-surface px-4 py-3 shadow-[0_1px_3px_var(--cs-shadow)]">
+          <div className="flex shrink-0 items-center -space-x-4">
+            {pageImages.length ? (
+              pageImages.slice(0, 3).map((src, index) => (
+                <img
+                  key={index}
+                  src={src}
+                  alt={index === 0 ? "The question's first page" : ""}
+                  className="h-12 w-10 rounded border border-cs-line bg-white object-cover object-top shadow-[0_1px_3px_var(--cs-shadow)]"
+                />
+              ))
+            ) : (
+              <span className="flex h-12 w-10 items-center justify-center rounded border border-cs-line bg-cs-muted text-cs-ink-3">
+                <FileImage className="h-4 w-4" aria-hidden="true" />
+              </span>
+            )}
+          </div>
+          <div className="min-w-[11rem] flex-1">
+            <p className="text-sm font-semibold text-cs-ink">Your question · 你嘅題目</p>
+            <p className="truncate text-xs text-cs-ink-3">
+              {pages ? `${pages} page${pages === 1 ? "" : "s"}` : "The last run"}
+              {names ? ` · ${names}` : ""}
+              {notes.trim() ? ` · "${notes.trim()}"` : ""}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {solving ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex items-center gap-1 rounded-cs border border-cs-line px-3 py-1.5 text-xs font-semibold text-cs-ink-2 transition hover:border-cs-danger hover:text-cs-danger"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Stop all
+              </button>
+            ) : null}
+            {!busy && queuedFiles.length ? (
+              <button
+                type="button"
+                onClick={onExpand}
+                className="inline-flex items-center gap-1 rounded-cs border border-cs-line px-3 py-1.5 text-xs font-semibold text-cs-ink-2 transition hover:border-cs-accent hover:text-cs-accent"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Edit · 修改
+              </button>
+            ) : null}
+            {!busy ? (
+              <button
+                type="button"
+                onClick={newQuestion}
+                className="inline-flex items-center gap-1 rounded-cs border border-cs-accent px-3 py-1.5 text-xs font-semibold text-cs-accent transition hover:bg-cs-accent hover:text-cs-on-accent"
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                New question · 新題目
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {bannerError ? (
+          <div className="rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger">
+            {bannerError}
+          </div>
+        ) : null}
+        {statusBox}
+        {footer}
+      </div>
+    );
+  }
+
   return (
-    <form className="space-y-5 print:hidden" onSubmit={handleSubmit}>
+    <form
+      id={STEP_IDS.upload}
+      tabIndex={-1}
+      className="scroll-mt-28 space-y-5 outline-none sm:scroll-mt-20 print:hidden"
+      onSubmit={handleSubmit}
+    >
+      {onCollapse ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-cs-ink-3 transition hover:text-cs-accent"
+          >
+            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+            Fold the form · 收起
+          </button>
+        </div>
+      ) : null}
       <section>
         <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
           <Upload className="h-4 w-4 text-cs-accent" />
@@ -1175,11 +1306,7 @@ export function UploadForm({
         </div>
       ) : null}
 
-      {status ? (
-        <div className="rounded-cs border border-cs-line bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
-          {status}
-        </div>
-      ) : null}
+      {statusBox}
 
       <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
         <button

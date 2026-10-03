@@ -20,6 +20,7 @@ import {
 } from "../../../shared/providers";
 import { isJudgeActive, isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
+import { scrollToStep, STEP_IDS } from "@/lib/journey";
 import MathProse from "./math-prose";
 import { ProviderLogo } from "./provider-logo";
 
@@ -130,8 +131,8 @@ export function AnswerSummary({
         : running.length
           ? "Waits for the solvers still running."
           : "";
-  const scrollToCrossCheck = () =>
-    document.getElementById("cross-check-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Clear of the sticky step bar (lib/journey.ts).
+  const scrollToCrossCheck = () => scrollToStep(STEP_IDS.check);
 
   return (
     <div className="cs-panel mb-4 rounded-cs-lg border border-cs-line-soft bg-cs-surface p-4 shadow-[0_1px_3px_var(--cs-shadow)] print:hidden sm:p-5">
