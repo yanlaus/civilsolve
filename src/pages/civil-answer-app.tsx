@@ -17,7 +17,6 @@ import { filesToImageDataUrls } from "@/lib/attachments";
 import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type JourneyStep } from "@/lib/journey";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
-import { extractQuantities, groupAnswers } from "../../shared/answers";
 import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
@@ -213,13 +212,9 @@ export default function CivilAnswerAppPage() {
     finished: solverRuns.filter((run) => run.status === "done" || run.status === "error").length,
     total: solverRuns.length,
     summary: () => {
-      const answers = Object.entries(runs).flatMap(([key, run]) =>
-        run.status === "done" ? [{ key, quantities: extractQuantities(run.solution.finalAnswer) }] : [],
-      );
-      const largest = groupAnswers(answers).groups[0]?.length ?? 0;
-      const ready = `${answers.length} solution${answers.length === 1 ? "" : "s"} ready`;
-      if (judgeRun.status === "done") return `${ready} · the cross-check has its verdict`;
-      return answers.length > 1 && largest > 1 ? `${ready} · ${largest} agree` : ready;
+      const done = Object.values(runs).filter((run) => run.status === "done").length;
+      const ready = `${done} solution${done === 1 ? "" : "s"} ready`;
+      return judgeRun.status === "done" ? `${ready} · the cross-check has its verdict` : ready;
     },
   });
 
