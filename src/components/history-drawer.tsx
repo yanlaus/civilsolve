@@ -7,7 +7,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, FileDown, History, Languages, Trash2, X } from "lucide-react";
-import { extractQuantities, groupAnswers } from "../../shared/answers";
 import { providerDisplayName, SOLUTION_ORDER, type ProviderKey } from "../../shared/providers";
 import { STUDY_KINDS, STUDY_TITLES } from "../../shared/study";
 import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib/history-store";
@@ -28,19 +27,14 @@ function solvedBy(entry: HistoryEntry) {
   return SOLUTION_ORDER.filter((key) => entry.solutions[key]);
 }
 
-/** What the list says about an entry's answers: the verdict, or how far they agree. */
+/** What the list says about an entry's answers: the verdict, or how many there are. */
 function summaryOf(entry: HistoryEntry) {
   const keys = solvedBy(entry);
   if (entry.verdict) {
     const right = entry.verdict.correct.map((key) => providerDisplayName(key, entry.solutions[key]?.variant));
     return right.length ? `Verified: ${right.join(", ")} correct` : "Verified: none correct";
   }
-  if (keys.length < 2) return `${keys.length} solution`;
-  const { groups } = groupAnswers(
-    keys.map((key) => ({ key, quantities: extractQuantities(entry.solutions[key]?.artifact.finalAnswer ?? "") })),
-  );
-  const largest = groups[0]?.length ?? 0;
-  return largest === keys.length ? `${keys.length} solutions, all agree` : largest > 1 ? `${largest} of ${keys.length} agree` : `${keys.length} solutions, answers differ`;
+  return `${keys.length} solution${keys.length === 1 ? "" : "s"}`;
 }
 
 function PdfLink({ jobId }: { jobId?: string }) {
