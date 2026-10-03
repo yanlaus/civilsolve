@@ -204,7 +204,8 @@ export function AskPanel({
           rows={3}
           maxLength={2000}
           aria-label={`Your question about ${label}'s solution`}
-          placeholder="e.g. 點解 $F_x$ 係負數？ / Why is the pressure force added here?"
+          // Plain words: a placeholder is not typeset, so $F_x$ showed as typed.
+          placeholder="e.g. 點解水平方向嘅力係負數？ / Why is the pressure force added here?"
           className="w-full resize-y rounded-cs border border-cs-line bg-cs-surface px-3 py-2 text-sm text-cs-ink outline-none transition focus:border-cs-accent focus:ring-4 focus:ring-cs-ring"
         />
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] sm:items-end">
