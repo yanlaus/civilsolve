@@ -33,8 +33,10 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Preset> = {
   // and reconciler first; the cross-check (ChatGPT at high, the most
   // reliable judge measured - AGENTS.md) when the student asks for it.
   careful: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: false },
-  // The two lightest draws on the OpenCode Go subscription, nothing else.
-  quick: { providers: ["muse", "deepseek"], effort: "high", verify: false, autoCheck: false },
+  // Three solvers and nothing else: the two lightest draws on the OpenCode
+  // Go subscription, and Gemini (3.8 Flash) since 4 October 2026 (the
+  // owner's call - a billed Flash call on the Vertex AI prepaid credit).
+  quick: { providers: ["muse", "deepseek", "gemini"], effort: "high", verify: false, autoCheck: false },
 };
 
 export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blurb: string }> = [
@@ -42,13 +44,13 @@ export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blur
     key: "careful",
     title: "Careful",
     chinese: "穩陣",
-    blurb: "Checks the reading of the question first, then three models solve. Tap Cross-check to have a judge grade the answers - before they are in too.",
+    blurb: "Checks the reading of the question first, then three models solve. Tap Cross-check to have a judge grade the answers.",
   },
   {
     key: "quick",
     title: "Quick",
     chinese: "快速",
-    blurb: "Two models solve straight away. Fastest and lightest on credit - compare their answers, or tap Cross-check.",
+    blurb: "Three models solve straight away, without checking the reading first. Fastest - compare their answers, or tap Cross-check.",
   },
   {
     key: "custom",
