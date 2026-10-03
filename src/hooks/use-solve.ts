@@ -182,6 +182,9 @@ export type JudgeRun =
 
 const JUDGE_STOPPED = "You stopped the cross-check.";
 
+/** A cross-check asked for while the solvers run: it is sent once they are done. */
+export const JUDGE_QUEUED = "Waiting for the solutions...";
+
 type DoneJudge = Extract<JudgeRun, { status: "done" }>;
 
 /** Who writes one kind of study notes: the model, and how hard it thinks. */
@@ -308,6 +311,13 @@ export function useSolve() {
   const tasksRef = useRef(new Map<ProviderKey, RunningTask>());
   const judgeTaskRef = useRef<RunningTask | null>(null);
   const runRef = useRef<SavedRun | null>(null);
+  /**
+   * The wave of solvers a run started with, while it is still going and was
+   * sent from this page (not re-attached after a reload): a cross-check asked
+   * for now is sent once, when it ends (queueCrossCheck). Null otherwise.
+   */
+  const waveRef = useRef<object | null>(null);
+  const [canQueueCrossCheck, setCanQueueCrossCheck] = useState(false);
   const bodyRef = useRef<SolveRequestBody | null>(null);
   /** The interpretation's display extras, saved with the body. */
   const extrasRef = useRef<InterpretationExtras | undefined>(undefined);
@@ -435,7 +445,17 @@ export function useSolve() {
   /** The cross-check's Stop: the solutions stay, and it can be run again. */
   const stopJudge = useCallback(() => {
     const task = judgeTaskRef.current;
-    if (!task) return;
+    if (!task) {
+      // Waiting for the solvers, not sent yet: it is taken off the run, so
+      // nothing is sent when they finish.
+      const run = runRef.current;
+      if (waveRef.current && run?.judge && !run.judge.jobId) {
+        run.judge = null;
+        persist();
+        setJudgeRun({ status: "idle" });
+      }
+      return;
+    }
     judgeTaskRef.current = null;
     task.tracker.end();
     stopTask(task.handle, task.abort);
@@ -447,7 +467,7 @@ export function useSolve() {
           : current,
       );
     }
-  }, []);
+  }, [persist]);
 
   /** Clears the page and forgets the saved run and its images (after a recovery, say). */
   const dismiss = useCallback(() => {
@@ -457,6 +477,8 @@ export function useSolve() {
     void clearBody();
     bodySavedRef.current = null;
     runRef.current = null;
+    waveRef.current = null;
+    setCanQueueCrossCheck(false);
     setRunId(null);
     setBody(null);
     setRuns(IDLE_RUNS);
@@ -784,11 +806,19 @@ export function useSolve() {
         if (run.study?.[kind]?.jobId) void studyOne(context, kind, null);
       }
 
+      const wave = {};
+      waveRef.current = body ? wave : null;
+      setCanQueueCrossCheck(Boolean(body));
       void (async () => {
         // A copy: a solver added while these run is started on its own.
         await runPool([...run.providers], SOLVE_CONCURRENCY, (provider) =>
           solveOne(context, provider, body),
         );
+        if (waveRef.current === wave) {
+          waveRef.current = null;
+          setCanQueueCrossCheck(false);
+        }
+        // The judge the run started with, or one asked for while it ran.
         if (!run.judge || signal.aborted) return;
         await judgeOne(context, body);
       })();
@@ -809,9 +839,7 @@ export function useSolve() {
       extrasRef.current = body.interpretation ? extras : undefined;
       setInterpretation(body.interpretation ? { ...extras, text: body.interpretation } : null);
       setJudgeRun(
-        judge
-          ? { status: "waiting", judge: judge.provider, message: "Waiting for the solutions..." }
-          : { status: "idle" },
+        judge ? { status: "waiting", judge: judge.provider, message: JUDGE_QUEUED } : { status: "idle" },
       );
       setStudyRuns(IDLE_STUDY);
       bodySavedRef.current = null;
@@ -996,6 +1024,26 @@ export function useSolve() {
   );
 
   /**
+   * A cross-check asked for while the run's solvers are still going (3
+   * October 2026: in Careful it runs only when the student asks): the judge
+   * goes on the run and is sent once, when the solvers are done, over the
+   * first finished solutions - as if the run had started with it. Its Stop
+   * takes it off again. Does nothing once the solvers are done (crossCheck
+   * runs it then) or for a run picked back up after a reload.
+   */
+  const queueCrossCheck = useCallback(
+    (judge: ModelChoice, effort: EffortKey = "high") => {
+      const run = runRef.current;
+      if (!run || !waveRef.current) return;
+      run.judge = { provider: judge.provider, variant: judge.variant, effort };
+      setVariants(variantsOf(run));
+      persist();
+      setJudgeRun({ status: "waiting", judge: judge.provider, message: JUDGE_QUEUED });
+    },
+    [persist],
+  );
+
+  /**
    * Sends one kind of study notes, starting from `source` as the page shows
    * it now: one solver's finished solution alone, or the verdict with the
    * solutions it graded - in its order, so its letters still match. A
@@ -1152,6 +1200,8 @@ export function useSolve() {
     stopProvider,
     refineProvider,
     crossCheck,
+    queueCrossCheck,
+    canQueueCrossCheck,
     stopJudge,
     refineVerdict,
     studyRuns,

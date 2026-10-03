@@ -24,7 +24,7 @@ function Model({ choice }: { choice: ModelChoice }) {
 }
 
 /** A stage this run leaves out: an empty slot where the models would be. */
-function Skipped() {
+function Skipped({ label = "Skipped · 略過" }: { label?: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-cs-ink-3">
       <span
@@ -33,7 +33,7 @@ function Skipped() {
       >
         <Minus className="h-3.5 w-3.5" />
       </span>
-      Skipped · 略過
+      {label}
     </span>
   );
 }
@@ -43,13 +43,15 @@ function Stage({
   label,
   chinese,
   off = false,
+  offLabel,
   children,
 }: {
   icon: typeof BookOpen;
   label: string;
   chinese: string;
-  /** Left out of this run: drawn greyed, with "Skipped" in place of models. */
+  /** Left out of this run: drawn greyed, with "Skipped" (or `offLabel`) in place of models. */
   off?: boolean;
+  offLabel?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -58,7 +60,7 @@ function Stage({
         <Icon className={`h-3.5 w-3.5 ${off ? "text-cs-ink-3" : "text-cs-accent"}`} aria-hidden="true" />
         {label} · {chinese}
       </span>
-      <span className="flex flex-wrap items-center gap-1.5">{off ? <Skipped /> : children}</span>
+      <span className="flex flex-wrap items-center gap-1.5">{off ? <Skipped label={offLabel} /> : children}</span>
     </li>
   );
 }
@@ -117,7 +119,8 @@ export function PresetFlow({
         </span>
       </Stage>
       <Step />
-      <Stage icon={Scale} label="Check" chinese="核對" off={!judge}>
+      {/* Without a judge set, the cross-check is still there - on a tap. */}
+      <Stage icon={Scale} label="Check" chinese="核對" off={!judge} offLabel="When you tap it · 撳先做">
         {judge ? <Model choice={judge} /> : null}
       </Stage>
     </ol>

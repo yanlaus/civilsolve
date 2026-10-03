@@ -955,6 +955,7 @@ export function UploadForm({
         ) : null}
         <p className="mt-2 text-xs text-cs-ink-3">
           This run makes {callCount} model call{callCount === 1 ? "" : "s"} · 呢次會用 {callCount} 個 model call
+          {autoCheckOn ? "" : " · cross-check +1 if you tap it · 核對答案再加 1 個"}
         </p>
       </section>
 

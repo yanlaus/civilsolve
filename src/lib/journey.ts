@@ -8,6 +8,7 @@
 import type { InterpretPipeline } from "@/hooks/use-interpret";
 import {
   isRunActive,
+  JUDGE_QUEUED,
   type ConfirmedInterpretation,
   type JudgeRun,
   type ProviderRuns,
@@ -111,7 +112,7 @@ export function buildJourney({ preparing, pipeline, plan, interpretation, runs, 
     label: "Cross-check",
     chinese: "核對答案",
     ...(total ? { target: STEP_IDS.check } : {}),
-    ...(judgeRun.status === "waiting" && judgeRun.message.startsWith("Waiting for the solutions")
+    ...(judgeRun.status === "waiting" && judgeRun.message === JUDGE_QUEUED
       ? { state: "queued", detail: ["After the answers", "答案之後"] }
       : judgeRun.status === "waiting" || judgeRun.status === "streaming"
         ? { state: "running", detail: ["Checking", "核對緊"] }

@@ -260,6 +260,8 @@ export default function SolutionPanel({
   onStopProvider,
   onRefineProvider,
   onCrossCheck,
+  canQueueCrossCheck,
+  onQueueCrossCheck,
   askThreads,
   askProgress,
   onAsk,
@@ -295,6 +297,9 @@ export default function SolutionPanel({
   /** Re-generates one finished solution with the user's instructions. */
   onRefineProvider: (provider: ProviderKey, instructions: string) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** Whether a cross-check asked for now waits for the solvers and is sent once they are done. */
+  canQueueCrossCheck: boolean;
+  onQueueCrossCheck: (judge: ModelChoice, effort: EffortKey) => void;
   /** Questions about each solution, and their answers (hooks/use-ask.ts). */
   askThreads: AskThreads;
   askProgress: Record<string, Progress>;
@@ -512,6 +517,9 @@ export default function SolutionPanel({
         locked={locked}
         onPick={pickProvider}
         onCrossCheck={onCrossCheck}
+        canQueue={canQueueCrossCheck}
+        onQueueCrossCheck={onQueueCrossCheck}
+        onStopJudge={onStopJudge}
       />
 
       <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">
