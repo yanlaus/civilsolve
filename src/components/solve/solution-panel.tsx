@@ -46,6 +46,7 @@ import {
   type StudySource,
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
+import { STEP_IDS } from "@/lib/journey";
 import { renderMarkdown } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
@@ -168,23 +169,30 @@ function verdictHeadline(labels: string[], correct: number[]) {
  * The confirmed interpretation, kept above the solutions for as long as they
  * are on the page - it used to vanish on Confirm & Solve (the owner asked for
  * it to stay, 26 September 2026). Rendered like a solution; the Traditional
- * Chinese is a fold away.
+ * Chinese is a fold away. Folded since 3 October 2026: open, it filled the
+ * screen where the student had just confirmed it, and the solutions under it
+ * went unnoticed. The step bar's "Check reading" opens it.
  */
 function InterpretationCard({ interpretation }: { interpretation: ConfirmedInterpretation }) {
   const { text, chinese, credit, note } = interpretation;
   return (
     <details
-      open
-      className="cs-panel group mb-8 overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden"
+      id={STEP_IDS.reading}
+      tabIndex={-1}
+      className="cs-panel group mb-3 scroll-mt-28 overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] outline-none sm:scroll-mt-20 print:hidden"
     >
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-5 py-4 sm:px-7">
-        <span className="flex flex-1 items-center gap-2 font-display text-lg font-semibold text-cs-ink sm:flex-none">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3 sm:px-7">
+        <span className="flex flex-1 items-center gap-2 text-sm font-semibold text-cs-ink sm:flex-none">
           <BookOpen className="h-4 w-4 text-cs-accent" aria-hidden="true" />
-          Interpreted question
+          Interpreted question · 題目解讀
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-[rgba(45,138,78,0.12)] px-2 py-0.5 text-[0.7rem] font-semibold text-cs-success">
+            <Check className="h-3 w-3" aria-hidden="true" />
+            confirmed
+          </span>
         </span>
         {/* On a phone the remark goes under the heading, not squeezed beside it. */}
         <span className="order-last basis-full text-xs text-cs-ink-3 sm:order-none sm:basis-0 sm:flex-1">
-          confirmed by you{credit ? ` · read by ${credit}` : ""} · what the solvers were given
+          by you{credit ? ` · read by ${credit}` : ""} · what the solvers were given
         </span>
         <ChevronDown
           className="h-4 w-4 shrink-0 text-cs-ink-3 transition group-open:rotate-180"
@@ -438,12 +446,12 @@ export default function SolutionPanel({
   if (!visibleProviders.length) return null;
 
   return (
-    <section className="mt-10">
+    <section className="mt-6">
       {interpretation ? <InterpretationCard interpretation={interpretation} /> : null}
 
       {/* The question as uploaded, a fold away while reading the solutions. */}
       {questionImages.length ? (
-        <details className="cs-panel group mb-6 rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] print:hidden">
+        <details className="cs-panel group mb-3 rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)] print:hidden">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-sm font-semibold text-cs-ink sm:px-7">
             <ImageIcon className="h-4 w-4 text-cs-accent" aria-hidden="true" />
             The question · 題目原圖
@@ -458,6 +466,9 @@ export default function SolutionPanel({
         </details>
       ) : null}
 
+      {/* The answers, from the heading to Add a solver: where the step bar's
+          "Answers" and the jump button land. */}
+      <div id={STEP_IDS.answers} tabIndex={-1} className="scroll-mt-28 pt-5 outline-none sm:scroll-mt-20">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-cs-ink">
           <CheckCircle2 className="h-5 w-5 text-cs-success" />
@@ -740,12 +751,18 @@ export default function SolutionPanel({
         locked={locked}
         onSolveProvider={solveWith}
       />
+      </div>
 
       {/* The cross-check, a section of its own since 3 October 2026 (the
           owner's call; it shared a panel with Add a solver): its controls,
           then the verdict under them - read after the solutions, not before
           them (the owner's order since 26 September 2026). */}
-      <section className="mt-8 print:hidden" aria-labelledby="cross-check-heading">
+      <section
+        id={STEP_IDS.check}
+        tabIndex={-1}
+        className="mt-8 scroll-mt-28 outline-none sm:scroll-mt-20 print:hidden"
+        aria-labelledby="cross-check-heading"
+      >
         <h2
           id="cross-check-heading"
           className="flex flex-wrap items-baseline gap-x-2 font-display text-2xl font-bold text-cs-ink"

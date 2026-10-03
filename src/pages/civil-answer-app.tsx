@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Calculator, History, Loader2, X } from "lucide-react";
 import { InterpretProgress } from "@/components/solve/interpret-progress";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
+import { JourneyBar, JumpButton } from "@/components/solve/journey-bar";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
@@ -13,6 +14,7 @@ import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, isStudyActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
+import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type JourneyStep } from "@/lib/journey";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import { extractQuantities, groupAnswers } from "../../shared/answers";
@@ -108,11 +110,27 @@ export default function CivilAnswerAppPage() {
   // running on the server while the page was closed or reloaded.
   const [recovered, setRecovered] = useState(false);
   const restoreAttempted = useRef(false);
+  // The form folds into one line once a run starts (lib/journey.ts, the step
+  // bar): what comes next is then on screen rather than under the form.
+  const [formCollapsed, setFormCollapsed] = useState(false);
+  // What the form will run, before anything has: the step bar shows the
+  // reading check as skipped in Quick.
+  const [plan, setPlan] = useState({ verify: false, autoCheck: false });
+  const onPlanChange = useCallback(
+    (next: { verify: boolean; autoCheck: boolean }) =>
+      setPlan((current) =>
+        current.verify === next.verify && current.autoCheck === next.autoCheck ? current : next,
+      ),
+    [],
+  );
 
   useEffect(() => {
     if (restoreAttempted.current) return;
     restoreAttempted.current = true;
-    if (restore()) setRecovered(true);
+    if (restore()) {
+      setRecovered(true);
+      setFormCollapsed(true);
+    }
   }, [restore]);
   const {
     pipeline,
@@ -158,6 +176,30 @@ export default function CivilAnswerAppPage() {
     Object.values(studyRuns).some(isStudyActive);
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
+  const hasRun = Object.values(runs).some((run) => run.status !== "idle");
+  // Folded only while there is something after it to look at.
+  const collapsed = formCollapsed && (busy || pipeline.status !== "idle" || hasRun);
+
+  const journey = buildJourney({
+    preparing: Boolean(prepStatus),
+    pipeline,
+    plan,
+    interpretation: confirmedInterpretation,
+    runs,
+    judgeRun,
+  });
+  const jump = useCallback((step: JourneyStep) => {
+    if (step.target) scrollToStep(step.target);
+  }, []);
+
+  // The reading is ready for review: take the student to it - they were
+  // watching the progress at the top.
+  const lastPipelineStatus = useRef(pipeline.status);
+  useEffect(() => {
+    const previous = lastPipelineStatus.current;
+    lastPipelineStatus.current = pipeline.status;
+    if (pipeline.status === "review" && previous !== "review") return scrollToStepWhenReady(STEP_IDS.review);
+  }, [pipeline.status]);
 
   // A long solve on a phone: keep the screen from locking while it runs.
   useWakeLock(isSolving || isInterpreting || asks.active);
@@ -216,6 +258,7 @@ export default function CivilAnswerAppPage() {
   function stopInterpretation() {
     resetInterpret();
     setPendingSolve(null);
+    setFormCollapsed(false);
   }
 
   async function handleSolve({
@@ -236,7 +279,9 @@ export default function CivilAnswerAppPage() {
     // Left on screen while the new question was being read, they looked
     // like what the interpretation pass was working on (26 September 2026).
     dismiss();
+    setFormCollapsed(true);
     setPrepStatus("Preparing images...");
+    scrollToStepWhenReady(STEP_IDS.upload);
 
     try {
       const images = await filesToImageDataUrls(uploads);
@@ -286,7 +331,10 @@ export default function CivilAnswerAppPage() {
       }
 
       start(providers, body, judgeOf(autoCheck), variants);
+      scrollToStepWhenReady(STEP_IDS.answers);
     } catch (prepError) {
+      // Nothing was sent: back to the form to fix the upload.
+      setFormCollapsed(false);
       setError(
         prepError instanceof Error ? prepError.message : "Could not prepare the uploads.",
       );
@@ -307,6 +355,24 @@ export default function CivilAnswerAppPage() {
     setPendingSolve(null);
     resetInterpret();
     start(providers, { ...body, interpretation: confirmedText }, judgeOf(autoCheck), variants, extras);
+    // The reading folds away and the solutions start below it: go to them.
+    scrollToStepWhenReady(STEP_IDS.answers);
+  }
+
+  /** "New question": the run is cleared (it stays in the history) and the form opens empty. */
+  function newQuestion() {
+    setRecovered(false);
+    resetInterpret();
+    setPendingSolve(null);
+    setError("");
+    dismiss();
+    setFormCollapsed(false);
+    window.scrollTo({ top: 0 });
+  }
+
+  function expandForm() {
+    setFormCollapsed(false);
+    scrollToStepWhenReady(STEP_IDS.upload);
   }
 
   return (
@@ -343,6 +409,9 @@ export default function CivilAnswerAppPage() {
           </p>
         </header>
 
+        <JourneyBar steps={journey.steps} current={journey.current} onJump={jump} />
+        <JumpButton step={journey.current} onJump={jump} />
+
         <UploadForm
           providerStatus={providerStatus}
           busy={busy}
@@ -358,6 +427,12 @@ export default function CivilAnswerAppPage() {
           error={bannerError}
           onSolve={handleSolve}
           onCancel={cancelAll}
+          collapsed={collapsed}
+          pageImages={pendingSolve?.body.images ?? questionImages}
+          onExpand={expandForm}
+          onCollapse={hasRun || pipeline.status === "review" ? () => setFormCollapsed(true) : undefined}
+          onNewQuestion={newQuestion}
+          onPlanChange={onPlanChange}
           footer={
             notifyAvailable ? (
               <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 text-xs text-cs-ink-3">

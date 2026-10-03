@@ -8,6 +8,7 @@
 import { lazy, Suspense, useState } from "react";
 import { Check, ChevronDown, Eye, Image as ImageIcon, Languages, Pencil, TriangleAlert, X } from "lucide-react";
 import type { InterpretationResult } from "../../../shared/interpretation";
+import { STEP_IDS } from "@/lib/journey";
 import { formatClock, useNow } from "@/lib/progress";
 import { StatusRow } from "./interpret-progress";
 import { QuestionImages } from "./question-images";
@@ -76,7 +77,11 @@ export function InterpretationReview({
   const now = useNow(Boolean(revising));
 
   return (
-    <section className="cs-panel mt-6 rounded-cs-lg border-2 border-cs-accent bg-cs-surface p-5 shadow-[0_0_0_4px_var(--cs-ring)] print:hidden">
+    <section
+      id={STEP_IDS.review}
+      tabIndex={-1}
+      className="cs-panel mt-6 scroll-mt-28 rounded-cs-lg border-2 border-cs-accent bg-cs-surface p-5 shadow-[0_0_0_4px_var(--cs-ring)] outline-none sm:scroll-mt-20 print:hidden"
+    >
       <p className="mb-2 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
         <Eye className="h-4 w-4 text-cs-accent" />
         Review the interpreted question
@@ -245,7 +250,9 @@ export function InterpretationReview({
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap justify-end gap-3">
+      {/* On a phone the reading is long, so Confirm stays at the bottom of the
+          screen while it is read (3 October 2026). */}
+      <div className="sticky bottom-0 z-20 -mx-5 mt-4 flex flex-wrap justify-end gap-3 border-t border-cs-line-soft bg-cs-surface/95 px-5 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <button
           type="button"
           onClick={onCancel}
