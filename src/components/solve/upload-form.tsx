@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
+import { PresetFlow } from "./preset-flow";
 import { ProviderLogo } from "./provider-logo";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
@@ -802,24 +803,20 @@ export function UploadForm({
         </div>
         <p className="mt-2 text-xs text-cs-ink-3">{MODES.find((option) => option.key === mode)?.blurb}</p>
         {mode !== "custom" ? (
-          // What the preset will run, in one line, and the way into the details.
-          <div className="mt-3 rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-sm text-cs-ink-2">
-            <span className="font-semibold text-cs-ink">
-              {selectedProviders.map((key) => providerDisplayName(key, variants[key])).join(", ") ||
-                "No solver available"}
-            </span>
-            {" · "}
-            {EFFORT_OPTIONS.find((option) => option.key === effort)?.label} thinking
-            {verifyEnabled
-              ? ` · reading checked first (${providerDisplayName(interpreterA.provider, interpreterA.variant)} and ${providerDisplayName(interpreterB.provider, interpreterB.variant)}, then ${providerDisplayName(verifier.provider, verifier.variant)})`
-              : ""}
-            {autoCheckOn
-              ? ` · cross-checked by ${providerDisplayName(autoJudge.provider, autoJudge.variant)}`
-              : ""}
+          // What the preset will run, stage by stage with the models' logos,
+          // and the way into the details.
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3">
+            <PresetFlow
+              readers={verifyEnabled ? [interpreterA, interpreterB] : null}
+              reconciler={verifier}
+              solvers={selectedProviders.map((key) => ({ provider: key, variant: variants[key] }))}
+              effortLabel={EFFORT_OPTIONS.find((option) => option.key === effort)?.label ?? effort}
+              judge={autoCheckOn ? autoJudge : null}
+            />
             <button
               type="button"
               onClick={() => chooseMode("custom", true)}
-              className="ml-2 font-semibold text-cs-accent underline-offset-2 hover:underline"
+              className="text-sm font-semibold text-cs-accent underline-offset-2 hover:underline"
             >
               Customise · 自訂設定
             </button>

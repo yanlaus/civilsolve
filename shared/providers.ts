@@ -203,16 +203,17 @@ export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "deepseek", "gemini"];
 /**
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree; the judge is a third model.
- * MiMo and Gemini Flash read; ChatGPT (gpt-5.6-luna on OpenCode Go, the most
- * reliable solver in the B.8 matrix) reconciles them. The readers were
+ * Muse Spark and Gemini Flash read; ChatGPT (gpt-5.6-luna on OpenCode Go, the
+ * most reliable solver in the B.8 matrix) reconciles them. The readers were
  * DeepSeek Flash and Muse Spark from 25 September 2026 (Gemini's free
  * AI Studio key failed too often to be the default then), Kimi and Gemini
- * Flash from 26 September, and MiMo took Kimi's place on 27 September - the
- * owner's picks each time. Gemini is on Vertex AI and its prepaid credit:
- * each reading is a billed Flash call.
+ * Flash from 26 September, MiMo took Kimi's place on 27 September, and Muse
+ * Spark took MiMo's on 3 October (on a one-page beam it read in 21-35 s,
+ * MiMo in 18-28 s, both correct) - the owner's picks each time. Gemini is
+ * on Vertex AI and its prepaid credit: each reading is a billed Flash call.
  */
 export const DEFAULT_INTERPRETERS: [ModelChoice, ModelChoice] = [
-  { provider: "mimo" },
+  { provider: "muse" },
   { provider: "gemini", variant: "flash" },
 ];
 export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };

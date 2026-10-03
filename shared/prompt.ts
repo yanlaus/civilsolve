@@ -96,6 +96,9 @@ const READING_FORMAT = [
   "- Format every symbol, formula and value with its unit as LaTeX in Markdown math delimiters: `$...$` inline (for example `$d_1 = 60\\,\\text{mm}$`, `$\\theta = 30^\\circ$`, `$P_A$`), `$$...$$` for a displayed equation. Never leave a formula or a subscripted symbol as plain text such as d_1 = 60 mm.",
   `- ${UNIT_RULE}`,
   "- No headings, no backticks, no code blocks.",
+  // The page puts each field under its own label (interpretationToText);
+  // a label in the field showed twice (3 October 2026).
+  "- Do not open `interpreted_problem`, `diagram_description`, `given` or `required` with a label such as **Diagram:**, Given: or Required: - the page shows each field under its own label.",
 ];
 
 /** What a re-generation adds to a prompt: the last version and the user's instructions. */
@@ -231,7 +234,7 @@ export function buildInterpretPrompt(
     "- Loads: every point load, distributed load, moment, and pressure — magnitude, direction, position, and extent.",
     "- Axes, labeled points, symbols, and any values given in tables or text.",
     "- Material or section properties if stated (E, I, A, dimensions...).",
-    "State the problem in your own words, list all given quantities with symbols and units, and state exactly what is being asked.",
+    "State the problem in your own words in `interpreted_problem`, describe the diagram in `diagram_description`, list all given quantities with symbols and units in `given`, and state exactly what is being asked in `required`.",
     "If any part of the image is ambiguous or unreadable, say so explicitly in the relevant field rather than guessing silently.",
     "Set the `discrepancies` field to an empty string.",
     ...READING_FORMAT,
@@ -270,6 +273,7 @@ export function buildReviseReadingPrompt(
   const sections = [
     "The attached civil engineering assignment images were read, and the reading below came out of it. The user reviewed it - and may have edited it - and asks for changes. Your job is to produce ONE corrected, authoritative reading that follows the user's instructions - do NOT solve the problem.",
     "Re-inspect the images yourself. Follow the user's instructions; where one contradicts what the images show, keep what the images show and say so. Keep everything in the current reading that is right.",
+    "The current reading is laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
     "In the `discrepancies` field, list what you changed from the current reading and why (or state that nothing needed to change).",
     CHINESE_DISCREPANCIES,
     CHINESE_READING,
@@ -312,6 +316,7 @@ export function buildVerifyPrompt(
     "- Where they agree, keep the shared reading.",
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
+    "The two interpretations are laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
     CHINESE_DISCREPANCIES,
     CHINESE_READING,
