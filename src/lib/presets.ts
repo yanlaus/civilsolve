@@ -17,15 +17,19 @@ export type Preset = {
   effort: EffortKey;
   /** Two readers and a reconciler check the reading before anyone solves. */
   verify: boolean;
-  /** The default judge cross-checks the solutions once they are in. */
+  /**
+   * The default judge cross-checks the solutions once they are in. Off in
+   * both presets since 3 October 2026 (the owner's call): the cross-check
+   * runs once, when the student taps it - before the answers are in too.
+   */
   autoCheck: boolean;
 };
 
 export const PRESETS: Record<Exclude<SolveMode, "custom">, Preset> = {
   // The owner's default solvers, the reading checked by the default readers
-  // and reconciler, and ChatGPT judging at high: the most reliable set-up
-  // measured (AGENTS.md).
-  careful: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: true },
+  // and reconciler first; the cross-check (ChatGPT at high, the most
+  // reliable judge measured - AGENTS.md) when the student asks for it.
+  careful: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: false },
   // The two lightest draws on the OpenCode Go subscription, nothing else.
   quick: { providers: ["muse", "deepseek"], effort: "high", verify: false, autoCheck: false },
 };
@@ -35,13 +39,13 @@ export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blur
     key: "careful",
     title: "Careful",
     chinese: "穩陣",
-    blurb: "Checks the reading of the question, solves with three models, then a judge cross-checks the answers. Slowest, most reliable.",
+    blurb: "Checks the reading of the question first, then three models solve. Tap Cross-check to have a judge grade the answers - before they are in too.",
   },
   {
     key: "quick",
     title: "Quick",
     chinese: "快速",
-    blurb: "Two models solve straight away. Fastest and lightest on credit - compare their answers yourself.",
+    blurb: "Two models solve straight away. Fastest and lightest on credit - compare their answers, or tap Cross-check.",
   },
   {
     key: "custom",

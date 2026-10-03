@@ -81,6 +81,8 @@ export default function CivilAnswerAppPage() {
     stopProvider,
     refineProvider,
     crossCheck,
+    queueCrossCheck,
+    canQueueCrossCheck,
     stopJudge,
     refineVerdict,
     studyRuns,
@@ -520,6 +522,8 @@ export default function CivilAnswerAppPage() {
             onStopProvider={stopProvider}
             onRefineProvider={refineProvider}
             onCrossCheck={crossCheck}
+            canQueueCrossCheck={canQueueCrossCheck}
+            onQueueCrossCheck={queueCrossCheck}
             askThreads={asks.threads}
             askProgress={asks.progress}
             onAsk={asks.ask}

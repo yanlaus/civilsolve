@@ -6,7 +6,7 @@
 // says so, and offers the cross-check in one tap until there is a verdict.
 
 import { useMemo } from "react";
-import { Check, ListChecks, Loader2, Scale, X } from "lucide-react";
+import { Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
 import { extractQuantities, groupAnswers, type Agreement } from "../../../shared/answers";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
@@ -18,7 +18,7 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
-import { isJudgeActive, isRunActive, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
+import { isJudgeActive, isRunActive, JUDGE_QUEUED, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
 import { scrollToStep, STEP_IDS } from "@/lib/journey";
 import MathProse from "./math-prose";
@@ -63,6 +63,9 @@ export function AnswerSummary({
   locked,
   onPick,
   onCrossCheck,
+  canQueue = false,
+  onQueueCrossCheck,
+  onStopJudge,
 }: {
   /** The solution tabs' order. */
   order: ProviderKey[];
@@ -78,6 +81,11 @@ export function AnswerSummary({
   /** Opens a solver's tab. */
   onPick: (key: ProviderKey) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** Whether a cross-check can be asked for now and sent once the solvers are done. */
+  canQueue?: boolean;
+  onQueueCrossCheck?: (judge: ModelChoice, effort: EffortKey) => void;
+  /** Takes a queued cross-check back. */
+  onStopJudge?: () => void;
 }) {
   const shown = order.filter((key) => runs[key].status !== "idle");
   const finished = shown.filter((key) => runs[key].status === "done");
@@ -94,12 +102,15 @@ export function AnswerSummary({
     return groupAnswers(entries);
   }, [runs]);
 
-  if (!finished.length) return null;
+  // Shown from the start of a run: the cross-check can be asked for before
+  // any answer is in.
+  if (!finished.length && !running.length) return null;
 
   const comparable = finished.filter((key) => status.get(key) !== "unknown");
   const largest = groups[0] ?? [];
-  const headline =
-    finished.length === 1
+  const headline = !finished.length
+    ? "Solving · 解緊題"
+    : finished.length === 1
       ? "One answer so far · 暫時得一個答案"
       : comparable.length < 2
         ? "Not enough numbers to compare · 無法自動比較"
@@ -122,15 +133,22 @@ export function AnswerSummary({
   const judging = isJudgeActive(judgeRun);
   const toJudge = PROVIDER_KEYS.filter((key) => runs[key].status === "done").slice(0, MAX_JUDGED_SOLUTIONS);
   const judgeEffort = effortBand(providerStatus?.[DEFAULT_JUDGE.provider]).clamp("high");
+  // Asked for while the solvers run, it is sent once, when they are done
+  // (3 October 2026: the cross-check runs only when the student taps it).
+  const queued = judgeRun.status === "waiting" && judgeRun.message === JUDGE_QUEUED;
+  const queueable = running.length > 0 && canQueue && Boolean(onQueueCrossCheck);
   const blocked = !canRerun
     ? "Needs this run's images, which this browser no longer has."
     : locked
       ? "Waits until the new upload is ready."
-      : toJudge.length < 2
-        ? "Needs at least two finished solutions."
-        : running.length
-          ? "Waits for the solvers still running."
+      : running.length
+        ? queueable
+          ? ""
+          : "Waits for the solvers still running."
+        : toJudge.length < 2
+          ? "Needs at least two finished solutions."
           : "";
+  const judgeName = providerDisplayName(DEFAULT_JUDGE.provider, DEFAULT_JUDGE.variant);
   // Clear of the sticky step bar (lib/journey.ts).
   const scrollToCrossCheck = () => scrollToStep(STEP_IDS.check);
 
@@ -206,20 +224,47 @@ export function AnswerSummary({
         Compared automatically from the numbers and units in each final answer.
       </p>
 
-      {!hasVerdict && finished.length > 1 ? (
+      {queued ? (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-cs border border-dashed border-cs-accent bg-cs-muted px-3 py-2 text-sm text-cs-ink-2">
+          <Hourglass className="h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">答案出齊就核對一次</span> · The cross-check runs once, when
+            the answers are in.
+          </span>
+          {onStopJudge ? (
+            <button
+              type="button"
+              onClick={onStopJudge}
+              className="text-xs font-semibold text-cs-ink-3 underline-offset-2 hover:text-cs-danger hover:underline"
+            >
+              Cancel · 取消
+            </button>
+          ) : null}
+        </div>
+      ) : !hasVerdict && (finished.length > 1 || queueable) ? (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
           <button
             type="button"
             disabled={judging || Boolean(blocked)}
-            onClick={() => onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)}
+            onClick={() =>
+              queueable
+                ? onQueueCrossCheck?.(DEFAULT_JUDGE, judgeEffort)
+                : onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)
+            }
             className="cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Scale className="h-4 w-4" aria-hidden="true" />
-            {judging ? "Cross-checking..." : "核對答案 · Run the cross-check"}
+            {judging
+              ? "Cross-checking..."
+              : queueable
+                ? "核對答案 · Cross-check when they are in"
+                : "核對答案 · Run the cross-check"}
           </button>
           <span className="text-xs text-cs-ink-3">
             {blocked ||
-              `${providerDisplayName(DEFAULT_JUDGE.provider, DEFAULT_JUDGE.variant)} grades ${toJudge.length} solutions - one model call. `}
+              (queueable
+                ? `${judgeName} grades the answers once they are all in - one model call. `
+                : `${judgeName} grades ${toJudge.length} solutions - one model call. `)}
             <button type="button" onClick={scrollToCrossCheck} className="font-semibold text-cs-accent underline-offset-2 hover:underline">
               Choose the judge
             </button>
