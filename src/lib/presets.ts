@@ -5,6 +5,9 @@
 // Careful was for the first few hours): two calls, and the answer summary
 // says whether its two answers agree; Careful is one tap away for a
 // question where a misread diagram or a plausible wrong answer would cost.
+// The page opens on Quick every time (the owner, 4 October 2026): the mode
+// picked last is not remembered - it was, and a student who once picked
+// Careful kept getting it.
 
 import type { EffortKey } from "../../shared/prompt";
 import { DEFAULT_SOLVERS, type ProviderKey } from "../../shared/providers";
@@ -55,21 +58,14 @@ export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blur
   },
 ];
 
-const MODE_KEY = "civilsolve:mode";
+/** The mode the page opens on, every time. */
+export const DEFAULT_MODE: SolveMode = "quick";
 
-export function loadMode(): SolveMode {
+/** The mode the page remembered until 4 October 2026, cleared from the browser. */
+export function forgetSavedMode() {
   try {
-    const saved = window.localStorage.getItem(MODE_KEY);
-    return saved === "quick" || saved === "custom" || saved === "careful" ? saved : "quick";
+    window.localStorage.removeItem("civilsolve:mode");
   } catch {
-    return "quick";
-  }
-}
-
-export function saveMode(mode: SolveMode) {
-  try {
-    window.localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    // Only the preference is lost.
+    // Nothing to clear.
   }
 }

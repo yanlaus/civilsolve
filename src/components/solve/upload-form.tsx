@@ -48,7 +48,7 @@ import {
 import { isAcceptedUpload, isPdfFile, type UploadItem } from "@/lib/attachments";
 import { parsePageSpec } from "@/lib/page-range";
 import { STEP_IDS } from "@/lib/journey";
-import { loadMode, MODES, PRESETS, saveMode, type Preset, type SolveMode } from "@/lib/presets";
+import { DEFAULT_MODE, forgetSavedMode, MODES, PRESETS, type Preset, type SolveMode } from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
 
 type QueuedFile = {
@@ -176,8 +176,9 @@ export function UploadForm({
   const [notes, setNotes] = useState("");
   // Careful, Quick or Custom (lib/presets.ts): a preset fills in the settings
   // below and hides them; Custom shows them all.
-  const [mode, setMode] = useState<SolveMode>(loadMode);
-  const [verifyEnabled, setVerifyEnabled] = useState(() => presetOf(loadMode())?.verify ?? false);
+  const [mode, setMode] = useState<SolveMode>(DEFAULT_MODE);
+  useEffect(forgetSavedMode, []);
+  const [verifyEnabled, setVerifyEnabled] = useState(() => presetOf(DEFAULT_MODE)?.verify ?? false);
   const [interpreterA, setInterpreterA] = useState<ModelChoice>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
@@ -190,13 +191,13 @@ export function UploadForm({
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
   const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(DEFAULT_VARIANTS);
-  const [effort, setEffort] = useState<EffortKey>(() => presetOf(loadMode())?.effort ?? "high");
+  const [effort, setEffort] = useState<EffortKey>(() => presetOf(DEFAULT_MODE)?.effort ?? "high");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(
-    () => presetOf(loadMode())?.providers ?? DEFAULT_SOLVERS,
+    () => presetOf(DEFAULT_MODE)?.providers ?? DEFAULT_SOLVERS,
   );
   // The cross-check, run by itself once the solutions are in (3 October
   // 2026; until then it was started from the solutions only).
-  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(loadMode())?.autoCheck ?? false);
+  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(DEFAULT_MODE)?.autoCheck ?? false);
   const [autoJudge, setAutoJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
   const [autoJudgeEffortPick, setAutoJudgeEffortPick] = useState<EffortKey>("high");
   /** The Custom settings, kept while a preset is picked, for when the user comes back. */
@@ -360,7 +361,6 @@ export function UploadForm({
       setAutoJudgeEffortPick(saved.judgeEffort);
     }
     setMode(next);
-    saveMode(next);
   }
 
   // A floor above a ceiling leaves no level that suits every solver. Nothing
