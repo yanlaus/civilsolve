@@ -73,6 +73,9 @@ const VERIFIED_INTERPRETATION_FIELDS = [
   ...INTERPRETATION_FIELDS,
   "discrepancies_chinese",
   "traditional_chinese",
+  "agreement",
+  "conclusion",
+  "conclusion_chinese",
 ] as const;
 
 /**
@@ -254,6 +257,26 @@ export function buildInterpretPrompt(
 const CHINESE_DISCREPANCIES =
   "In the `discrepancies_chinese` field, write the `discrepancies` again in Traditional Chinese as written in Hong Kong, in the same Markdown and the same `$...$` math: translate every ordinary word; keep numbers, units, symbols and formulas exactly as in English.";
 
+/**
+ * The comparison summed up, which the review step shows first (the owner,
+ * 3 October 2026: the student should not have to read the discrepancies to
+ * learn whether the readers agreed).
+ */
+function conclusionRule(what: "readings" | "changes") {
+  const agreement =
+    what === "readings"
+      ? "In `agreement`, write `agree` when the two interpretations say the same (wording aside), `minor` when they differ only in ways that change no value, dimension, angle, support, load or requirement the solution needs, and `differ` when they differ in any of those."
+      : "In `agreement`, write `agree` when nothing in the reading needed to change, `minor` when only wording or layout changed, and `differ` when a value, dimension, angle, support, load or requirement changed.";
+  const upshot =
+    what === "readings"
+      ? "one short sentence saying whether the two readings agree; only when they do not, add at most three `- ` bullets, a few words each, naming the key differences and which reading you kept"
+      : "one short sentence saying what changed; only when something did, add at most three `- ` bullets, a few words each, naming the key changes";
+  return [
+    `Sum it up for the student, who reads it first: ${agreement}`,
+    `In \`conclusion_chinese\`, in Traditional Chinese as written in Hong Kong: ${upshot} (numbers, units and symbols in the same \`$...$\` math as in English). In \`conclusion\`, the same in English. Keep both short - the full account is in \`discrepancies\`.`,
+  ];
+}
+
 /** The reconciler's Traditional Chinese version of the whole reading. */
 const CHINESE_READING =
   "In the `traditional_chinese` field, write your whole corrected interpretation again - problem, diagram, given quantities and what is required, in that order, not the discrepancies - in Traditional Chinese as written in Hong Kong, each part opening with a bold label on a line of its own (**題目：**, **圖示：**, **已知：**, **所求：**). Translate every ordinary word (pipe, jet, beam, support, ethyl alcohol...); keep the figure's own labels (such as Fig. B.8b) as they are, and write every number with its unit, symbol, variable name and formula exactly as in the English fields, in the same `$...$` math, for example `$W = 0.5\\,\\text{kN}$`, `$P_A$`, `$30^\\circ$`. Every other field stays in English.";
@@ -276,6 +299,7 @@ export function buildReviseReadingPrompt(
     "The current reading is laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
     "In the `discrepancies` field, list what you changed from the current reading and why (or state that nothing needed to change).",
     CHINESE_DISCREPANCIES,
+    ...conclusionRule("changes"),
     CHINESE_READING,
     ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
@@ -319,6 +343,7 @@ export function buildVerifyPrompt(
     "The two interpretations are laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
     "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
     CHINESE_DISCREPANCIES,
+    ...conclusionRule("readings"),
     CHINESE_READING,
     ...READING_FORMAT,
     "Return JSON matching the required schema exactly.",
