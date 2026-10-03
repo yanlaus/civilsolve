@@ -1,8 +1,10 @@
 // How a run is set up, in one choice (3 October 2026): a student picks
 // "Careful" or "Quick" and the form fills in the solvers, the thinking
 // level, the reading check and the cross-check; "Custom" is the full form,
-// as it was before. Careful is the default - a misread diagram and a
-// plausible wrong answer are the two failures the app exists to catch.
+// as it was before. Quick is the default (the owner's call, 3 October 2026 -
+// Careful was for the first few hours): two calls, and the answer summary
+// says whether its two answers agree; Careful is one tap away for a
+// question where a misread diagram or a plausible wrong answer would cost.
 
 import type { EffortKey } from "../../shared/prompt";
 import { DEFAULT_SOLVERS, type ProviderKey } from "../../shared/providers";
@@ -54,9 +56,9 @@ const MODE_KEY = "civilsolve:mode";
 export function loadMode(): SolveMode {
   try {
     const saved = window.localStorage.getItem(MODE_KEY);
-    return saved === "quick" || saved === "custom" || saved === "careful" ? saved : "careful";
+    return saved === "quick" || saved === "custom" || saved === "careful" ? saved : "quick";
   } catch {
-    return "careful";
+    return "quick";
   }
 }
 
