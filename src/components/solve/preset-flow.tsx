@@ -2,9 +2,11 @@
 // logos (the owner asked for icons instead of a line of names, 3 October
 // 2026): read the question (two readers, then the reconciler), solve, then
 // cross-check. Each logo carries its model's name as a tooltip and for
-// screen readers.
+// screen readers. A stage the run leaves out is still drawn, greyed and
+// marked "Skipped" (Quick reads and checks nothing - the owner wanted the
+// same three stages there too).
 
-import { ArrowRight, BookOpen, Brain, Calculator, Scale } from "lucide-react";
+import { ArrowRight, BookOpen, Brain, Calculator, Minus, Scale } from "lucide-react";
 import { providerDisplayName, type ModelChoice } from "../../../shared/providers";
 import { ProviderLogo } from "./provider-logo";
 
@@ -21,24 +23,42 @@ function Model({ choice }: { choice: ModelChoice }) {
   );
 }
 
+/** A stage this run leaves out: an empty slot where the models would be. */
+function Skipped() {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-cs-ink-3">
+      <span
+        aria-hidden="true"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-cs-line"
+      >
+        <Minus className="h-3.5 w-3.5" />
+      </span>
+      Skipped · 略過
+    </span>
+  );
+}
+
 function Stage({
   icon: Icon,
   label,
   chinese,
+  off = false,
   children,
 }: {
   icon: typeof BookOpen;
   label: string;
   chinese: string;
-  children: React.ReactNode;
+  /** Left out of this run: drawn greyed, with "Skipped" in place of models. */
+  off?: boolean;
+  children?: React.ReactNode;
 }) {
   return (
-    <li className="flex flex-col gap-1.5">
+    <li className={`flex flex-col gap-1.5 ${off ? "opacity-60" : ""}`}>
       <span className="flex items-center gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-cs-ink-3">
-        <Icon className="h-3.5 w-3.5 text-cs-accent" aria-hidden="true" />
+        <Icon className={`h-3.5 w-3.5 ${off ? "text-cs-ink-3" : "text-cs-accent"}`} aria-hidden="true" />
         {label} · {chinese}
       </span>
-      <span className="flex flex-wrap items-center gap-1.5">{children}</span>
+      <span className="flex flex-wrap items-center gap-1.5">{off ? <Skipped /> : children}</span>
     </li>
   );
 }
@@ -69,18 +89,18 @@ export function PresetFlow({
 }) {
   return (
     <ol className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-3" aria-label="What this run does">
-      {readers ? (
-        <>
-          <Stage icon={BookOpen} label="Read" chinese="讀題">
+      <Stage icon={BookOpen} label="Read" chinese="讀題" off={!readers}>
+        {readers ? (
+          <>
             <Model choice={readers[0]} />
             <Model choice={readers[1]} />
             <ArrowRight className="h-3.5 w-3.5 text-cs-ink-3" aria-hidden="true" />
             <span className="sr-only">then reconciled by</span>
             <Model choice={reconciler} />
-          </Stage>
-          <Step />
-        </>
-      ) : null}
+          </>
+        ) : null}
+      </Stage>
+      <Step />
       <Stage icon={Calculator} label="Solve" chinese="解題">
         {solvers.length ? (
           solvers.map((choice) => <Model key={choice.provider} choice={choice} />)
@@ -96,14 +116,10 @@ export function PresetFlow({
           <span className="sr-only"> thinking</span>
         </span>
       </Stage>
-      {judge ? (
-        <>
-          <Step />
-          <Stage icon={Scale} label="Check" chinese="核對">
-            <Model choice={judge} />
-          </Stage>
-        </>
-      ) : null}
+      <Step />
+      <Stage icon={Scale} label="Check" chinese="核對" off={!judge}>
+        {judge ? <Model choice={judge} /> : null}
+      </Stage>
     </ol>
   );
 }
