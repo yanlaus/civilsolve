@@ -20,6 +20,7 @@ import type { ProviderArtifact } from "../../../shared/solution";
 import type { SolutionStep } from "../../../shared/steps";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { effortBand } from "@/lib/effort-band";
+import { prefersReducedMotion } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
 import { ERROR_BOX, ProgressBox, STOPPED_BOX, TIMEOUT_BOX } from "./task-status";
@@ -39,6 +40,7 @@ export function AskPanel({
   providerStatus,
   disabledReason,
   step,
+  stepPickedAt,
   onClearStep,
   onAsk,
   onStop,
@@ -59,6 +61,8 @@ export function AskPanel({
   disabledReason?: string;
   /** The step a question will quote, when one was picked. */
   step: SolutionStep | null;
+  /** When the step was picked: each pick brings the question box into view. */
+  stepPickedAt?: number;
   onClearStep: () => void;
   onAsk: (question: string, writer: AskWriter, step?: SolutionStep) => void;
   onStop: (id: string) => void;
@@ -79,12 +83,21 @@ export function AskPanel({
     if (thread.length) setOpen(true);
   }, [thread.length]);
 
-  // A step picked from beside the working opens the fold, ready to type.
+  // A step picked from beside the working opens the fold and takes the
+  // student to the question box, in the middle of the screen, ready to type -
+  // a focus alone left it at the screen's edge, or out of sight under a long
+  // solution (the owner, 3 October 2026).
   useEffect(() => {
     if (!step) return;
     setOpen(true);
-    requestAnimationFrame(() => box.current?.focus({ preventScroll: false }));
-  }, [step]);
+    const frame = requestAnimationFrame(() => {
+      const element = box.current;
+      if (!element) return;
+      element.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+      element.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [step, stepPickedAt]);
 
   const send = () => {
     if (!question.trim() || disabledReason) return;

@@ -7,34 +7,45 @@ import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Loader2, Minus, X } from "lucide-react";
 import type { JourneyStep, StepState } from "@/lib/journey";
 
+// One colour for the way through (the theme's accent), grey for what is
+// still ahead; a step left out keeps a dashed outline. Every dot sits in a
+// ring of the page colour, so the track stops short of it.
+const PAGE_RING = "shadow-[0_0_0_4px_var(--cs-page)]";
+const ACTIVE_RING = "shadow-[0_0_0_4px_var(--cs-page),0_0_0_7px_var(--cs-ring)]";
+
 const DOT: Record<StepState, string> = {
-  todo: "border-cs-line bg-cs-surface text-cs-ink-3",
-  now: "border-cs-accent bg-cs-accent text-cs-on-accent",
-  running: "border-cs-accent bg-cs-surface text-cs-accent",
-  queued: "border-dashed border-cs-accent bg-cs-surface text-cs-accent",
-  yourTurn: "border-cs-accent bg-cs-accent text-cs-on-accent shadow-[0_0_0_4px_var(--cs-ring)]",
-  done: "border-cs-success bg-cs-success text-white",
-  skipped: "border-dashed border-cs-line bg-cs-surface text-cs-ink-3",
-  failed: "border-cs-danger bg-cs-surface text-cs-danger",
+  todo: `border-cs-line bg-cs-surface text-cs-ink-3 ${PAGE_RING}`,
+  now: `border-cs-accent bg-cs-surface text-cs-accent ${ACTIVE_RING}`,
+  running: `border-cs-accent bg-cs-surface text-cs-accent ${ACTIVE_RING}`,
+  queued: `border-dashed border-cs-accent bg-cs-surface text-cs-accent ${PAGE_RING}`,
+  yourTurn: `border-cs-accent bg-cs-accent text-cs-on-accent ${ACTIVE_RING}`,
+  done: `border-cs-accent bg-cs-accent text-cs-on-accent ${PAGE_RING}`,
+  skipped: `border-dashed border-cs-line bg-cs-surface text-cs-ink-3 ${PAGE_RING}`,
+  failed: `border-cs-danger bg-cs-surface text-cs-danger ${PAGE_RING}`,
 };
 
 function StepDot({ state, number }: { state: StepState; number: number }) {
   return (
-    <span
-      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${DOT[state]}`}
-      aria-hidden="true"
-    >
-      {state === "done" ? (
-        <Check className="h-3.5 w-3.5" strokeWidth={3} />
-      ) : state === "running" ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : state === "skipped" ? (
-        <Minus className="h-3.5 w-3.5" />
-      ) : state === "failed" ? (
-        <X className="h-3.5 w-3.5" strokeWidth={3} />
-      ) : (
-        number
-      )}
+    <span className="relative flex h-7 w-7 shrink-0" aria-hidden="true">
+      {/* Waiting for the student: a soft pulse round the dot. */}
+      {state === "yourTurn" ? (
+        <span className="absolute inset-0 animate-ping rounded-full bg-cs-accent opacity-30 motion-reduce:hidden" />
+      ) : null}
+      <span
+        className={`relative flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors duration-300 ${DOT[state]}`}
+      >
+        {state === "done" ? (
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+        ) : state === "running" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : state === "skipped" ? (
+          <Minus className="h-3.5 w-3.5" />
+        ) : state === "failed" ? (
+          <X className="h-3.5 w-3.5" strokeWidth={3} />
+        ) : (
+          number
+        )}
+      </span>
     </span>
   );
 }
@@ -44,6 +55,11 @@ function spoken(step: JourneyStep) {
   return `${step.label}: ${step.detail?.[0] ?? step.state}`;
 }
 
+/**
+ * A stepper with the labels under the dots, joined by one track that fills
+ * in as the run moves on (the owner found the dashes between the steps
+ * unprofessional, 3 October 2026).
+ */
 export function JourneyBar({
   steps,
   current,
@@ -56,21 +72,28 @@ export function JourneyBar({
   return (
     <nav
       aria-label="Progress"
-      className="sticky top-0 z-30 -mx-5 mb-6 border-b border-cs-line-soft bg-cs-page/95 px-3 py-2 backdrop-blur sm:-mx-6 sm:px-6 print:hidden"
+      className="sticky top-0 z-30 -mx-5 mb-6 border-b border-cs-line-soft bg-cs-page/95 px-2 pb-2 pt-3 backdrop-blur sm:-mx-6 sm:px-6 print:hidden"
     >
-      <ol className="flex items-start">
+      <ol className="flex">
         {steps.map((step, index) => {
           const isCurrent = step.key === current.key;
           const jumpable = Boolean(step.target);
+          const quiet = step.state === "todo" || step.state === "skipped";
           return (
-            <li key={step.key} className="flex min-w-0 flex-1 items-start">
+            <li key={step.key} className="relative min-w-0 flex-1">
+              {/* The track from the step before to this one: filled once the
+                  run has got here (a step left out is passed through). */}
               {index > 0 ? (
                 <span
                   aria-hidden="true"
-                  className={`mt-3.5 hidden h-0.5 w-4 shrink-0 rounded sm:block lg:w-8 ${
-                    step.state === "todo" || step.state === "skipped" ? "bg-cs-line" : "bg-cs-accent"
-                  }`}
-                />
+                  className="absolute left-[-50%] right-1/2 top-[13px] h-0.5 overflow-hidden rounded-full bg-cs-line-soft"
+                >
+                  <span
+                    className={`block h-full rounded-full bg-cs-accent transition-[width] duration-500 ease-out ${
+                      step.state === "todo" ? "w-0" : "w-full"
+                    }`}
+                  />
+                </span>
               ) : null}
               <button
                 type="button"
@@ -78,38 +101,40 @@ export function JourneyBar({
                 onClick={() => onJump(step)}
                 aria-current={isCurrent ? "step" : undefined}
                 aria-label={spoken(step)}
-                className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-cs px-1 py-1 text-center transition sm:flex-row sm:items-start sm:gap-2 sm:px-2 sm:text-left ${
-                  jumpable ? "hover:bg-cs-surface" : "cursor-default"
-                } ${isCurrent ? "bg-cs-surface shadow-[0_1px_3px_var(--cs-shadow)]" : ""}`}
+                className={`group relative z-10 flex w-full flex-col items-center gap-1.5 px-1 text-center outline-none ${
+                  jumpable ? "cursor-pointer" : "cursor-default"
+                }`}
               >
                 <StepDot state={step.state} number={index + 1} />
-                <span className="min-w-0">
+                <span className="w-full min-w-0">
                   <span
-                    className={`block truncate text-xs font-semibold ${
-                      step.state === "skipped" || step.state === "todo" ? "text-cs-ink-3" : "text-cs-ink"
-                    }`}
+                    className={`block truncate text-xs font-semibold transition-colors ${
+                      isCurrent ? "text-cs-accent" : quiet ? "text-cs-ink-3" : "text-cs-ink"
+                    } ${jumpable ? "group-hover:text-cs-accent group-focus-visible:underline" : ""}`}
                   >
                     <span className="sm:hidden">{step.chinese}</span>
-                    <span className="hidden sm:inline">{step.label}</span>
+                    <span className="hidden sm:inline">
+                      {step.label} <span className="font-normal text-cs-ink-3">{step.chinese}</span>
+                    </span>
                   </span>
-                  {/* Under it: on a phone where it stands, in Chinese; on a
-                      wider screen the Chinese name, then where it stands. */}
-                  <span className="block truncate text-[0.68rem] text-cs-ink-3">
-                    <span className="hidden sm:inline">{step.chinese}</span>
+                  <span
+                    className={`block truncate text-[0.68rem] ${
+                      step.state === "yourTurn"
+                        ? "font-semibold text-cs-accent"
+                        : step.state === "failed"
+                          ? "text-cs-danger"
+                          : "text-cs-ink-3"
+                    }`}
+                  >
                     {step.detail ? (
-                      <span
-                        className={
-                          step.state === "yourTurn"
-                            ? "font-semibold text-cs-accent"
-                            : step.state === "failed"
-                              ? "text-cs-danger"
-                              : ""
-                        }
-                      >
+                      <>
                         <span className="sm:hidden">{step.detail[1]}</span>
-                        <span className="hidden sm:inline"> · {step.detail[0]}</span>
-                      </span>
-                    ) : null}
+                        <span className="hidden sm:inline">{step.detail[0]}</span>
+                      </>
+                    ) : (
+                      // Keeps every step the same height.
+                      <span aria-hidden="true">&nbsp;</span>
+                    )}
                   </span>
                 </span>
               </button>

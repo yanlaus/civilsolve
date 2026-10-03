@@ -34,6 +34,7 @@ import {
   type RunVariants,
 } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
+import { ProviderLogo } from "./provider-logo";
 
 const PANEL_CLASS =
   "cs-panel rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)] print:hidden";
@@ -230,6 +231,7 @@ export function CrossCheckControls({
                 onChange={() => togglePicked(key)}
                 className="h-4 w-4 accent-cs-accent"
               />
+              <ProviderLogo provider={key} className="h-4 w-4 shrink-0" />
               {nameOf(key)}
             </label>
           ))}

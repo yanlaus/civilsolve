@@ -144,7 +144,7 @@ function currentStep([upload, reading, answers, check]: JourneyStep[]): JourneyS
   return upload;
 }
 
-function prefersReducedMotion() {
+export function prefersReducedMotion() {
   try {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   } catch {
