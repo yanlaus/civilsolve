@@ -6,8 +6,24 @@
 // reconciler can be asked for the reading again, with the user's instructions.
 
 import { lazy, Suspense, useState } from "react";
-import { Check, ChevronDown, Eye, Image as ImageIcon, Languages, Pencil, TriangleAlert, X } from "lucide-react";
-import type { InterpretationResult } from "../../../shared/interpretation";
+import {
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  Eye,
+  Image as ImageIcon,
+  Info,
+  Languages,
+  Pencil,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import {
+  readingAgreement,
+  type InterpretationResult,
+  type ReadingAgreement,
+} from "../../../shared/interpretation";
 import { STEP_IDS } from "@/lib/journey";
 import { formatClock, useNow } from "@/lib/progress";
 import { StatusRow } from "./interpret-progress";
@@ -18,12 +34,20 @@ import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 const MathProse = lazy(() => import("./math-prose"));
 
 /** Rendered Markdown and LaTeX, with the plain text in its place while the renderer loads. */
-export function RenderedText({ source, chinese = false }: { source: string; chinese?: boolean }) {
+export function RenderedText({
+  source,
+  chinese = false,
+  className,
+}: {
+  source: string;
+  chinese?: boolean;
+  className?: string;
+}) {
   return (
     <Suspense
       fallback={<div className="whitespace-pre-wrap text-sm leading-7 text-cs-ink">{source}</div>}
     >
-      <MathProse source={source} chinese={chinese} />
+      <MathProse source={source} chinese={chinese} className={className} />
     </Suspense>
   );
 }
@@ -36,6 +60,105 @@ function joinNames(names: string[]) {
 }
 
 const TAB_CLASS = "inline-flex items-center gap-1 px-3 py-1 transition";
+
+/** The headline per agreement: for two readings compared, and for a re-generated one. */
+const VERDICT: Record<
+  ReadingAgreement,
+  { readings: [string, string]; changes: [string, string]; box: string; icon: typeof Info }
+> = {
+  agree: {
+    readings: ["兩個讀法一致", "The two readings agree"],
+    changes: ["冇改動", "Nothing changed"],
+    box: "border-[#c9dcc4] bg-[#eef6ea] text-[#2f6b2c]",
+    icon: CheckCircle2,
+  },
+  minor: {
+    readings: ["大致一致，有細微分別", "Minor differences"],
+    changes: ["小改動", "Small changes"],
+    box: "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
+    icon: Info,
+  },
+  differ: {
+    readings: ["兩個讀法有分歧 - 請核對", "The readings differ - check these"],
+    changes: ["有重要改動 - 請核對", "Key changes - check these"],
+    box: "border-[#f3cf9f] bg-[rgba(230,126,34,0.10)] text-[#a85a12]",
+    icon: CircleAlert,
+  },
+};
+
+/**
+ * The comparison of the two readings, summed up first (the owner, 3 October
+ * 2026): whether they agree and the key differences, in Chinese then
+ * English, with the full discrepancies - Chinese first too - a fold away.
+ * A reading from before the conclusion existed shows the discrepancies open.
+ */
+function ReadingConclusion({
+  interpretation,
+  revised,
+}: {
+  interpretation: InterpretationResult;
+  revised: boolean;
+}) {
+  const agreement = readingAgreement(interpretation.agreement);
+  const chinese = interpretation.conclusion_chinese?.trim() ?? "";
+  const english = interpretation.conclusion?.trim() ?? "";
+  const hasConclusion = Boolean(agreement || chinese || english);
+  const verdict = agreement ? VERDICT[agreement] : null;
+  const [headline, headlineEnglish] = verdict
+    ? revised
+      ? verdict.changes
+      : verdict.readings
+    : revised
+      ? ["改動摘要", "What changed"]
+      : ["兩份解讀的比較", "How the two readings compare"];
+  const Icon = verdict?.icon ?? Info;
+  const detailsChinese = interpretation.discrepancies_chinese?.trim() ?? "";
+  const detailsEnglish = interpretation.discrepancies?.trim() ?? "";
+
+  return (
+    <div
+      className={`mb-3 rounded-cs border px-4 py-3 text-sm ${
+        verdict?.box ?? "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]"
+      }`}
+    >
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold">
+        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="text-base">{headline}</span>
+        <span className="font-normal opacity-80">· {headlineEnglish}</span>
+      </p>
+      {chinese ? (
+        <div className="mt-1">
+          <RenderedText source={chinese} chinese />
+        </div>
+      ) : null}
+      {english ? (
+        <div className="mt-1">
+          <RenderedText source={english} className="!text-[0.82rem] !leading-6 opacity-80" />
+        </div>
+      ) : null}
+      {detailsChinese || detailsEnglish ? (
+        <details open={!hasConclusion} className="group/details mt-2 border-t border-current/20 pt-2">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold">
+            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+            {revised ? "詳細改動 · Full list of changes" : "詳細分歧 · Full details"}
+            <ChevronDown className="h-3.5 w-3.5 transition group-open/details:rotate-180" aria-hidden="true" />
+          </summary>
+          {detailsChinese ? (
+            <div className="mt-2">
+              <RenderedText source={detailsChinese} chinese />
+            </div>
+          ) : null}
+          {detailsEnglish ? (
+            <div className={detailsChinese ? "mt-2 border-t border-current/20 pt-2" : "mt-2"}>
+              <div className="mb-1 text-[0.7rem] font-semibold uppercase tracking-[0.15em] opacity-80">English</div>
+              <RenderedText source={detailsEnglish} />
+            </div>
+          ) : null}
+        </details>
+      ) : null}
+    </div>
+  );
+}
 
 export function InterpretationReview({
   images = [],
@@ -86,6 +209,10 @@ export function InterpretationReview({
         <Eye className="h-4 w-4 text-cs-accent" />
         Review the interpreted question
       </p>
+
+      {interpretation.discrepancies || interpretation.conclusion || interpretation.conclusion_chinese ? (
+        <ReadingConclusion interpretation={interpretation} revised={Boolean(revisedWith)} />
+      ) : null}
       <p className="mb-3 text-sm text-cs-ink-3">
         {note
           ? "Check the reading below — especially the diagram geometry, supports, and loads — fix anything that is wrong, then confirm to start solving."
@@ -115,26 +242,6 @@ export function InterpretationReview({
       {reviseError ? (
         <div className="mb-3">
           <RevisionNotice message={reviseError} />
-        </div>
-      ) : null}
-
-      {interpretation.discrepancies ? (
-        <div className="mb-3 rounded-cs border border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] px-4 py-3 text-sm text-[#7a5d10]">
-          <span className="font-semibold">
-            {revisedWith ? "What changed:" : "Discrepancies found between the two readings:"}
-          </span>
-          <div className="mt-1">
-            <RenderedText source={interpretation.discrepancies} />
-          </div>
-          {interpretation.discrepancies_chinese?.trim() ? (
-            <div className="mt-2 border-t border-[#e8d9a8] pt-2">
-              <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
-                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-                {revisedWith ? "改動 · 繁體中文" : "兩份解讀的分歧 · 繁體中文"}
-              </div>
-              <RenderedText source={interpretation.discrepancies_chinese} chinese />
-            </div>
-          ) : null}
         </div>
       ) : null}
 

@@ -31,7 +31,35 @@ export type InterpretationResult = {
    * the solvers are given the English. Empty for the interpret stage.
    */
   traditional_chinese: string;
+  /**
+   * Verify (and revise) stage only, since 3 October 2026: how far the two
+   * readings agree - "agree", "minor" or "differ" (revise: how much the
+   * reading changed) - read with `readingAgreement`. The review step leads
+   * with it, so the student need not read the discrepancies to know.
+   */
+  agreement: string;
+  /** The upshot in a sentence, and the key differences in a few bullets: English. */
+  conclusion: string;
+  /** The same in Traditional Chinese, shown first. */
+  conclusion_chinese: string;
 };
+
+export type ReadingAgreement = "agree" | "minor" | "differ";
+
+const AGREEMENTS: ReadingAgreement[] = ["agree", "minor", "differ"];
+
+/** The reconciler's `agreement`, or null when it left it out or wrote something else. */
+export function readingAgreement(value: string | undefined): ReadingAgreement | null {
+  const text = (value ?? "").trim().toLowerCase();
+  if (!text) return null;
+  if ((AGREEMENTS as string[]).includes(text)) return text as ReadingAgreement;
+  // Schema-less rungs write it in words: "minor differences" is minor, and
+  // "disagree" is checked before "agree".
+  if (/minor|small|slight|partial/.test(text)) return "minor";
+  if (/disagree|differ|major|conflict/.test(text)) return "differ";
+  if (/agree|same|consistent|identical/.test(text)) return "agree";
+  return null;
+}
 
 const READING_PROPERTIES = {
   interpreted_problem: { type: "string" },
@@ -49,7 +77,10 @@ export const interpretationSchema = {
   required: Object.keys(READING_PROPERTIES),
 } as const;
 
-/** What the reconciler returns: a reading plus its Traditional Chinese version. */
+/**
+ * What the reconciler returns: a reading plus its Traditional Chinese
+ * version, and the comparison summed up - agreement and a short conclusion.
+ */
 export const verifiedInterpretationSchema = {
   type: "object",
   additionalProperties: false,
@@ -57,8 +88,18 @@ export const verifiedInterpretationSchema = {
     ...READING_PROPERTIES,
     discrepancies_chinese: { type: "string" },
     traditional_chinese: { type: "string" },
+    agreement: { type: "string", enum: AGREEMENTS },
+    conclusion: { type: "string" },
+    conclusion_chinese: { type: "string" },
   },
-  required: [...Object.keys(READING_PROPERTIES), "discrepancies_chinese", "traditional_chinese"],
+  required: [
+    ...Object.keys(READING_PROPERTIES),
+    "discrepancies_chinese",
+    "traditional_chinese",
+    "agreement",
+    "conclusion",
+    "conclusion_chinese",
+  ],
 } as const;
 
 /**
@@ -172,6 +213,10 @@ const FIELD_KEYS: Record<keyof InterpretationResult, string[]> = {
   discrepancies: ["discrepancies", "disagreements", "differences", "resolution"],
   discrepancies_chinese: ["discrepancies_chinese", "discrepancies_zh", "chinese_discrepancies"],
   traditional_chinese: ["traditional_chinese", "chinese", "zh_hant", "zh", "translation"],
+  agreement: ["agreement", "readings_agree", "consensus"],
+  // Not "summary": that is a name readers use for the problem statement.
+  conclusion: ["conclusion", "bottom_line", "verdict"],
+  conclusion_chinese: ["conclusion_chinese", "conclusion_zh", "chinese_conclusion"],
 };
 
 const PART_KEYS = ["problems", "parts", "questions", "sub_questions"];
@@ -256,6 +301,9 @@ export function parseInterpretation(
       discrepancies: "",
       discrepancies_chinese: "",
       traditional_chinese: "",
+      agreement: "",
+      conclusion: "",
+      conclusion_chinese: "",
     };
   }
 
@@ -265,6 +313,7 @@ export function parseInterpretation(
 
   const record = unwrap(parsed as Record<string, unknown>);
   const result = readReading(record);
+  result.agreement = readingAgreement(result.agreement) ?? "";
 
   if (!result.interpreted_problem && !result.diagram_description) {
     // Something came back, just not under any name above. On the last
