@@ -69,15 +69,77 @@ export const verifiedInterpretationSchema = {
  * on a line of its own, so a list that follows it stays a list.
  */
 export function interpretationToText(result: InterpretationResult) {
+  const sections = READING_SECTIONS.map(({ field, label, names }) => ({
+    label,
+    names,
+    body: stripLeadingLabel(result[field], names),
+  })).filter((section) => section.body);
   return [
-    result.interpreted_problem,
-    result.diagram_description ? `**Diagram:**\n${result.diagram_description}` : "",
-    result.given ? `**Given:**\n${result.given}` : "",
-    result.required ? `**Required:**\n${result.required}` : "",
+    problemWithoutSections(result.interpreted_problem, sections),
+    ...sections.map(({ label, body }) => `**${label}:**\n${body}`),
   ]
     .filter(Boolean)
     .join("\n\n")
     .trim();
+}
+
+/**
+ * The labelled parts of a reading, and what a model may call them. The
+ * reconciler and a revision are sent readings already flattened under these
+ * labels, and a model may write the label into the field again - the page
+ * then showed "Diagram:", "Given:" and "Required:" twice (3 October 2026).
+ */
+const READING_SECTIONS: Array<{
+  field: "diagram_description" | "given" | "required";
+  label: string;
+  names: string;
+}> = [
+  { field: "diagram_description", label: "Diagram", names: "diagram(?: description)?|figure(?: description)?" },
+  { field: "given", label: "Given", names: "given(?: (?:data|information|quantities))?|knowns?" },
+  { field: "required", label: "Required", names: "required(?: quantities)?|to find|find|unknowns?" },
+];
+
+/** A label line such as `**Diagram:**`, `**Given**:`, `Required:` or `### Diagram`. */
+function labelPattern(names: string, flags = "i") {
+  return new RegExp(
+    `^[ \\t]*(?:#{1,6}[ \\t]*)?(?:\\*\\*|__)?[ \\t]*(?:${names})[ \\t]*(?:\\*\\*|__)?[ \\t]*[:：][ \\t]*(?:\\*\\*|__)?[ \\t]*`,
+    flags,
+  );
+}
+
+/** The field without a label of its own at its start: the page adds one. */
+function stripLeadingLabel(text: string, names: string) {
+  const trimmed = text.trim();
+  const heading = new RegExp(`^#{1,6}[ \\t]*(?:\\*\\*|__)?(?:${names})(?:\\*\\*|__)?[ \\t]*(?:\\n|$)`, "i");
+  return trimmed.replace(heading, "").replace(labelPattern(names), "").trim();
+}
+
+/**
+ * The problem statement, cut where a model wrote the labelled parts into it
+ * as well - the reading written out whole in the first field, with the same
+ * parts in their own fields after it. Only when it reads as that copy: each
+ * label once, in the page's order, and what follows mostly in the fields
+ * already - a paper whose problems each have a "Given:" line keeps them.
+ */
+function problemWithoutSections(problem: string, sections: Array<{ names: string; body: string }>) {
+  const lines = problem.trim().split("\n");
+  const labelled = lines
+    .map((line, index) => ({ index, section: sections.findIndex(({ names }) => labelPattern(names).test(line)) }))
+    .filter(({ index, section }) => index > 0 && section !== -1);
+  if (!labelled.length) return problem.trim();
+  const order = labelled.map(({ section }) => section);
+  const once = new Set(order).size === order.length && order.every((section, i) => i === 0 || section > order[i - 1]);
+  const tail = lines.slice(labelled[0].index).join("\n");
+  const fields = sections.map(({ body }) => body).join("\n");
+  return once && mostlyIn(tail, fields) ? lines.slice(0, labelled[0].index).join("\n").trim() : problem.trim();
+}
+
+/** Whether most of the words and numbers of `text` are in `other` too. */
+function mostlyIn(text: string, other: string) {
+  const tokens = (value: string) => value.toLowerCase().match(/[a-z]{3,}|\d+(?:\.\d+)?/g) ?? [];
+  const known = new Set(tokens(other));
+  const words = tokens(text).filter((token) => !/^(?:diagram|given|required)$/.test(token));
+  return words.length > 0 && words.filter((token) => known.has(token)).length / words.length >= 0.6;
 }
 
 /**
