@@ -9,29 +9,46 @@
 // allowance used up, the browser service down - printing from the browser
 // is still there.
 //
-// "Send to WhatsApp" (4 October 2026, the owner's request, for an iPhone): a
-// web page cannot open WhatsApp with a file attached, so the PDF goes
-// through the share sheet (navigator.share with the file), where WhatsApp is
-// one of the apps. iOS opens the sheet only straight from a tap - not after
-// waiting for the server - so the page keeps the PDF it fetched and shares
-// it the moment the button is tapped; when the tap that started it has
-// expired by the time the PDF is made, the page asks for one more. A
-// browser that cannot share files sends WhatsApp a link to the PDF instead.
+// "WhatsApp" (4 October 2026, the owner's request): a web page cannot open
+// WhatsApp with a file attached, so
+// - on a phone or tablet the PDF goes through the share sheet
+//   (navigator.share with the file), where WhatsApp is one of the apps. iOS
+//   opens the sheet only straight from a tap - not after waiting for the
+//   server - so the page keeps the PDF it fetched and shares it the moment
+//   the button is tapped; when the tap that started it has expired by the
+//   time the PDF is made, the page asks for one more. A browser that cannot
+//   share files sends WhatsApp a link to the PDF instead;
+// - on a computer (5 October 2026) the PDF is downloaded, then WhatsApp Web
+//   opens in a new tab for the student to attach it to a chat. A browser
+//   blocks a tab opened long after the click, so when making the PDF took
+//   that long, the page asks for one more click to open WhatsApp.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Loader2, MessageCircle, Printer } from "lucide-react";
 import { formatClock, useNow } from "@/lib/progress";
 
+/** A word under the buttons on sending the PDF; `strong` when one more tap is needed. */
+type Nudge = { text: string; strong?: boolean };
+
 type PdfState =
   | { status: "idle" }
-  /** `forWhatsApp`: started by the WhatsApp button, so it is shared once made. */
+  /** `forWhatsApp`: started by the WhatsApp button, so it is sent once made. */
   | { status: "working"; startedAt: number; forWhatsApp: boolean }
   /**
    * `forever`: the server keeps the file for good; otherwise only while it
-   * keeps the answer. `file`: the PDF itself, kept for the share sheet.
-   * `nudge`: a word on sending it, after a share that could not open.
+   * keeps the answer. `file`: the PDF itself, kept for the share sheet or
+   * the download. `downloaded`: it is in the computer's downloads already,
+   * so the next click only opens WhatsApp.
    */
-  | { status: "ready"; url: string; forever: boolean; file: File | null; copied?: boolean; nudge?: string }
+  | {
+      status: "ready";
+      url: string;
+      forever: boolean;
+      file: File | null;
+      copied?: boolean;
+      downloaded?: boolean;
+      nudge?: Nudge;
+    }
   | { status: "error"; message: string };
 
 const DARK_BUTTON =
@@ -44,13 +61,29 @@ const WHATSAPP_BUTTON =
 const WHATSAPP_BUTTON_STRONG =
   "inline-flex items-center gap-1.5 rounded-cs border border-[#25D366] bg-[#25D366] font-semibold text-white shadow-[0_0_0_4px_rgba(37,211,102,0.2)] transition hover:bg-[#1ebe5a]";
 
+const WHATSAPP_WEB = "https://web.whatsapp.com/";
+
+/**
+ * Whether this is a phone or tablet - the share sheet - rather than a
+ * computer - download, then WhatsApp Web. An iPad reports itself as a Mac;
+ * its touch screen gives it away.
+ */
+function isMobileDevice() {
+  const agent = navigator.userAgent;
+  if (/iPhone|iPad|iPod|Android/i.test(agent)) return true;
+  if (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1) return true;
+  const hints = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (typeof hints?.mobile === "boolean") return hints.mobile;
+  return /Mobile/i.test(agent);
+}
+
 /** The file name the server gave the PDF. */
 function fileNameOf(response: Response) {
   const match = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "");
   return match?.[1] || "civilsolve.pdf";
 }
 
-/** Whether this browser can hand a file to the share sheet (iOS 15 and later, Android, Chrome on Windows...). */
+/** Whether this browser can hand a file to the share sheet (iOS 15 and later, Android...). */
 function canShareFile(file: File | null): file is File {
   try {
     return Boolean(file && typeof navigator.share === "function" && navigator.canShare?.({ files: [file] }));
@@ -59,7 +92,7 @@ function canShareFile(file: File | null): file is File {
   }
 }
 
-/** A WhatsApp message with the PDF's link, for a browser that cannot share the file itself. */
+/** A WhatsApp message with the PDF's link, for a phone browser that cannot share the file itself. */
 function whatsAppLink(url: string) {
   const absolute = new URL(url, window.location.href).toString();
   return `https://wa.me/?text=${encodeURIComponent(`CivilSolve PDF: ${absolute}`)}`;
@@ -82,7 +115,36 @@ async function shareFile(file: File): Promise<"shared" | "cancelled" | "blocked"
   }
 }
 
-const TAP_AGAIN = "The PDF is ready - tap WhatsApp again to open the share sheet, then pick WhatsApp.";
+/** Saves the PDF to the computer's downloads. */
+function downloadFile(file: File) {
+  const href = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+}
+
+/** WhatsApp Web in a new tab; false when the browser blocked it (the click was too long ago). */
+function openWhatsAppWeb() {
+  const tab = window.open(WHATSAPP_WEB, "_blank");
+  if (tab) tab.opener = null;
+  return Boolean(tab);
+}
+
+const TAP_AGAIN: Nudge = {
+  text: "The PDF is ready - tap WhatsApp again to open the share sheet, then pick WhatsApp.",
+  strong: true,
+};
+
+/** After the download, on a computer. */
+function desktopNudge(fileName: string, opened: boolean): Nudge {
+  return opened
+    ? { text: `Downloaded ${fileName}. In WhatsApp, open the chat and attach it - drag it in, or use the paperclip.` }
+    : { text: `Downloaded ${fileName}. Click WhatsApp again to open WhatsApp Web, then attach it to the chat.`, strong: true };
+}
 
 export function PdfButton({
   jobId,
@@ -97,6 +159,7 @@ export function PdfButton({
 }) {
   const [state, setState] = useState<PdfState>({ status: "idle" });
   const now = useNow(state.status === "working");
+  const mobile = useMemo(isMobileDevice, []);
   const size = small ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
   const icon = small ? "h-3.5 w-3.5" : "h-4 w-4";
 
@@ -111,21 +174,26 @@ export function PdfButton({
       const response = await fetch(url);
       if (response.ok) {
         // Read to the end, so the server has cached the whole file - and
-        // kept, so it can be shared without another wait.
+        // kept, so it can be sent without another wait.
         const bytes = await response.arrayBuffer();
         const file = new File([bytes], fileNameOf(response), { type: "application/pdf" });
         const ready = { status: "ready", url, forever: response.headers.get("x-pdf-kept") === "forever", file } as const;
         setState(ready);
-        if (forWhatsApp) {
-          if (!canShareFile(file)) {
-            setState({ ...ready, nudge: "This browser cannot attach the file, so WhatsApp gets a link to the PDF." });
-            return;
-          }
-          // Quick enough (a PDF made before), the tap still counts and the
-          // sheet opens; otherwise one more tap.
-          const outcome = await shareFile(file);
-          if (outcome === "blocked" || outcome === "failed") setState({ ...ready, nudge: TAP_AGAIN });
+        if (!forWhatsApp) return;
+        if (!mobile) {
+          downloadFile(file);
+          const opened = openWhatsAppWeb();
+          setState({ ...ready, downloaded: !opened, nudge: desktopNudge(file.name, opened) });
+          return;
         }
+        if (!canShareFile(file)) {
+          setState({ ...ready, nudge: { text: "This browser cannot attach the file, so WhatsApp gets a link to the PDF." } });
+          return;
+        }
+        // Quick enough (a PDF made before), the tap still counts and the
+        // sheet opens; otherwise one more tap.
+        const outcome = await shareFile(file);
+        if (outcome === "blocked" || outcome === "failed") setState({ ...ready, nudge: TAP_AGAIN });
         return;
       }
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -144,19 +212,34 @@ export function PdfButton({
     }
   }
 
-  async function sendToWhatsApp(file: File) {
+  async function shareToWhatsApp(file: File) {
     const outcome = await shareFile(file);
     setState((current) =>
       current.status !== "ready"
         ? current
         : outcome === "failed" || outcome === "blocked"
-          ? { ...current, nudge: "The share sheet did not open. Open the PDF and send it from there, or copy the link." }
+          ? {
+              ...current,
+              nudge: { text: "The share sheet did not open. Open the PDF and send it from there, or copy the link." },
+            }
           : { ...current, nudge: undefined },
     );
   }
 
+  /** On a computer: the PDF to the downloads (unless it is there already), then WhatsApp Web. */
+  function sendFromComputer(file: File, alreadyDownloaded: boolean) {
+    if (!alreadyDownloaded) downloadFile(file);
+    const opened = openWhatsAppWeb();
+    setState((current) =>
+      current.status === "ready"
+        ? { ...current, downloaded: !opened, nudge: desktopNudge(file.name, opened) }
+        : current,
+    );
+  }
+
   if (state.status === "ready") {
-    const shareable = canShareFile(state.file);
+    const file = state.file;
+    const whatsAppClass = `${state.nudge?.strong ? WHATSAPP_BUTTON_STRONG : WHATSAPP_BUTTON} ${size}`;
     return (
       <span className="inline-flex flex-col items-start gap-1.5">
         <span className="inline-flex flex-wrap items-center gap-2">
@@ -164,15 +247,24 @@ export function PdfButton({
             <ExternalLink className={icon} aria-hidden="true" />
             Open PDF
           </a>
-          {shareable ? (
+          {!mobile && file ? (
             <button
               type="button"
-              onClick={() => void sendToWhatsApp(state.file as File)}
-              className={`${state.nudge ? WHATSAPP_BUTTON_STRONG : WHATSAPP_BUTTON} ${size}`}
+              onClick={() => sendFromComputer(file, Boolean(state.downloaded))}
+              className={whatsAppClass}
+              title="Downloads the PDF, then opens WhatsApp Web to attach it to a chat"
+            >
+              <MessageCircle className={icon} aria-hidden="true" />
+              WhatsApp
+            </button>
+          ) : canShareFile(file) ? (
+            <button
+              type="button"
+              onClick={() => void shareToWhatsApp(file)}
+              className={whatsAppClass}
               title="Opens the share sheet with the PDF - pick WhatsApp, then the chat"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              {/* Short, like Open PDF beside it (the owner, 4 October 2026). */}
               WhatsApp
             </button>
           ) : (
@@ -192,7 +284,7 @@ export function PdfButton({
             {state.copied ? "Link copied" : "Copy link"}
           </button>
         </span>
-        {state.nudge ? <span className="text-xs font-semibold text-[#128C7E]">{state.nudge}</span> : null}
+        {state.nudge ? <span className="text-xs font-semibold text-[#128C7E]">{state.nudge.text}</span> : null}
         <span className="text-xs text-cs-ink-3">
           {state.forever
             ? "Saved on the server - the link keeps working."
@@ -229,16 +321,18 @@ export function PdfButton({
           onClick={() => void generate(true)}
           disabled={working}
           className={`${WHATSAPP_BUTTON} ${size}`}
-          title="Makes the PDF, then opens the share sheet with it - pick WhatsApp"
+          title={
+            mobile
+              ? "Makes the PDF, then opens the share sheet with it - pick WhatsApp"
+              : "Makes the PDF, downloads it, then opens WhatsApp Web to attach it to a chat"
+          }
         >
           {working && state.forWhatsApp ? (
             <Loader2 className={`${icon} animate-spin`} aria-hidden="true" />
           ) : (
             <MessageCircle className={icon} aria-hidden="true" />
           )}
-          {working && state.forWhatsApp
-            ? `Preparing... ${formatClock(now - state.startedAt)}`
-            : "WhatsApp"}
+          {working && state.forWhatsApp ? `Preparing... ${formatClock(now - state.startedAt)}` : "WhatsApp"}
         </button>
       </span>
       {state.status === "error" ? (
