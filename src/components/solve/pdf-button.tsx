@@ -82,7 +82,7 @@ async function shareFile(file: File): Promise<"shared" | "cancelled" | "blocked"
   }
 }
 
-const TAP_AGAIN = "The PDF is ready - tap Send to WhatsApp to open the share sheet, then pick WhatsApp.";
+const TAP_AGAIN = "The PDF is ready - tap WhatsApp again to open the share sheet, then pick WhatsApp.";
 
 export function PdfButton({
   jobId,
@@ -172,7 +172,8 @@ export function PdfButton({
               title="Opens the share sheet with the PDF - pick WhatsApp, then the chat"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              Send to WhatsApp · 傳去 WhatsApp
+              {/* Short, like Open PDF beside it (the owner, 4 October 2026). */}
+              WhatsApp
             </button>
           ) : (
             <a
@@ -183,7 +184,7 @@ export function PdfButton({
               title="Opens WhatsApp with a message holding the PDF's link"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              Send link on WhatsApp · 用 WhatsApp 傳連結
+              WhatsApp link
             </a>
           )}
           <button type="button" onClick={() => void copyLink(state.url)} className={`${LIGHT_BUTTON} ${size}`}>
@@ -236,7 +237,7 @@ export function PdfButton({
             <MessageCircle className={icon} aria-hidden="true" />
           )}
           {working && state.forWhatsApp
-            ? `Preparing for WhatsApp... ${formatClock(now - state.startedAt)}`
+            ? `Preparing... ${formatClock(now - state.startedAt)}`
             : "WhatsApp"}
         </button>
       </span>
