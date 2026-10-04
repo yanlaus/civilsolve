@@ -482,24 +482,32 @@ const STUDY_BRIEFS: Record<
   // the fastest one being its real strength, a line after every number on
   // what it means, and "that's all there is to it" at the end - in spoken
   // Cantonese with the English terms kept. The first version read like a
-  // textbook chapter (7,000 characters for a beam).
+  // textbook chapter (7,000 characters for a beam). Since 5 October 2026 (the
+  // owner's call) it also builds intuition the way 3Blue1Brown does - a
+  // question to be curious about, the key idea seen in a picture before it is
+  // a rule, the picture behind each step, a "what if" at the end - while
+  // staying as plain and short as before: the aim is easier, not longer. On a
+  // beam the old brief stated "the worst bending is where the shear is zero"
+  // as a rule, and its line on spacing and edge distances - meant for the
+  // bolt example - came out on a beam that has neither.
   explain: {
     what: "the question and its solution explained simply, the way a friendly tutor talks a student through it",
     audience: [
       "Pitch it at a secondary-school student who has not understood much of this subject yet. Talk to the student as \"you\", in plain words and short sentences, like a patient tutor sitting beside them - not like a textbook.",
       "Give the problem an everyday picture that fits it (two plates clamped between two cover plates are \"a sandwich\"; the ways a part can fail are its \"ways to break\", and the one that comes first is its real strength). A comparison of size must be right: 700 kN is the weight of about 70 tonnes, not of hundreds of cars.",
+      "Build the intuition before the formulas, the way 3Blue1Brown explains things: let the student see what happens in the picture first, so that each formula reads as that picture written down rather than a rule to memorise - where it helps, say which part of the picture a term stands for (\"$60 \\times 3$ is the sandbags' turning push about A\"). Answer the \"why\" a curious student would ask (\"why is the worst bend not right under the heavy bag?\") from the picture, in a sentence or two. Keep it as plain as the rest: no new jargon, no long detours.",
       "Name each technical term in English with a plain explanation the first time. After every number you work out, say in one line what it means physically (\"so at 183.8 kN the bolt snaps in two places\").",
-      "Keep it short: say each thing once and leave out what the student does not need - about 300 to 450 words for one question, and a short run through each for a paper with several.",
+      "Keep it short: say each thing once and leave out what the student does not need - about 350 to 450 words for one question, and a short run through each for a paper with several. When it runs long, cut detail, never the picture.",
     ].join(" "),
     parts: [
-      "the situation in two or three sentences of everyday words, with the everyday picture, and what the question wants you to find.",
-      "the one idea the whole solution hangs on, in a sentence or two (for example: a bolt can fail in several ways, and whichever comes first is its real strength).",
-      "the working as a few numbered points (`1.`, `2.`, ...), one per idea rather than one per line of the solution - checks of the same kind share a point (the three plate-bearing checks are one). Each point: a plain name for what it checks (\"Way 1: the bolt snaps\"), the formula with the numbers put in, the result with its unit, then one line on what that number means. Checks that do not change the answer - spacing, edge distances and other detailing - get one line at the end of this part, not a point each.",
-      "the results side by side as `- ` bullet lines, which one governs and why, the final answer with its unit, and one closing line the student can remember (\"That's all there is to it: work out every way it can fail - the smallest one wins.\").",
+      "one question that makes the student curious about this problem (\"which support works harder - and where would the plank crack first?\"), then the situation in two or three sentences of everyday words, with the everyday picture, and what the question wants you to find.",
+      "the one idea the whole solution hangs on - one only - seen in the picture rather than stated as a rule: at most three short sentences that show why it must be so (for example: press on a plank near one end, and the support at that end feels most of your push), so that the method which follows feels like the obvious thing to do. Any other \"why\" goes in the step where it is used, not here.",
+      "the working as a few numbered points (`1.`, `2.`, ...), one per idea rather than one per line of the solution - checks of the same kind share a point (the three plate-bearing checks are one). Each point: a plain name for what it finds (\"Way 1: the bolt snaps\"), one line on what is happening in the picture, the formula with the numbers put in, the result with its unit, then one line on what that number means. Only when the solution has checks that do not change the answer - spacing, edge distances and other detailing - give them one line at the end of this part; when it has none, leave that line out.",
+      "the results side by side as `- ` bullet lines, which one governs and why, and the final answer with its unit; then one short \"what if\" (a sentence or two) that changes one thing (double the load, move it to the middle) and says what would happen and why, straight from the picture; and one closing line the student can remember (\"That's all there is to it: work out every way it can fail - the smallest one wins.\").",
     ],
     chinese: (labels) => [
       `\`traditional_chinese\`: the same explanation told again for a Hong Kong student, the way a Hong Kong tutor talks - in spoken Cantonese written in Traditional Chinese characters (係、嘅、咗、咁、佢、呢個、即係話), not formal written Chinese, and not a word-for-word translation of the English. The student is taught in English, so keep each engineering term in English with its Chinese in brackets the first time, for example Double Shear (雙剪), Bearing Capacity (承壓力); everything else - the everyday pictures and words included (三文治, 死法, 頂唔頂得住) - is in Cantonese. The same parts in the same order, each opening with its bold label on a line of its own (${labels}), with the same Markdown and the same \`$...$\` math; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
-      "The tone to aim for, from another question - do not copy its content: 「一粒螺絲有3種死法，邊種死得最快，嗰個就係佢嘅真正實力。三文治夾住，所以螺絲會斷2個位，叫 Double Shear (雙剪)。一個位頂到 $91.8\\,\\text{kN}$，兩個位就係 $2 \\times 91.8 = 183.8\\,\\text{kN}$。即係話，拉到 $183.8\\,\\text{kN}$，粒螺絲就會斷兩截。」",
+      "The tone to aim for, from another question - do not copy its content: 「一粒螺絲有3種死法，邊種死得最快，嗰個就係佢嘅真正實力。三文治夾住，所以螺絲會斷2個位，叫 Double Shear (雙剪)。一個位頂到 $91.8\\,\\text{kN}$，兩個位就係 $2 \\times 91.8 = 183.8\\,\\text{kN}$。即係話，拉到 $183.8\\,\\text{kN}$，粒螺絲就會斷兩截。」 And for the picture and the \"what if\": 「想像你用手撳住塊木板：手近邊個支座，邊個就要頂多啲力。如果將嗰袋重沙搬去正中間，兩邊就會頂返一樣咁多。」",
     ],
   },
 };
