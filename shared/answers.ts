@@ -53,6 +53,8 @@ const BASES: Record<string, Base> = {
   m: { factor: 1, dims: { m: 1 } },
   g: { factor: 1e-3, dims: { kg: 1 } },
   t: { factor: 1e3, dims: { kg: 1 } },
+  tonne: { factor: 1e3, dims: { kg: 1 } },
+  tonnes: { factor: 1e3, dims: { kg: 1 } },
   s: { factor: 1, dims: { s: 1 } },
   sec: { factor: 1, dims: { s: 1 } },
   min: { factor: 60, dims: { s: 1 } },
@@ -247,41 +249,70 @@ export type Comparison = {
   /** Numbers matched exactly, and matched but for the sign (a sign convention). */
   same: number;
   sign: number;
-  /** The larger of the two answers' counts. */
-  total: number;
+  /** Numbers of the same kind that both answers state and that do not match: real disagreements. */
+  conflicts: number;
 };
 
+/** What a number can be weighed against: its dimensions, or else its unit as written ("" for a bare number). */
+function kindOf(quantity: Quantity) {
+  return quantity.dims !== null ? `dims:${quantity.dims}` : `unit:${quantity.unit.toLowerCase()}`;
+}
+
+/** How many of each kind are left over. */
+function countKinds(quantities: Quantity[]) {
+  const counts = new Map<string, number>();
+  for (const quantity of quantities) counts.set(kindOf(quantity), (counts.get(kindOf(quantity)) ?? 0) + 1);
+  return counts;
+}
+
 /**
- * How two answers compare: every number matched ("agree"), some matched or
- * only the signs differ ("partial"), none ("differ"), or one of them states
- * no number to compare ("unknown").
+ * How two answers compare, on what both of them state. Until 6 October 2026
+ * every number had to match, so an answer that also gave its working - a
+ * moment, a mass, a lever arm the other left out - "differed" from one with
+ * the same results (the owner saw two gate answers, both W = 210 kN, F_oil
+ * 165 kN and F_water 31.1 kN, marked as differing). Now a number one answer
+ * states and the other does not is no disagreement; a disagreement is a
+ * number of the same kind (a force, a length...) that both state and that
+ * does not match:
+ * - "agree": something matched, and nothing disagrees;
+ * - "partial": something matched, and something disagrees or only the
+ *   signs match (a sign convention, often);
+ * - "differ": nothing matched, and something disagrees;
+ * - "unknown": nothing to weigh against each other.
  */
 export function compareAnswers(a: Quantity[], b: Quantity[]): Comparison {
-  const total = Math.max(a.length, b.length);
-  if (!a.length || !b.length) return { agreement: "unknown", same: 0, sign: 0, total };
-  const used = new Set<number>();
-  const pending: Quantity[] = [];
-  let same = 0;
-  for (const quantity of a) {
-    const index = b.findIndex((other, at) => !used.has(at) && matchQuantities(quantity, other) === "same");
-    if (index >= 0) {
-      used.add(index);
-      same += 1;
-    } else {
-      pending.push(quantity);
-    }
-  }
-  let sign = 0;
-  for (const quantity of pending) {
-    const index = b.findIndex((other, at) => !used.has(at) && matchQuantities(quantity, other) === "sign");
-    if (index >= 0) {
-      used.add(index);
-      sign += 1;
-    }
-  }
+  if (!a.length || !b.length) return { agreement: "unknown", same: 0, sign: 0, conflicts: 0 };
+  const usedA = new Set<number>();
+  const usedB = new Set<number>();
+  const pair = (kind: "same" | "sign") => {
+    let count = 0;
+    a.forEach((quantity, at) => {
+      if (usedA.has(at)) return;
+      const index = b.findIndex((other, bt) => !usedB.has(bt) && matchQuantities(quantity, other) === kind);
+      if (index < 0) return;
+      usedA.add(at);
+      usedB.add(index);
+      count += 1;
+    });
+    return count;
+  };
+  const same = pair("same");
+  const sign = pair("sign");
+  // Left over on both sides and of the same kind: the two answers give
+  // different values for the same thing.
+  const leftA = countKinds(a.filter((_, at) => !usedA.has(at)));
+  const leftB = countKinds(b.filter((_, at) => !usedB.has(at)));
+  let conflicts = 0;
+  for (const [kind, count] of leftA) conflicts += Math.min(count, leftB.get(kind) ?? 0);
   const agreement: Agreement =
-    same === total ? "agree" : same + sign > 0 ? "partial" : "differ";
-  return { agreement, same, sign, total };
+    same + sign === 0
+      ? conflicts > 0
+        ? "differ"
+        : "unknown"
+      : conflicts === 0 && sign === 0
+        ? "agree"
+        : "partial";
+  return { agreement, same, sign, conflicts };
 }
 
 export type AnswerGroups<K> = {
@@ -317,19 +348,28 @@ export function groupAnswers<K>(entries: Array<{ key: K; quantities: Quantity[] 
 
   const status = new Map<K, Agreement>();
   for (const key of unknown) status.set(key, "unknown");
-  const largest = indexGroups[0];
+  const largest = indexGroups[0] ?? [];
+  // An answer outside the largest group of agreeing answers - or every
+  // answer, when no two agree - gets its closest relation to the answers it
+  // is measured against: partly agreeing with one of them beats differing.
+  // (When no two agreed, every answer used to be "differ", even ones that
+  // partly matched.)
+  const RANK: Record<Agreement, number> = { agree: 3, partial: 2, differ: 1, unknown: 0 };
   comparable.forEach((entry, index) => {
-    if (!largest || largest.length < 2) {
-      status.set(entry.key, comparable.length > 1 ? "differ" : "unknown");
-      return;
-    }
-    if (largest.includes(index)) {
+    if (largest.length >= 2 && largest.includes(index)) {
       status.set(entry.key, "agree");
       return;
     }
-    const leader = comparable[largest[0]];
-    const { agreement } = compareAnswers(entry.quantities, leader.quantities);
-    status.set(entry.key, agreement === "partial" ? "partial" : "differ");
+    const against = largest.length >= 2 ? largest : comparable.map((_, other) => other).filter((other) => other !== index);
+    let best: Agreement = "unknown";
+    for (const other of against) {
+      const { agreement } = compareAnswers(entry.quantities, comparable[other].quantities);
+      // Agreeing with one answer that is not in the largest group is still
+      // only partly agreeing with the rest.
+      const seen: Agreement = agreement === "agree" ? "partial" : agreement;
+      if (RANK[seen] > RANK[best]) best = seen;
+    }
+    status.set(entry.key, best);
   });
   return { groups, unknown, status };
 }

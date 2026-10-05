@@ -126,7 +126,9 @@ export function AnswerSummary({
           ? `The answers: all ${comparable.length} agree · 全部一致`
           : largest.length >= 2
             ? `The answers: ${largest.length} of ${comparable.length} agree · ${comparable.length} 個有 ${largest.length} 個一致`
-            : "The answers differ · 答案各有不同";
+            : comparable.some((key) => status.get(key) === "partial")
+              ? "The answers partly agree · 答案部分一致"
+              : "The answers differ · 答案各有不同";
 
   // The one-tap cross-check: the default judge, at high (or the nearest level
   // its route offers), over the first finished solutions in picker order -
