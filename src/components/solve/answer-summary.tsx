@@ -1,15 +1,15 @@
 // The answer summary at the top of the solutions (3 October 2026): every
 // solver's final answer side by side, and the cross-check in one tap until
 // there is a verdict - then its verified answer, a ✓ or ✗ per solver, and
-// how far the answers agree, worked out on the page from the numbers and
-// units each one states (shared/answers.ts, no model call). Nothing is
-// compared before the verdict (the owner, 4 October 2026): agreement is no
-// proof - on B.8 four models agreed on the same wrong answer.
+// how far the answers line up with each other, as the judge saw it
+// (`alignment` in the verdict, since 9 October 2026 - the page compared the
+// numbers by rule before, and got directions and answers showing their
+// working wrong). Nothing is compared before the verdict (the owner,
+// 4 October 2026): agreement is no proof - on B.8 four models agreed on the
+// same wrong answer.
 
-import { useMemo } from "react";
 import { Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
-import { extractQuantities, groupAnswers, type Agreement } from "../../../shared/answers";
-import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
+import { MAX_JUDGED_SOLUTIONS, type Alignment } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   DEFAULT_JUDGE,
@@ -23,29 +23,25 @@ import { isJudgeActive, isRunActive, JUDGE_QUEUED, type JudgeRun, type ProviderR
 import { effortBand } from "@/lib/effort-band";
 import { scrollToStep, STEP_IDS } from "@/lib/journey";
 import MathProse from "./math-prose";
+import { MathTitle } from "./math-title";
 import { ProviderLogo } from "./provider-logo";
 
 // Status colours stay fixed on purpose, like the credit badges (CLAUDE.md).
-const CHIP: Record<Agreement, { label: string; className: string; title: string }> = {
-  agree: {
+const CHIP: Record<Alignment, { label: string; className: string; title: string }> = {
+  aligned: {
     label: "一致 Agree",
     className: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a]",
-    title: "Its numbers match the most common answer.",
+    title: "The judge found its answers line up with the others'.",
   },
   partial: {
     label: "部分一致 Partly",
     className: "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
-    title: "Some of its numbers match the other answers, and some differ - in value or in direction.",
+    title: "The judge found some of its answers line up with the others', and some differ - in value or in direction.",
   },
-  differ: {
+  not_aligned: {
     label: "唔同 Differs",
     className: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b]",
-    title: "Its numbers do not match the other answers.",
-  },
-  unknown: {
-    label: "無法比較 Can't compare",
-    className: "border-cs-line bg-cs-muted text-cs-ink-3",
-    title: "No number with a unit to compare in its final answer.",
+    title: "The judge found its answers do not line up with the others'.",
   },
 };
 
@@ -92,17 +88,6 @@ export function AnswerSummary({
   const finished = shown.filter((key) => runs[key].status === "done");
   const running = shown.filter((key) => isRunActive(runs[key]));
 
-  // Re-read only when a solution changes, not on every tick of the clocks.
-  const { groups, status } = useMemo(() => {
-    const entries = PROVIDER_KEYS.flatMap((key) => {
-      const run = runs[key];
-      return run.status === "done"
-        ? [{ key, quantities: extractQuantities(run.solution.finalAnswer) }]
-        : [];
-    });
-    return groupAnswers(entries);
-  }, [runs]);
-
   // Shown from the start of a run: the cross-check can be asked for before
   // any answer is in.
   if (!finished.length && !running.length) return null;
@@ -114,21 +99,25 @@ export function AnswerSummary({
       ? `Cross-checked: ${verdict.judgement.correct.length} of ${verdict.solvers.length} correct · 已核對：${verdict.solvers.length} 個有 ${verdict.judgement.correct.length} 個啱`
       : `${finished.length} answer${finished.length === 1 ? "" : "s"} · ${finished.length} 個答案`;
 
-  // How far the answers agree - shown once there is a verdict, never before.
-  const comparable = finished.filter((key) => status.get(key) !== "unknown");
-  const largest = groups[0] ?? [];
+  // How far the answers line up - the judge's word, shown with its verdict
+  // and never before. A verdict from before 9 October 2026 has none.
+  const alignmentOf = (key: ProviderKey): { alignment: Alignment; note: string } | null => {
+    const index = verdict ? verdict.solvers.indexOf(key) : -1;
+    const alignment = index >= 0 ? verdict?.judgement.alignment?.[index] : null;
+    return alignment ? { alignment, note: verdict?.judgement.alignment_notes?.[index] ?? "" } : null;
+  };
+  const weighed = verdict ? verdict.solvers.filter((key) => alignmentOf(key)) : [];
+  const aligned = weighed.filter((key) => alignmentOf(key)?.alignment === "aligned").length;
   const agreement =
-    !verdict || finished.length < 2
+    weighed.length < 2
       ? ""
-      : comparable.length < 2
-        ? "Not enough numbers to compare · 無法自動比較"
-        : largest.length === comparable.length
-          ? `The answers: all ${comparable.length} agree · 全部一致`
-          : largest.length >= 2
-            ? `The answers: ${largest.length} of ${comparable.length} agree · ${comparable.length} 個有 ${largest.length} 個一致`
-            : comparable.some((key) => status.get(key) === "partial")
-              ? "The answers partly agree · 答案部分一致"
-              : "The answers differ · 答案各有不同";
+      : aligned === weighed.length
+        ? `The answers: all ${weighed.length} agree · 全部一致`
+        : aligned >= 2
+          ? `The answers: ${aligned} of ${weighed.length} agree · ${weighed.length} 個有 ${aligned} 個一致`
+          : weighed.some((key) => alignmentOf(key)?.alignment === "partial")
+            ? "The answers partly agree · 答案部分一致"
+            : "The answers differ · 答案各有不同";
 
   // The one-tap cross-check: the default judge, at high (or the nearest level
   // its route offers), over the first finished solutions in picker order -
@@ -185,7 +174,7 @@ export function AnswerSummary({
         {shown.map((key) => {
           const run = runs[key];
           const mark = markOf(key);
-          const agrees = verdict && run.status === "done" && finished.length > 1 ? status.get(key) : undefined;
+          const lineUp = run.status === "done" && weighed.length > 1 ? alignmentOf(key) : null;
           return (
             <li key={key} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-start sm:gap-3">
               <button
@@ -204,7 +193,13 @@ export function AnswerSummary({
               </button>
               <div className="min-w-0 flex-1">
                 {run.status === "done" ? (
-                  <MathProse source={run.solution.finalAnswer} className="text-sm leading-6" />
+                  <>
+                    <MathProse source={run.solution.finalAnswer} className="text-sm leading-6" />
+                    {/* What the judge found differs from the others. */}
+                    {lineUp?.note && lineUp.alignment !== "aligned" ? (
+                      <MathTitle text={lineUp.note} className="mt-1 block text-xs text-[#7a5d10]" />
+                    ) : null}
+                  </>
                 ) : isRunActive(run) ? (
                   <span className="flex items-center gap-1.5 text-xs text-cs-ink-3">
                     <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -214,9 +209,12 @@ export function AnswerSummary({
                   <span className="text-xs text-cs-ink-3">No answer</span>
                 )}
               </div>
-              {agrees ? (
-                <span className={`${CHIP_BASE} ${CHIP[agrees].className} self-start`} title={CHIP[agrees].title}>
-                  {CHIP[agrees].label}
+              {lineUp ? (
+                <span
+                  className={`${CHIP_BASE} ${CHIP[lineUp.alignment].className} self-start`}
+                  title={CHIP[lineUp.alignment].title}
+                >
+                  {CHIP[lineUp.alignment].label}
                 </span>
               ) : null}
             </li>
@@ -224,11 +222,10 @@ export function AnswerSummary({
         })}
       </ul>
 
-      {verdict && finished.length > 1 ? (
+      {weighed.length > 1 ? (
         <p className="mt-2 text-xs text-cs-ink-3">
-          ✓ / ✗ is the judge&apos;s verdict. 一致 / 唔同 only compares the numbers in each final answer -
-          their size, unit and direction, from a sign or words such as downward, +y or upstream -
-          worked out on the page.
+          Both from the judge: ✓ / ✗ says whether each answer is right; 一致 / 唔同 says whether the
+          answers line up with each other - values, units and directions.
         </p>
       ) : null}
 

@@ -403,6 +403,10 @@ export function buildJudgePrompt(
     "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
     "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
+    // The answer summary's chips (9 October 2026, the owner's call: the page
+    // compared the numbers by rule before, and got directions wrong).
+    `- \`alignment\`: exactly ${count} entries, one per solution in order (${letterList}): how that solution's final answers line up with the other solutions' final answers - whether they agree with each other, not whether they are correct. \`aligned\`: every result it gives matches the others' - the same values within rounding, the same units, the same directions; a direction written as a sign by one and in words by another (\`$-30\\,\\text{kN}$\` and \`$30\\,\\text{kN}$\` downward) is the same direction, while the same size pointing the other way is not; results one solution gives and another leaves out (its working, an extra quantity) do not count against it. \`partial\`: some of its results match the others' and some differ, in value or in direction. \`not_aligned\`: its results do not match the others'. With three or more solutions, measure each against what most of the others give; two solutions that agree with each other are both \`aligned\`, even if both are wrong.`,
+    `- \`alignment_notes\`: exactly ${count} entries, in the same order: for a \`partial\` or \`not_aligned\` solution, what differs from the others, in a few plain words with its numbers and no LaTeX (for example "both forces point the other way: the support's push on the pipe, not the force on the support"); an empty string for an \`aligned\` one.`,
     "Write `final_answer`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
@@ -430,12 +434,12 @@ export function buildJudgePrompt(
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic
     // all-strings skeleton cannot express.
-    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": "", "alignment": [${letters.map(() => '"aligned"').join(", ")}], "alignment_notes": [${letters.map(() => '""').join(", ")}]}`;
     sections.push(
       "",
-      "Return exactly one JSON object with these 7 fields:",
+      "Return exactly one JSON object with these 9 fields:",
       skeleton,
-      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` and \`assessments_chinese\` have exactly ${count} strings each, in order; \`confidence\` is one of "high", "medium", "low".`,
+      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\`, \`assessments_chinese\`, \`alignment\` and \`alignment_notes\` have exactly ${count} entries each, in order; \`confidence\` is one of "high", "medium", "low"; each \`alignment\` is one of "aligned", "partial", "not_aligned".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
     );
   }
