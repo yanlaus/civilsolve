@@ -3,6 +3,7 @@
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
+import type { AlignResult } from "./align";
 import type { AskResult } from "./ask";
 import type { InterpretationResult } from "./interpretation";
 import type { JudgementResult } from "./judgement";
@@ -127,6 +128,24 @@ export type AskRequestBody = {
 };
 
 /**
+ * The answers compared with each other (shared/align.ts): every finished
+ * solver's final answer, as text, labelled A, B, C... in this order, and the
+ * question in words for context - no images. Sent by itself once every
+ * solver has answered.
+ */
+export type AlignRequestBody = {
+  /** Two to MAX_ALIGN_ANSWERS final answers. */
+  answers: string[];
+  /** What was asked, in words: the confirmed reading, or a solver's restatement. */
+  question?: string;
+  notes: string;
+  /** Reasoning level. Defaults to "low": it compares, it does not derive. */
+  effort?: EffortKey;
+  /** Which of the provider's models, when it offers several. */
+  variant?: ModelVariant;
+};
+
+/**
  * The first event of every job's stream (worker/jobs.ts), on the first
  * connection and on every re-attach. Times are the server's clock, in ms;
  * `now` lets the page correct for its own clock being off, so the elapsed
@@ -178,6 +197,12 @@ export type AskEvent =
   | { type: "done"; answer: AskResult; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
+export type AlignEvent =
+  | { type: "status"; message: string; at?: number }
+  | { type: "delta"; text: string }
+  | { type: "done"; comparison: AlignResult; at?: number; model?: string }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
+
 /** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */
 export function formatDuration(ms: number) {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -204,6 +229,10 @@ export const MAX_STEP_TEXT = 6_000;
 /** Earlier questions sent with a new one, and how much of each answer. */
 export const MAX_ASK_HISTORY = 6;
 export const MAX_ASK_ANSWER_TEXT = 4_000;
+/** The answers compared at once (every solver card), and how much of each final answer and of the question. */
+export const MAX_ALIGN_ANSWERS = 9;
+export const MAX_ALIGN_ANSWER_TEXT = 3_000;
+export const MAX_ALIGN_QUESTION_TEXT = 4_000;
 
 export const DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 

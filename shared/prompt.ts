@@ -34,6 +34,8 @@ export const JUDGE_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown 
 
 export const ASK_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor answering a student's question about a worked solution. Answer in the language the student asked in.`;
 
+export const ALIGN_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a careful civil engineering examiner comparing several answers to the same question with each other. Use English.`;
+
 export const STUDY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor writing study notes on an assignment that has already been solved. Use English, except in the \`traditional_chinese\` field.`;
 
 /**
@@ -403,10 +405,6 @@ export function buildJudgePrompt(
     "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
     "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
-    // The answer summary's chips (9 October 2026, the owner's call: the page
-    // compared the numbers by rule before, and got directions wrong).
-    `- \`alignment\`: exactly ${count} entries, one per solution in order (${letterList}): how that solution's final answers line up with the other solutions' final answers - whether they agree with each other, not whether they are correct. \`aligned\`: every result it gives matches the others' - the same values within rounding, the same units, the same directions; a direction written as a sign by one and in words by another (\`$-30\\,\\text{kN}$\` and \`$30\\,\\text{kN}$\` downward) is the same direction, while the same size pointing the other way is not; results one solution gives and another leaves out (its working, an extra quantity) do not count against it. \`partial\`: some of its results match the others' and some differ, in value or in direction. \`not_aligned\`: its results do not match the others'. With three or more solutions, measure each against what most of the others give; two solutions that agree with each other are both \`aligned\`, even if both are wrong.`,
-    `- \`alignment_notes\`: exactly ${count} entries, in the same order: for a \`partial\` or \`not_aligned\` solution, what differs from the others, in a few plain words with its numbers and no LaTeX (for example "both forces point the other way: the support's push on the pipe, not the force on the support"); an empty string for an \`aligned\` one.`,
     "Write `final_answer`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
@@ -434,12 +432,12 @@ export function buildJudgePrompt(
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic
     // all-strings skeleton cannot express.
-    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": "", "alignment": [${letters.map(() => '"aligned"').join(", ")}], "alignment_notes": [${letters.map(() => '""').join(", ")}]}`;
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
     sections.push(
       "",
-      "Return exactly one JSON object with these 9 fields:",
+      "Return exactly one JSON object with these 7 fields:",
       skeleton,
-      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\`, \`assessments_chinese\`, \`alignment\` and \`alignment_notes\` have exactly ${count} entries each, in order; \`confidence\` is one of "high", "medium", "low"; each \`alignment\` is one of "aligned", "partial", "not_aligned".`,
+      `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` and \`assessments_chinese\` have exactly ${count} strings each, in order; \`confidence\` is one of "high", "medium", "low".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
     );
   }
@@ -655,5 +653,49 @@ export function buildAskPrompt(
     sections.push(...shapeContract(ASK_FIELDS));
   }
 
+  return sections.join("\n");
+}
+
+/**
+ * The answers compared with each other (shared/align.ts, since 9 October
+ * 2026): only their final answers, labelled A, B, C..., and the question in
+ * words. Not a grading - the cross-check grades.
+ */
+export function buildAlignPrompt(
+  answers: string[],
+  question: string,
+  userNotes: string,
+  options?: { enforceShape?: boolean },
+) {
+  const count = answers.length;
+  const letters = answers.map((_, index) => String.fromCharCode(65 + index));
+  const letterList = letters.join(", ");
+  const sections = [
+    `${count} solvers answered the same civil engineering question independently. Their final answers are below as Answer ${letterList}. Compare the answers with each other - do not solve the question, and do not judge which answer is correct.`,
+    `- \`alignment\`: exactly ${count} entries, one per answer in order (${letterList}): how that answer lines up with the other answers.`,
+    "  - `aligned`: every result it gives matches the others' - the same values within rounding, the same units, the same directions. A direction written as a sign by one answer and in words by another (`$-30\\,\\text{kN}$` and `$30\\,\\text{kN}$` downward) is the same direction; the same size pointing the other way is not. Results one answer gives and another leaves out (its working, an extra quantity) do not count against it, and neither do symbols named differently for the same quantity.",
+    "  - `partial`: some of its results match the others' and some differ, in value or in direction.",
+    "  - `not_aligned`: its results do not match the others'.",
+    "  With three or more answers, measure each against what most of the others give; two answers that agree with each other are both `aligned`, even if both may be wrong. When the answers report different quantities for the same thing (the force on a support against the support's push on the pipe), compare what they say about the same physical thing, and say so in the note.",
+    `- \`alignment_notes\`: exactly ${count} entries, in the same order: for a \`partial\` or \`not_aligned\` answer, what differs from the others, in a few plain words with its numbers and no LaTeX (for example "both forces point the other way: the support's push on the pipe, not the force on the support"); an empty string for an \`aligned\` one.`,
+    "Return JSON matching the required schema exactly.",
+    "",
+    question ? `The question, in words:\n${question}` : "The question: [not given - compare the answers as they stand]",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  ];
+  answers.forEach((answer, index) => {
+    sections.push("", `Answer ${letters[index]}:`, answer);
+  });
+  if (options?.enforceShape) {
+    // Bespoke contract: both fields are arrays.
+    sections.push(
+      "",
+      "Return exactly one JSON object with these 2 fields:",
+      `{"alignment": [${letters.map(() => '"aligned"').join(", ")}], "alignment_notes": [${letters.map(() => '""').join(", ")}]}`,
+      `Each has exactly ${count} entries, in order; each \`alignment\` is one of "aligned", "partial", "not_aligned".`,
+      "Do not add other fields. Do not nest this object inside another object or array.",
+    );
+  }
   return sections.join("\n");
 }

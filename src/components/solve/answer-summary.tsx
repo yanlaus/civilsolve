@@ -1,15 +1,17 @@
 // The answer summary at the top of the solutions (3 October 2026): every
-// solver's final answer side by side, and the cross-check in one tap until
-// there is a verdict - then its verified answer, a ✓ or ✗ per solver, and
-// how far the answers line up with each other, as the judge saw it
-// (`alignment` in the verdict, since 9 October 2026 - the page compared the
-// numbers by rule before, and got directions and answers showing their
-// working wrong). Nothing is compared before the verdict (the owner,
-// 4 October 2026): agreement is no proof - on B.8 four models agreed on the
-// same wrong answer.
+// solver's final answer side by side, how far they line up with each other,
+// and the cross-check in one tap until there is a verdict - then its
+// verified answer and a ✓ or ✗ per solver. How they line up comes from a
+// model that compares the answers once every solver has answered
+// (hooks/use-align.ts, since 9 October 2026, the owner's call), without
+// waiting for or starting the cross-check; the page compared the numbers by
+// rule before, and got directions and answers showing their working wrong.
+// Agreement is no proof - on B.8 four models agreed on the same wrong
+// answer - which is what the cross-check is for.
 
 import { Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
-import { MAX_JUDGED_SOLUTIONS, type Alignment } from "../../../shared/judgement";
+import type { Alignment } from "../../../shared/align";
+import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   DEFAULT_JUDGE,
@@ -19,6 +21,7 @@ import {
   type ProviderKey,
   type ProviderStatus,
 } from "../../../shared/providers";
+import type { AlignState } from "@/hooks/use-align";
 import { isJudgeActive, isRunActive, JUDGE_QUEUED, type JudgeRun, type ProviderRuns } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
 import { scrollToStep, STEP_IDS } from "@/lib/journey";
@@ -31,17 +34,17 @@ const CHIP: Record<Alignment, { label: string; className: string; title: string 
   aligned: {
     label: "一致 Agree",
     className: "border-[#c9dcc4] bg-[#eef6ea] text-[#3f7a3a]",
-    title: "The judge found its answers line up with the others'.",
+    title: "Its answers line up with the other answers' - values, units and directions.",
   },
   partial: {
     label: "部分一致 Partly",
     className: "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
-    title: "The judge found some of its answers line up with the others', and some differ - in value or in direction.",
+    title: "Some of its answers line up with the others', and some differ - in value or in direction.",
   },
   not_aligned: {
     label: "唔同 Differs",
     className: "border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] text-[#c0392b]",
-    title: "The judge found its answers do not line up with the others'.",
+    title: "Its answers do not line up with the other answers'.",
   },
 };
 
@@ -63,6 +66,8 @@ export function AnswerSummary({
   canQueue = false,
   onQueueCrossCheck,
   onStopJudge,
+  alignment = { status: "idle" },
+  onCompareAgain,
 }: {
   /** The solution tabs' order. */
   order: ProviderKey[];
@@ -83,6 +88,10 @@ export function AnswerSummary({
   onQueueCrossCheck?: (judge: ModelChoice, effort: EffortKey) => void;
   /** Takes a queued cross-check back. */
   onStopJudge?: () => void;
+  /** How the answers line up with each other (hooks/use-align.ts). */
+  alignment?: AlignState;
+  /** Compares the answers again, after a comparison that failed. */
+  onCompareAgain?: () => void;
 }) {
   const shown = order.filter((key) => runs[key].status !== "idle");
   const finished = shown.filter((key) => runs[key].status === "done");
@@ -99,14 +108,15 @@ export function AnswerSummary({
       ? `Cross-checked: ${verdict.judgement.correct.length} of ${verdict.solvers.length} correct · 已核對：${verdict.solvers.length} 個有 ${verdict.judgement.correct.length} 個啱`
       : `${finished.length} answer${finished.length === 1 ? "" : "s"} · ${finished.length} 個答案`;
 
-  // How far the answers line up - the judge's word, shown with its verdict
-  // and never before. A verdict from before 9 October 2026 has none.
+  // How far the answers line up - from the comparison made once every
+  // solver answered, for the answers it compared.
+  const compared = alignment.status === "done" ? alignment : null;
   const alignmentOf = (key: ProviderKey): { alignment: Alignment; note: string } | null => {
-    const index = verdict ? verdict.solvers.indexOf(key) : -1;
-    const alignment = index >= 0 ? verdict?.judgement.alignment?.[index] : null;
-    return alignment ? { alignment, note: verdict?.judgement.alignment_notes?.[index] ?? "" } : null;
+    const index = compared ? compared.solvers.indexOf(key) : -1;
+    const value = index >= 0 ? compared?.comparison.alignment[index] : null;
+    return value ? { alignment: value, note: compared?.comparison.notes[index] ?? "" } : null;
   };
-  const weighed = verdict ? verdict.solvers.filter((key) => alignmentOf(key)) : [];
+  const weighed = compared ? compared.solvers.filter((key) => alignmentOf(key)) : [];
   const aligned = weighed.filter((key) => alignmentOf(key)?.alignment === "aligned").length;
   const agreement =
     weighed.length < 2
@@ -159,7 +169,27 @@ export function AnswerSummary({
         ) : null}
       </p>
 
-      {agreement ? <p className="mt-0.5 text-sm text-cs-ink-2">{agreement}</p> : null}
+      {alignment.status === "running" ? (
+        <p className="mt-0.5 flex items-center gap-1.5 text-sm text-cs-ink-3">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          Comparing the answers... · 比較緊答案
+        </p>
+      ) : alignment.status === "error" ? (
+        <p className="mt-0.5 text-sm text-cs-ink-3">
+          The answers could not be compared. · 未能比較答案
+          {onCompareAgain ? (
+            <button
+              type="button"
+              onClick={onCompareAgain}
+              className="ml-2 font-semibold text-cs-accent underline-offset-2 hover:underline"
+            >
+              Try again
+            </button>
+          ) : null}
+        </p>
+      ) : agreement ? (
+        <p className="mt-0.5 text-sm text-cs-ink-2">{agreement}</p>
+      ) : null}
 
       {hasVerdict && judgeRun.judgement.final_answer ? (
         <div className="mt-3 rounded-cs border-2 border-cs-accent bg-cs-muted px-3 py-2">

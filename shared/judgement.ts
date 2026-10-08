@@ -21,16 +21,6 @@ export const MAX_JUDGED_SOLUTIONS = SOLUTION_LETTERS.length;
 
 export type Confidence = "high" | "medium" | "low";
 
-/**
- * How one solution's final answers line up with the other solutions' - not
- * whether they are right - as the judge sees it (since 9 October 2026, the
- * owner's call: the page compared the numbers by rule before, and got
- * directions and answers that show their working wrong).
- */
-export type Alignment = "aligned" | "partial" | "not_aligned";
-
-export const ALIGNMENTS: Alignment[] = ["aligned", "partial", "not_aligned"];
-
 export type JudgementResult = {
   /** Zero-based indices of the solutions the judge found correct; empty for none. */
   correct: number[];
@@ -49,10 +39,6 @@ export type JudgementResult = {
    * English. Empty when the judge left it out.
    */
   traditional_chinese: string;
-  /** One per solution, in order: how its answers line up with the others'; null where it was left out (a verdict from before 9 October 2026). */
-  alignment: Array<Alignment | null>;
-  /** One per solution, in order: in a few words, what differs from the others; "" for an aligned one. */
-  alignment_notes: string[];
 };
 
 export const CONFIDENCES: Confidence[] = ["high", "medium", "low"];
@@ -71,8 +57,6 @@ export const judgementSchema = {
     comparison: { type: "string" },
     confidence: { type: "string", enum: CONFIDENCES },
     traditional_chinese: { type: "string" },
-    alignment: { type: "array", items: { type: "string", enum: ALIGNMENTS } },
-    alignment_notes: { type: "array", items: { type: "string" } },
   },
   required: [
     "correct_solutions",
@@ -82,8 +66,6 @@ export const judgementSchema = {
     "comparison",
     "confidence",
     "traditional_chinese",
-    "alignment",
-    "alignment_notes",
   ],
 } as const;
 
@@ -150,33 +132,6 @@ function readAssessments(value: unknown, count: number): string[] {
   return out;
 }
 
-/** An alignment as a judge wrote it: the enum, or words on a schema-less rung ("partially aligned", "not aligned"). */
-function alignmentOf(value: unknown): Alignment | null {
-  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!text) return null;
-  // "not aligned" before "aligned", "partially aligned" before "aligned".
-  if (/\bnot\b|not_aligned|\bun-?aligned\b|\bmisaligned\b|\bdiffer|\bdisagree/.test(text)) return "not_aligned";
-  if (/partial|partly|\bsome\b|\bmixed\b/.test(text)) return "partial";
-  if (/aligned|\bagree|\bsame\b|\bmatch|\bconsistent/.test(text)) return "aligned";
-  return null;
-}
-
-/** One alignment per solution, from an array in order or an object keyed by letter. */
-function readAlignment(value: unknown, count: number): Array<Alignment | null> {
-  const out: Array<Alignment | null> = Array.from({ length: count }, () => null);
-  if (Array.isArray(value)) {
-    value.slice(0, count).forEach((entry, index) => {
-      out[index] = alignmentOf(entry);
-    });
-  } else if (value && typeof value === "object") {
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      const index = letterIndex(key.replace(/_/g, " "), count);
-      if (index !== null) out[index] = alignmentOf(entry);
-    }
-  }
-  return out;
-}
-
 function readConfidence(value: string): Confidence {
   const text = value.trim().toLowerCase();
   if (text.startsWith("high")) return "high";
@@ -217,8 +172,6 @@ export function parseJudgement(
       comparison: text,
       confidence: "low",
       traditional_chinese: "",
-      alignment: Array.from({ length: count }, () => null),
-      alignment_notes: Array.from({ length: count }, () => ""),
     };
   }
 
@@ -242,8 +195,6 @@ export function parseJudgement(
     comparison: read("comparison") || read("discrepancies") || read("reasoning"),
     confidence: readConfidence(read("confidence")),
     traditional_chinese: read("traditional_chinese") || read("chinese"),
-    alignment: readAlignment(record.alignment ?? record.alignments, count),
-    alignment_notes: readAssessments(record.alignment_notes ?? record.alignment_reasons, count),
   };
 
   // A verdict with no reasoning behind it is a judge that skipped its job;
@@ -272,12 +223,6 @@ export function judgementToText(judgement: JudgementResult, count: number) {
       judgement.assessments[index] ? `Assessment of Solution ${letter(index)}:\n${judgement.assessments[index]}` : "",
     ),
     judgement.comparison ? `Why:\n${judgement.comparison}` : "",
-    judgement.alignment?.some(Boolean)
-      ? `How the answers line up: ${Array.from({ length: count }, (_, index) => {
-          const note = judgement.alignment_notes?.[index];
-          return `${letter(index)} ${judgement.alignment[index] ?? "not given"}${note ? ` (${note})` : ""}`;
-        }).join("; ")}`
-      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
