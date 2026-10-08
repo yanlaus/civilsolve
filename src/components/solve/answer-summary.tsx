@@ -222,13 +222,6 @@ export function AnswerSummary({
         })}
       </ul>
 
-      {weighed.length > 1 ? (
-        <p className="mt-2 text-xs text-cs-ink-3">
-          Both from the judge: ✓ / ✗ says whether each answer is right; 一致 / 唔同 says whether the
-          answers line up with each other - values, units and directions.
-        </p>
-      ) : null}
-
       {queued ? (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-cs border border-dashed border-cs-accent bg-cs-muted px-3 py-2 text-sm text-cs-ink-2">
           <Hourglass className="h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
