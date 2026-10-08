@@ -214,8 +214,12 @@ export function extractQuantities(answer: string): Quantity[] {
       si: parsed ? value * parsed.factor : null,
       dims: parsed ? parsed.dims : null,
     };
-    // The same result stated twice ("= 142.9 N", later "142.9 N to the left").
-    if (found.some((other) => matchQuantities(other, quantity) === "same")) continue;
+    // The same result stated twice ("= 142.9 N", later "142.9 N to the left"),
+    // or as the equal and opposite force ("177.1 kN to the right", then
+    // "R_x = -177.1 kN" on the fluid). Only a near-exact repeat: within the
+    // 2% of a match, a resultant of 180 kN was dropped as a repeat of a
+    // 177 kN component (9 October 2026).
+    if (found.some((other) => (magnitudeGap(other, quantity) ?? Infinity) <= REPEAT_TOLERANCE)) continue;
     found.push(quantity);
   }
   return found;
@@ -225,20 +229,32 @@ function close(a: number, b: number) {
   return Math.abs(a - b) <= TOLERANCE * Math.max(Math.abs(a), Math.abs(b)) || Math.abs(a - b) < 1e-12;
 }
 
+/** The two numbers to weigh against each other, in the same units; null when they cannot be. */
+function comparable(a: Quantity, b: Quantity): [number, number] | null {
+  if (a.unit && b.unit && a.dims !== null && b.dims !== null) {
+    return a.dims === b.dims ? [a.si as number, b.si as number] : null;
+  }
+  if (!a.unit || !b.unit || a.unit.toLowerCase() === b.unit.toLowerCase()) return [a.value, b.value];
+  return null;
+}
+
+/** How far apart two numbers' sizes are, relative to the larger; null when they cannot be weighed. */
+function magnitudeGap(a: Quantity, b: Quantity): number | null {
+  const pair = comparable(a, b);
+  if (!pair) return null;
+  const [x, y] = pair.map(Math.abs);
+  const larger = Math.max(x, y);
+  return larger < 1e-12 ? 0 : Math.abs(x - y) / larger;
+}
+
+/** Within one answer, a number this close to another is the same result stated again. */
+const REPEAT_TOLERANCE = 0.005;
+
 /** Whether two numbers are the same result, the same but for the sign, or different. */
 export function matchQuantities(a: Quantity, b: Quantity): "same" | "sign" | null {
-  let x: number;
-  let y: number;
-  if (a.unit && b.unit && a.dims !== null && b.dims !== null) {
-    if (a.dims !== b.dims) return null;
-    x = a.si as number;
-    y = b.si as number;
-  } else if (!a.unit || !b.unit || a.unit.toLowerCase() === b.unit.toLowerCase()) {
-    x = a.value;
-    y = b.value;
-  } else {
-    return null;
-  }
+  const pair = comparable(a, b);
+  if (!pair) return null;
+  const [x, y] = pair;
   if (close(x, y)) return "same";
   if (close(Math.abs(x), Math.abs(y))) return "sign";
   return null;
@@ -275,20 +291,36 @@ function countKinds(quantities: Quantity[]) {
  * number of the same kind (a force, a length...) that both state and that
  * does not match:
  * - "agree": something matched, and nothing disagrees;
- * - "partial": something matched, and something disagrees or only the
- *   signs match (a sign convention, often);
+ * - "partial": something matched, and something disagrees;
  * - "differ": nothing matched, and something disagrees;
  * - "unknown": nothing to weigh against each other.
+ * A number matching but for its sign counts as a match (since 9 October
+ * 2026): a direction is written as a sign by one solver and in words by
+ * another - Gemini's "F_y = -29.99 kN (downward)" against DeepSeek's
+ * "30.0 kN downward" - so the sizes are compared, and whether a direction
+ * is right is the cross-check's to say.
  */
 export function compareAnswers(a: Quantity[], b: Quantity[]): Comparison {
   if (!a.length || !b.length) return { agreement: "unknown", same: 0, sign: 0, conflicts: 0 };
   const usedA = new Set<number>();
   const usedB = new Set<number>();
+  // Each number to the closest one it matches, not the first: a 177 kN
+  // component took a 179.65 kN resultant, within 2%, before the 177.13 kN
+  // listed after it.
   const pair = (kind: "same" | "sign") => {
     let count = 0;
     a.forEach((quantity, at) => {
       if (usedA.has(at)) return;
-      const index = b.findIndex((other, bt) => !usedB.has(bt) && matchQuantities(quantity, other) === kind);
+      let index = -1;
+      let gap = Infinity;
+      b.forEach((other, bt) => {
+        if (usedB.has(bt) || matchQuantities(quantity, other) !== kind) return;
+        const distance = magnitudeGap(quantity, other) ?? Infinity;
+        if (distance < gap) {
+          gap = distance;
+          index = bt;
+        }
+      });
       if (index < 0) return;
       usedA.add(at);
       usedB.add(index);
@@ -309,7 +341,7 @@ export function compareAnswers(a: Quantity[], b: Quantity[]): Comparison {
       ? conflicts > 0
         ? "differ"
         : "unknown"
-      : conflicts === 0 && sign === 0
+      : conflicts === 0
         ? "agree"
         : "partial";
   return { agreement, same, sign, conflicts };
