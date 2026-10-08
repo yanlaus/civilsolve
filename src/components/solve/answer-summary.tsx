@@ -35,7 +35,7 @@ const CHIP: Record<Agreement, { label: string; className: string; title: string 
   partial: {
     label: "部分一致 Partly",
     className: "border-[#e8d9a8] bg-[rgba(179,138,30,0.08)] text-[#7a5d10]",
-    title: "Some of its numbers match the other answers, and some do not.",
+    title: "Some of its numbers match the other answers, and some differ - in value or in direction.",
   },
   differ: {
     label: "唔同 Differs",
@@ -226,9 +226,9 @@ export function AnswerSummary({
 
       {verdict && finished.length > 1 ? (
         <p className="mt-2 text-xs text-cs-ink-3">
-          ✓ / ✗ is the judge&apos;s verdict. 一致 / 唔同 only compares the size of the numbers and their
-          units in each final answer, worked out on the page - not their signs or directions, which
-          solvers write differently (−30 kN, or 30 kN downward).
+          ✓ / ✗ is the judge&apos;s verdict. 一致 / 唔同 only compares the numbers in each final answer -
+          their size, unit and direction, from a sign or words such as downward, +y or upstream -
+          worked out on the page.
         </p>
       ) : null}
 
