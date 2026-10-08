@@ -18,7 +18,14 @@ export type Quantity = {
   si: number | null;
   /** The unit's dimensions over base units ("m-2·N1"), when understood. */
   dims: string | null;
+  /** Written with a sign ("-29.99", "+30.0"), not as a bare size. */
+  signed: boolean;
+  /** The direction the words after it give ("to the right", "downward", "+y"), when they give one. */
+  direction: Direction | null;
 };
+
+/** A direction along an axis: x to the right (the inlet flow), y upward. */
+export type Direction = { axis: "x" | "y"; sign: 1 | -1 };
 
 /** How two answers compare. */
 export type Agreement = "agree" | "partial" | "differ" | "unknown";
@@ -201,28 +208,96 @@ const NOT_UNITS = new Set([
 /** Every number an answer states, with its unit; repeats of the same value dropped. */
 export function extractQuantities(answer: string): Quantity[] {
   const found: Quantity[] = [];
-  for (const match of plainAnswer(answer).matchAll(NUMBER_WITH_UNIT)) {
-    const [, sign, digits, exponent, rawUnit] = match;
+  const text = plainAnswer(answer);
+  const matches = [...text.matchAll(NUMBER_WITH_UNIT)];
+  matches.forEach((match, at) => {
+    const [whole, sign, digits, exponent, rawUnit] = match;
     const value = Number(`${sign === "-" ? "-" : ""}${digits.replace(/,/g, "")}${exponent ? `e${exponent}` : ""}`);
-    if (!Number.isFinite(value)) continue;
+    if (!Number.isFinite(value)) return;
     let unit = rawUnit.replace(/[·/^-]+$/, "");
     if (NOT_UNITS.has(unit.toLowerCase())) unit = "";
     const parsed = unit ? parseUnit(unit) : null;
+    // The words after it, up to the next number or the end of the line,
+    // say which way it acts.
+    const start = (match.index ?? 0) + whole.length;
+    const end = Math.min(matches[at + 1]?.index ?? text.length, text.indexOf("\n", start) === -1 ? text.length : text.indexOf("\n", start));
     const quantity: Quantity = {
       value,
       unit,
       si: parsed ? value * parsed.factor : null,
       dims: parsed ? parsed.dims : null,
+      signed: sign === "-" || sign === "+",
+      direction: directionIn(text.slice(start, end)),
     };
     // The same result stated twice ("= 142.9 N", later "142.9 N to the left"),
     // or as the equal and opposite force ("177.1 kN to the right", then
-    // "R_x = -177.1 kN" on the fluid). Only a near-exact repeat: within the
-    // 2% of a match, a resultant of 180 kN was dropped as a repeat of a
-    // 177 kN component (9 October 2026).
-    if (found.some((other) => (magnitudeGap(other, quantity) ?? Infinity) <= REPEAT_TOLERANCE)) continue;
+    // "R_x = -177.1 kN" on the fluid): the first time it is stated is the
+    // answer. Only a near-exact repeat: within the 2% of a match, a
+    // resultant of 180 kN was dropped as a repeat of a 177 kN component
+    // (9 October 2026).
+    if (found.some((other) => (magnitudeGap(other, quantity) ?? Infinity) <= REPEAT_TOLERANCE)) return;
     found.push(quantity);
-  }
+  });
   return found;
+}
+
+/**
+ * Words that give a direction, with the axis they are on: x to the right,
+ * as the inlet flow usually runs - so "upstream" is to the left - and y
+ * upward. "Above" and "below" are left out: they say where, not which way.
+ */
+const DIRECTION_WORDS: Array<{ pattern: RegExp; direction: Direction }> = [
+  {
+    pattern: /\bto the right\b|\brightwards?\b|\bright\b|(?<![A-Za-z0-9])\+\s*x\b|\bpositive x\b|\bdownstream\b/i,
+    direction: { axis: "x", sign: 1 },
+  },
+  {
+    pattern:
+      /\bto the left\b|\bleftwards?\b|\bleft\b|(?<![A-Za-z0-9])-\s*x\b|\bnegative x\b|\bupstream\b|\bopposite to (?:the )?(?:inlet )?flow\b|\bagainst the (?:inlet )?flow\b/i,
+    direction: { axis: "x", sign: -1 },
+  },
+  {
+    pattern: /\bupwards?\b|\bup\b(?!\s+to\b)|(?<![A-Za-z0-9])\+\s*y\b|\bpositive y\b/i,
+    direction: { axis: "y", sign: 1 },
+  },
+  {
+    pattern: /\bdownwards?\b|\bdown\b|(?<![A-Za-z0-9])-\s*y\b|\bnegative y\b/i,
+    direction: { axis: "y", sign: -1 },
+  },
+];
+
+/** The first direction the words give, if any. */
+function directionIn(words: string): Direction | null {
+  let first: { at: number; direction: Direction } | null = null;
+  for (const { pattern, direction } of DIRECTION_WORDS) {
+    const match = pattern.exec(words);
+    if (match && (!first || match.index < first.at)) first = { at: match.index, direction };
+  }
+  return first?.direction ?? null;
+}
+
+/**
+ * Whether two numbers of the same size point the same way (since 9 October
+ * 2026, the owner's rule: a difference in direction is a difference). Words
+ * come first - Gemini's "-29.99 kN (downward)" and DeepSeek's "30.0 kN
+ * downward" point the same way, Muse Spark's "30.0 kN in +y" the other - and
+ * a sign counts when there are no words. A bare size ("210 kN") says no
+ * direction, so it is not held against one in words. Two numbers in words
+ * on different axes are not the same thing at all.
+ */
+function directionRelation(a: Quantity, b: Quantity): "same" | "opposite" | "other" {
+  const signOf = (quantity: Quantity) => (quantity.value < 0 ? -1 : 1);
+  if (a.direction && b.direction) {
+    if (a.direction.axis !== b.direction.axis) return "other";
+    return a.direction.sign === b.direction.sign ? "same" : "opposite";
+  }
+  const worded = a.direction ?? b.direction;
+  if (worded) {
+    const plain = a.direction ? b : a;
+    if (!plain.signed) return "same";
+    return worded.sign === signOf(plain) ? "same" : "opposite";
+  }
+  return signOf(a) === signOf(b) ? "same" : "opposite";
 }
 
 function close(a: number, b: number) {
@@ -250,21 +325,21 @@ function magnitudeGap(a: Quantity, b: Quantity): number | null {
 /** Within one answer, a number this close to another is the same result stated again. */
 const REPEAT_TOLERANCE = 0.005;
 
-/** Whether two numbers are the same result, the same but for the sign, or different. */
-export function matchQuantities(a: Quantity, b: Quantity): "same" | "sign" | null {
+/** Whether two numbers are the same result, the same size pointing the other way, or different. */
+export function matchQuantities(a: Quantity, b: Quantity): "same" | "opposite" | null {
   const pair = comparable(a, b);
   if (!pair) return null;
   const [x, y] = pair;
-  if (close(x, y)) return "same";
-  if (close(Math.abs(x), Math.abs(y))) return "sign";
-  return null;
+  if (!close(Math.abs(x), Math.abs(y))) return null;
+  const relation = directionRelation(a, b);
+  return relation === "other" ? null : relation;
 }
 
 export type Comparison = {
   agreement: Agreement;
-  /** Numbers matched exactly, and matched but for the sign (a sign convention). */
+  /** Numbers matched, and matched in size but pointing the other way. */
   same: number;
-  sign: number;
+  opposite: number;
   /** Numbers of the same kind that both answers state and that do not match: real disagreements. */
   conflicts: number;
 };
@@ -291,60 +366,55 @@ function countKinds(quantities: Quantity[]) {
  * number of the same kind (a force, a length...) that both state and that
  * does not match:
  * - "agree": something matched, and nothing disagrees;
- * - "partial": something matched, and something disagrees;
+ * - "partial": something matched in size, and something disagrees - a
+ *   value, or a direction;
  * - "differ": nothing matched, and something disagrees;
  * - "unknown": nothing to weigh against each other.
- * A number matching but for its sign counts as a match (since 9 October
- * 2026): a direction is written as a sign by one solver and in words by
- * another - Gemini's "F_y = -29.99 kN (downward)" against DeepSeek's
- * "30.0 kN downward" - so the sizes are compared, and whether a direction
- * is right is the cross-check's to say.
+ * Directions count (directionRelation): the same size pointing the other
+ * way is a disagreement - the owner's rule, 9 October 2026.
  */
 export function compareAnswers(a: Quantity[], b: Quantity[]): Comparison {
-  if (!a.length || !b.length) return { agreement: "unknown", same: 0, sign: 0, conflicts: 0 };
+  if (!a.length || !b.length) return { agreement: "unknown", same: 0, opposite: 0, conflicts: 0 };
   const usedA = new Set<number>();
   const usedB = new Set<number>();
-  // Each number to the closest one it matches, not the first: a 177 kN
-  // component took a 179.65 kN resultant, within 2%, before the 177.13 kN
-  // listed after it.
-  const pair = (kind: "same" | "sign") => {
-    let count = 0;
-    a.forEach((quantity, at) => {
-      if (usedA.has(at)) return;
-      let index = -1;
-      let gap = Infinity;
-      b.forEach((other, bt) => {
-        if (usedB.has(bt) || matchQuantities(quantity, other) !== kind) return;
-        const distance = magnitudeGap(quantity, other) ?? Infinity;
-        if (distance < gap) {
-          gap = distance;
-          index = bt;
-        }
-      });
-      if (index < 0) return;
-      usedA.add(at);
-      usedB.add(index);
-      count += 1;
+  // Numbers are paired closest first, over both answers at once, and only
+  // then is each pair the same or the other way. Paired one by one in
+  // order, a 180 kN resultant within 2% of a 177.1 kN component took it
+  // before the 177 kN component it belongs with (9 October 2026).
+  const candidates: Array<{ at: number; bt: number; gap: number; relation: "same" | "opposite" }> = [];
+  a.forEach((quantity, at) => {
+    b.forEach((other, bt) => {
+      const relation = matchQuantities(quantity, other);
+      if (relation) candidates.push({ at, bt, gap: magnitudeGap(quantity, other) ?? Infinity, relation });
     });
-    return count;
-  };
-  const same = pair("same");
-  const sign = pair("sign");
+  });
+  // The closest first; at an equal distance, a pair pointing the same way.
+  candidates.sort((x, y) => x.gap - y.gap || (x.relation === "same" ? -1 : 1) - (y.relation === "same" ? -1 : 1));
+  let same = 0;
+  let opposite = 0;
+  for (const { at, bt, relation } of candidates) {
+    if (usedA.has(at) || usedB.has(bt)) continue;
+    usedA.add(at);
+    usedB.add(bt);
+    if (relation === "same") same += 1;
+    else opposite += 1;
+  }
   // Left over on both sides and of the same kind: the two answers give
   // different values for the same thing.
   const leftA = countKinds(a.filter((_, at) => !usedA.has(at)));
   const leftB = countKinds(b.filter((_, at) => !usedB.has(at)));
   let conflicts = 0;
   for (const [kind, count] of leftA) conflicts += Math.min(count, leftB.get(kind) ?? 0);
+  // Matched in size but pointing the other way: matched, and a disagreement.
   const agreement: Agreement =
-    same + sign === 0
+    same + opposite === 0
       ? conflicts > 0
         ? "differ"
         : "unknown"
-      : conflicts === 0
+      : conflicts === 0 && opposite === 0
         ? "agree"
         : "partial";
-  return { agreement, same, sign, conflicts };
+  return { agreement, same, opposite, conflicts };
 }
 
 export type AnswerGroups<K> = {
