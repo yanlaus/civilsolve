@@ -49,6 +49,7 @@ import { exportPdf } from "@/lib/exports";
 import { STEP_IDS } from "@/lib/journey";
 import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
+import type { AlignState } from "@/hooks/use-align";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { AnswerSummary } from "./answer-summary";
 import { AskPanel } from "./ask-panel";
@@ -263,6 +264,8 @@ export default function SolutionPanel({
   onCrossCheck,
   canQueueCrossCheck,
   onQueueCrossCheck,
+  alignment,
+  onCompareAgain,
   askThreads,
   askProgress,
   onAsk,
@@ -300,6 +303,9 @@ export default function SolutionPanel({
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
   /** Whether a cross-check asked for now waits for the solvers and is sent once they are done. */
   canQueueCrossCheck: boolean;
+  /** How the answers line up with each other, compared once every solver answered (hooks/use-align.ts). */
+  alignment: AlignState;
+  onCompareAgain: () => void;
   onQueueCrossCheck: (judge: ModelChoice, effort: EffortKey) => void;
   /** Questions about each solution, and their answers (hooks/use-ask.ts). */
   askThreads: AskThreads;
@@ -518,6 +524,8 @@ export default function SolutionPanel({
         canQueue={canQueueCrossCheck}
         onQueueCrossCheck={onQueueCrossCheck}
         onStopJudge={onStopJudge}
+        alignment={alignment}
+        onCompareAgain={onCompareAgain}
       />
 
       <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">

@@ -139,6 +139,7 @@ app.post("/api/interpret/:provider", (c) => handleTask(c, "interpret"));
 app.post("/api/judge/:provider", (c) => handleTask(c, "judge"));
 app.post("/api/study/:provider", (c) => handleTask(c, "study"));
 app.post("/api/ask/:provider", (c) => handleTask(c, "ask"));
+app.post("/api/align/:provider", (c) => handleTask(c, "align"));
 
 // Re-attach to a job after the connection dropped: the stored result, or
 // the rest of a run still in progress. Only well-formed ids reach the

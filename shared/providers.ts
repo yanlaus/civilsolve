@@ -226,6 +226,17 @@ export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
  */
 export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
 
+/**
+ * Who compares the answers with each other once every solver has answered
+ * (shared/align.ts, since 9 October 2026), at "low": DeepSeek Flash, the
+ * lightest draw on the OpenCode Go subscription. Measured on two sets of
+ * three answers (a pipe bifurcation whose forces one answer gave the other
+ * way, and a gate with one W different): it named both, in 19 s and 7 s.
+ * Muse Spark named both too, a little faster, but its free tier keeps what
+ * it is sent for training.
+ */
+export const DEFAULT_ALIGNER: ModelChoice = { provider: "deepseek" };
+
 export type ChannelKey = "poe" | "opencode" | "google" | "google-backup" | "minimax";
 
 export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "google-backup", "minimax"];

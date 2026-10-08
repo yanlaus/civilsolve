@@ -6,6 +6,7 @@ import { JourneyBar, JumpButton } from "@/components/solve/journey-bar";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { useAlign } from "@/hooks/use-align";
 import { useAsk } from "@/hooks/use-ask";
 import { useCompletionAlert } from "@/hooks/use-completion-alert";
 import { useHealth } from "@/hooks/use-health";
@@ -82,6 +83,7 @@ export default function CivilAnswerAppPage() {
     crossCheck,
     queueCrossCheck,
     canQueueCrossCheck,
+    sentHere,
     stopJudge,
     refineVerdict,
     studyRuns,
@@ -94,6 +96,14 @@ export default function CivilAnswerAppPage() {
   const { providerStatus } = useHealth();
   // Questions about a solution (問呢一步), answered in jobs of their own.
   const asks = useAsk({ runId, getBody });
+  // The answers compared with each other once every solver has answered.
+  const { alignment, compareAgain } = useAlign({
+    runId,
+    runs,
+    interpretation: confirmedInterpretation,
+    sentHere,
+    getBody,
+  });
   // Every question solved, kept in this browser for revision.
   const [historyOpen, setHistoryOpen] = useState(false);
   useHistory({
@@ -519,6 +529,8 @@ export default function CivilAnswerAppPage() {
             onCrossCheck={crossCheck}
             canQueueCrossCheck={canQueueCrossCheck}
             onQueueCrossCheck={queueCrossCheck}
+            alignment={alignment}
+            onCompareAgain={compareAgain}
             askThreads={asks.threads}
             askProgress={asks.progress}
             onAsk={asks.ask}

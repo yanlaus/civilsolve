@@ -7,6 +7,7 @@
 // Durable Object - the request body is, and both sides turn it into the same
 // task here.
 
+import { alignSchema, parseAlign } from "../shared/align";
 import { askSchema, parseAsk } from "../shared/ask";
 import {
   interpretationSchema,
@@ -15,7 +16,9 @@ import {
 } from "../shared/interpretation";
 import { judgementSchema, MAX_JUDGED_SOLUTIONS, parseJudgement } from "../shared/judgement";
 import {
+  ALIGN_INSTRUCTIONS,
   ASK_INSTRUCTIONS,
+  buildAlignPrompt,
   buildAskPrompt,
   buildInterpretPrompt,
   buildJudgePrompt,
@@ -43,6 +46,9 @@ import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
 import {
   DATA_URL_PATTERN,
+  MAX_ALIGN_ANSWER_TEXT,
+  MAX_ALIGN_ANSWERS,
+  MAX_ALIGN_QUESTION_TEXT,
   MAX_ASK_ANSWER_TEXT,
   MAX_ASK_HISTORY,
   MAX_IMAGES,
@@ -58,9 +64,9 @@ import {
 import { interpretOverride, variantOverride, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
-export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask";
+export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align";
 
-export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask"];
+export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align"];
 
 export function isTaskKind(value: string): value is TaskKind {
   return (TASK_KINDS as string[]).includes(value);
@@ -145,6 +151,7 @@ export function buildTask(
   if (kind === "interpret") return buildInterpret(providerName, body, env, variant);
   if (kind === "study") return buildStudy(providerName, body, env, variant);
   if (kind === "ask") return buildAsk(providerName, body, env, variant);
+  if (kind === "align") return buildAlign(providerName, body, env, variant);
   return buildJudge(providerName, body, env, variant);
 }
 
@@ -466,6 +473,49 @@ function buildAsk(
       },
       finalize: (rawText, { lastAttempt }) => ({
         answer: parseAsk(rawText, provider, { allowIncomplete: lastAttempt }),
+      }),
+    },
+  };
+}
+
+/**
+ * The answers compared with each other (shared/align.ts): their final
+ * answers as text and the question in words - no images, so it is quick.
+ */
+function buildAlign(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
+  const answers = (Array.isArray(body.answers) ? body.answers : [])
+    .map((answer) => readText(answer, MAX_ALIGN_ANSWER_TEXT))
+    .filter(Boolean);
+  if (answers.length < 2 || answers.length > MAX_ALIGN_ANSWERS) {
+    return { error: `Compare between 2 and ${MAX_ALIGN_ANSWERS} answers.`, status: 400 };
+  }
+  const question = readText(body.question, MAX_ALIGN_QUESTION_TEXT);
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "low";
+  const count = answers.length;
+
+  return {
+    params: {
+      provider,
+      env,
+      effort,
+      routeOverride: variantOverride(provider, variant, env),
+      task: {
+        session: crypto.randomUUID(),
+        prompt: ({ enforceShape }) => buildAlignPrompt(answers, question, notes, { enforceShape }),
+        instructions: ALIGN_INSTRUCTIONS,
+        schemaName: "civil_answer_alignment",
+        schema: alignSchema as unknown as Record<string, unknown>,
+        images: [],
+      },
+      finalize: (rawText, { lastAttempt }) => ({
+        comparison: parseAlign(rawText, provider, count, { allowIncomplete: lastAttempt }),
       }),
     },
   };

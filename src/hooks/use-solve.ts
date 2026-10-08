@@ -318,6 +318,13 @@ export function useSolve() {
    */
   const waveRef = useRef<object | null>(null);
   const [canQueueCrossCheck, setCanQueueCrossCheck] = useState(false);
+  /**
+   * Whether this run's answers were sent from this page - by Solve, a retry,
+   * a solver added or a re-generation - rather than only picked back up
+   * after a reload: the answers are compared by themselves only then
+   * (use-align.ts), since nothing is sent on page load.
+   */
+  const [sentHere, setSentHere] = useState(false);
   const bodyRef = useRef<SolveRequestBody | null>(null);
   /** The interpretation's display extras, saved with the body. */
   const extrasRef = useRef<InterpretationExtras | undefined>(undefined);
@@ -479,6 +486,7 @@ export function useSolve() {
     runRef.current = null;
     waveRef.current = null;
     setCanQueueCrossCheck(false);
+    setSentHere(false);
     setRunId(null);
     setBody(null);
     setRuns(IDLE_RUNS);
@@ -809,6 +817,7 @@ export function useSolve() {
       const wave = {};
       waveRef.current = body ? wave : null;
       setCanQueueCrossCheck(Boolean(body));
+      setSentHere(Boolean(body));
       void (async () => {
         // A copy: a solver added while these run is started on its own.
         await runPool([...run.providers], SOLVE_CONCURRENCY, (provider) =>
@@ -927,6 +936,7 @@ export function useSolve() {
       const run = runRef.current;
       const body = bodyRef.current;
       if (!run || !body) return;
+      setSentHere(true);
       const signal = currentSignal();
       if (!run.providers.includes(provider)) {
         run.providers = PROVIDER_KEYS.filter((key) => key === provider || run.providers.includes(key));
@@ -958,6 +968,7 @@ export function useSolve() {
       const previous = doneRef.current.get(provider);
       const wanted = instructions.trim();
       if (!run || !body || !previous || !wanted) return;
+      setSentHere(true);
       const signal = currentSignal();
       delete run.solveJobs[provider];
       persist();
@@ -1202,6 +1213,7 @@ export function useSolve() {
     crossCheck,
     queueCrossCheck,
     canQueueCrossCheck,
+    sentHere,
     stopJudge,
     refineVerdict,
     studyRuns,
