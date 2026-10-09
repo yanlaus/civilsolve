@@ -1,8 +1,10 @@
 // Upstream channel adapters.
 //
 // Every provider is reached through exactly one "channel" (Poe, OpenCode Go,
-// Google), resolved from env at request time. Channels speak three different
-// API dialects, so this module owns:
+// Google), resolved from env at request time. Channels speak four different
+// API dialects (OpenAI Responses, chat completions, Gemini, and since
+// 10 October 2026 Anthropic Messages, for Claude Haiku on OpenCode Go), so
+// this module owns:
 //
 //   - route resolution (which channel/model/key/endpoint for a provider)
 //   - request building per dialect, including the reasoning-effort parameter
@@ -23,7 +25,7 @@ import {
   type ProviderStatus,
 } from "../shared/providers";
 
-export type Dialect = "responses" | "chat-completions" | "gemini";
+export type Dialect = "responses" | "chat-completions" | "gemini" | "messages";
 
 export type WorkerEnv = {
   // --- Bindings -----------------------------------------------------------
@@ -85,6 +87,7 @@ export type WorkerEnv = {
   MINIMAX_CHANNEL?: string;
   KIMI_CHANNEL?: string;
   MUSE_CHANNEL?: string;
+  HAIKU_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   // A value may be a chain, primary first: "gemini-3.8-flash,gemini-3.5-flash".
@@ -101,6 +104,7 @@ export type WorkerEnv = {
   MINIMAX_MODEL?: string;
   OPENCODE_KIMI_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
+  OPENCODE_HAIKU_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   /** The model behind Gemini's "Pro" pick (PROVIDER_VARIANTS). */
   GOOGLE_GEMINI_PRO_MODEL?: string;
@@ -164,6 +168,16 @@ const CLAMPED_EFFORT: EffortSpec = {
 const GEMINI_LEVEL: EffortSpec = {
   kind: "enum",
   values: { low: "low", medium: "medium", high: "high", max: "high" },
+};
+
+// Claude Haiku 5.5 on the Messages API: adaptive thinking, its depth set by
+// output_config.effort (low, medium, high, xhigh, max; the model's own
+// default is medium). The owner wants it at "xhigh" or above (10 October
+// 2026): the UI's High sends "xhigh", Max sends "max", and the route floors
+// at High (minEffort), so nothing lower is ever sent.
+const HAIKU_EFFORT: EffortSpec = {
+  kind: "enum",
+  values: { high: "xhigh", max: "max" },
 };
 
 /**
@@ -535,6 +549,25 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       region: "wnam",
     },
   },
+  // Claude Haiku 5.5 on OpenCode Go (10 October 2026, the owner's pick, in
+  // Muse Spark's card): the gateway serves it on the Anthropic Messages API
+  // only - /responses and /chat/completions answer 400
+  // ModelProtocolUnsupported - hence the "messages" dialect. $0.10 / $0.50
+  // per 1M tokens on the Go plan, under a monthly cap of its own. Verified to
+  // read a diagram: the beam image's span, UDL and point load, at "xhigh",
+  // with the strict schema held, in 6 s.
+  haiku: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "messages",
+      pathSuffix: "/messages",
+      modelVar: "OPENCODE_HAIKU_MODEL",
+      defaultModel: "claude-haiku-5-5",
+      effort: HAIKU_EFFORT,
+      minEffort: "high",
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+    },
+  },
 };
 
 /**
@@ -561,6 +594,7 @@ const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
   minimax: ["minimax", "opencode"],
   kimi: ["opencode"],
   muse: ["opencode"],
+  haiku: ["opencode"],
 };
 
 /**
@@ -585,6 +619,7 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   minimax: "MINIMAX_CHANNEL",
   kimi: "KIMI_CHANNEL",
   muse: "MUSE_CHANNEL",
+  haiku: "HAIKU_CHANNEL",
 };
 
 export type Route = {
@@ -950,6 +985,23 @@ function toInlineData(dataUrl: string) {
   return { inline_data: { mime_type: match[1], data: match[2] } };
 }
 
+/** An Anthropic Messages image block from a data URL. */
+function toImageBlock(dataUrl: string) {
+  const match = DATA_URL.exec(dataUrl);
+  if (!match) return null;
+  return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
+}
+
+/**
+ * The Messages API needs an output cap on every request: Haiku 5.5's
+ * ceiling, 128K. Thinking counts against it. At 64K - Anthropic's usual
+ * figure for a streamed request - Haiku at "max" spent all of it thinking
+ * on the pipe-bifurcation question and wrote nothing (10 October 2026); a
+ * run that still spends it all is retried a level down (isThinkingExhausted).
+ * Billed per token used, not per token allowed.
+ */
+const MESSAGES_MAX_TOKENS = 128_000;
+
 /** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
 function channelHeaders(route: Route, task: Task): Record<string, string> {
   if (route.channel === "opencode") {
@@ -1021,6 +1073,49 @@ export function buildRequest(
         contents: [{ role: "user", parts }],
         ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
       }),
+    };
+  }
+
+  if (route.dialect === "messages") {
+    // The question's images first, as Anthropic advises, then the prompt,
+    // then any lecture notes behind their marker.
+    const content: Array<Record<string, unknown>> = [
+      ...images.flatMap((image) => toImageBlock(image) ?? []),
+      { type: "text", text: prompt },
+      ...(referenceImages.length
+        ? [
+            { type: "text", text: REFERENCE_MARKER },
+            ...referenceImages.flatMap((image) => toImageBlock(image) ?? []),
+          ]
+        : []),
+    ];
+    const outputConfig: Record<string, unknown> = {};
+    const messagesEffort = caps.reasoning ? enumEffort(route, effort) : undefined;
+    if (messagesEffort) outputConfig.effort = messagesEffort;
+    // Strict only: the Messages API has no plain JSON mode, so the "loose"
+    // rung sends no format, like "none", and the prompt carries the fields.
+    if (caps.schema === "strict") outputConfig.format = { type: "json_schema", schema };
+    const messagesBody: Record<string, unknown> = {
+      model: route.model,
+      max_tokens: MESSAGES_MAX_TOKENS,
+      system: instructions,
+      messages: [{ role: "user", content }],
+    };
+    if (messagesEffort) messagesBody.thinking = { type: "adaptive" };
+    if (Object.keys(outputConfig).length) messagesBody.output_config = outputConfig;
+    if (stream) messagesBody.stream = true;
+
+    return {
+      url: route.endpoint,
+      headers: {
+        "x-api-key": route.apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "User-Agent": UPSTREAM_UA,
+        ...extraHeaders,
+        ...(stream ? { Accept: "text/event-stream" } : {}),
+      },
+      body: JSON.stringify(messagesBody),
     };
   }
 
@@ -1147,6 +1242,11 @@ export function isReasoningOnlyFrame(dialect: Dialect, data: string): boolean {
       !/"finish_reason"\s*:\s*"/.test(data)
     );
   }
+  if (dialect === "messages") {
+    // content_block_delta frames of a thinking block: its (empty by default)
+    // text and its signature. Answer text comes as text_delta.
+    return /"type"\s*:\s*"(thinking_delta|signature_delta)"/.test(data) && !data.includes('"text_delta"');
+  }
   return false;
 }
 
@@ -1171,13 +1271,24 @@ export function isTerminalFrame(dialect: Dialect, event: Record<string, unknown>
   if (dialect === "chat-completions") {
     return Boolean(readString(asRecord(asArray(event.choices)[0]), "finish_reason"));
   }
+  if (dialect === "messages") {
+    return (
+      event.type === "message_stop" ||
+      (event.type === "message_delta" && Boolean(readString(asRecord(event.delta), "stop_reason")))
+    );
+  }
   // gemini: a candidate carrying finishReason.
   return asArray(event.candidates).some((c) => Boolean(readString(asRecord(c), "finishReason")));
 }
 
 /** SSE payload that ends the stream, if the dialect uses one. */
 export function streamTerminator(dialect: Dialect) {
-  return dialect === "gemini" ? null : "[DONE]";
+  return dialect === "gemini" || dialect === "messages" ? null : "[DONE]";
+}
+
+/** Why a Messages API response stopped: streamed in message_delta, or on the message itself. */
+function messagesStopReason(payload: Record<string, unknown>) {
+  return readString(asRecord(payload.delta), "stop_reason") || readString(payload, "stop_reason");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1238,6 +1349,14 @@ export function extractDelta(dialect: Dialect, event: Record<string, unknown>): 
     return readString(delta, "content");
   }
 
+  if (dialect === "messages") {
+    // Only text_delta; thinking_delta and signature_delta belong to thinking.
+    const delta = asRecord(event.delta);
+    return event.type === "content_block_delta" && readString(delta, "type") === "text_delta"
+      ? readString(delta, "text")
+      : "";
+  }
+
   return geminiText(event);
 }
 
@@ -1254,6 +1373,16 @@ export function extractFinalText(dialect: Dialect, payload: Record<string, unkno
     if (content.trim()) return content.trim();
     // Some servers return the streamed shape on the final frame.
     return readString(asRecord(choice?.delta), "content").trim();
+  }
+
+  if (dialect === "messages") {
+    // Text blocks only; thinking blocks are never part of the answer.
+    return asArray(payload.content)
+      .map((block) => asRecord(block))
+      .filter((block) => readString(block, "type") === "text")
+      .map((block) => readString(block, "text"))
+      .join("")
+      .trim();
   }
 
   if (typeof payload.output_text === "string" && payload.output_text.trim()) {
@@ -1333,6 +1462,9 @@ export function hitOutputCap(dialect: Dialect, payload: Record<string, unknown>)
   if (dialect === "chat-completions") {
     return readString(asRecord(asArray(payload.choices)[0]), "finish_reason") === "length";
   }
+  if (dialect === "messages") {
+    return messagesStopReason(payload) === "max_tokens";
+  }
   return false;
 }
 
@@ -1370,6 +1502,12 @@ export function extractPayloadError(dialect: Dialect, payload: Record<string, un
 
   if (isThinkingExhausted(dialect, payload)) {
     return "the model used its whole token budget thinking and never wrote an answer.";
+  }
+
+  // A safety classifier declined the request: HTTP 200, stop_reason
+  // "refusal". Haiku has no server-side fallback model.
+  if (dialect === "messages" && messagesStopReason(payload) === "refusal") {
+    return "the model declined to answer this request.";
   }
 
   if (dialect === "gemini") {

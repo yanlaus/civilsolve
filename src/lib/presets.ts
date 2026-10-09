@@ -33,11 +33,12 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Preset> = {
   // and reconciler first; the cross-check (ChatGPT at high, the most
   // reliable judge measured - AGENTS.md) when the student asks for it.
   careful: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: false },
-  // Three solvers and nothing else: ChatGPT and DeepSeek on the OpenCode Go
-  // subscription, and Gemini (3.8 Flash) since 4 October 2026 (the owner's
-  // call - a billed Flash call on the Vertex AI prepaid credit). ChatGPT
-  // replaced Muse Spark on 10 October 2026, as in DEFAULT_SOLVERS.
-  quick: { providers: ["chatgpt", "deepseek", "gemini"], effort: "high", verify: false, autoCheck: false },
+  // Three solvers and nothing else: Claude Haiku and DeepSeek on the OpenCode
+  // Go subscription, and Gemini (3.8 Flash) since 4 October 2026 (the
+  // owner's call - a billed Flash call on the Vertex AI prepaid credit).
+  // Claude Haiku replaced Muse Spark on 10 October 2026, as in
+  // DEFAULT_SOLVERS.
+  quick: { providers: ["haiku", "deepseek", "gemini"], effort: "high", verify: false, autoCheck: false },
 };
 
 export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blurb: string }> = [
