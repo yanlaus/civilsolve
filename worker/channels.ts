@@ -237,9 +237,10 @@ type RouteSpec = {
    * Where the call has to come from, as a Durable Object location hint, for
    * a model served in some countries only. A task's TaskJob is otherwise
    * placed near whoever asked; handleTask in worker/index.ts places it here
-   * instead. It helps only where the upstream judges the country by where
-   * the call comes from - Muse Spark's still refused a student in Hong Kong
-   * (see its route, and isRegionRefusal in run.ts).
+   * instead. It does not change the country an upstream sees: Cloudflare
+   * passes the visitor's country on to the job's subrequests wherever it
+   * runs (measured, 9 October 2026 - see the Muse route, and
+   * isRegionRefusal in run.ts).
    */
   region?: DurableObjectLocationHint;
 };
@@ -522,12 +523,15 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // travelling got 403 "This model is not available in your country."
       // (9 October 2026), while the same call from Japan was answered. The
       // job runs in North America, Meta's home market, at the owner's
-      // choice - but a student in Hong Kong still got the 403 after that,
-      // so the gateway seems to see where the student is, most likely by
-      // the visitor's IP that Cloudflare passes on with a Worker's
-      // subrequests (x-real-ip; untested). run.ts then says so plainly
-      // (isRegionRefusal). Do not go further - forging the IP, a proxy: the
-      // restriction is Meta's, and evading it risks the workspace.
+      // choice - but a student in Hong Kong still got the 403 after that.
+      // Measured with a probe the same day: the hint is honoured (a job
+      // hinted "weur" ran in Amsterdam), but Cloudflare passes the visitor's
+      // country on to every subrequest made on their behalf, the job's
+      // included - the gateway saw "JP" for a Japanese visitor whichever
+      // colo the job ran in. So the placement cannot change the country;
+      // run.ts says so plainly instead (isRegionRefusal). Do not hide the
+      // student's country from the gateway: the restriction is Meta's, on
+      // where the student is.
       region: "wnam",
     },
   },
