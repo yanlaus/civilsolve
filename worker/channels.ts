@@ -236,9 +236,10 @@ type RouteSpec = {
   /**
    * Where the call has to come from, as a Durable Object location hint, for
    * a model served in some countries only. A task's TaskJob is otherwise
-   * placed near whoever asked, and the upstream judges the country by where
-   * the call comes from - so the same model answers at home and refuses a
-   * student abroad. handleTask in worker/index.ts places the job here instead.
+   * placed near whoever asked; handleTask in worker/index.ts places it here
+   * instead. It helps only where the upstream judges the country by where
+   * the call comes from - Muse Spark's still refused a student in Hong Kong
+   * (see its route, and isRegionRefusal in run.ts).
    */
   region?: DurableObjectLocationHint;
 };
@@ -517,12 +518,16 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // six values from the B.8 image.
       defaultModel: "muse-spark-1.3-contributor",
       effort: CLAMPED_EFFORT,
-      // Meta offers the contributor tier in some countries only, and the
-      // gateway judges the country by where the call comes from: students
+      // Meta offers the contributor tier in some countries only: students
       // travelling got 403 "This model is not available in your country."
-      // from a job placed near them (9 October 2026), while the same call
-      // from Japan was answered. North America is Meta's home market, so the
-      // job runs there, wherever the student is.
+      // (9 October 2026), while the same call from Japan was answered. The
+      // job runs in North America, Meta's home market, at the owner's
+      // choice - but a student in Hong Kong still got the 403 after that,
+      // so the gateway seems to see where the student is, most likely by
+      // the visitor's IP that Cloudflare passes on with a Worker's
+      // subrequests (x-real-ip; untested). run.ts then says so plainly
+      // (isRegionRefusal). Do not go further - forging the IP, a proxy: the
+      // restriction is Meta's, and evading it risks the workspace.
       region: "wnam",
     },
   },

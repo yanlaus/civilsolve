@@ -132,6 +132,8 @@ type UpstreamError = Error & {
   partialText?: string;
   /** What the upstream said inside a stream that stopped partway, if anything. */
   upstreamDetail?: string;
+  /** The upstream does not serve this model in the country the request comes from (isRegionRefusal). */
+  regionRefused?: boolean;
 };
 
 function isRetryableStatus(status: number) {
@@ -201,13 +203,36 @@ function isSilentRejection(status: number, body: string) {
   return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
 
+const REGION_WORDS =
+  /not (available|supported|offered) in your (country|region|location)|(country|region|location) (is )?not supported|unsupported (country|region|location)/i;
+
+/**
+ * The upstream will not serve this model where the request comes from.
+ * OpenCode Go answers Muse Spark's contributor tier - which Meta offers in
+ * some countries only - with 403 "This model is not available in your
+ * country." to a student in Hong Kong (9 October 2026), and still did once
+ * the job ran in North America (RouteSpec.region). No retry changes where
+ * the student is, so the error says so plainly - not "HTTP 403", and not a
+ * refused account.
+ */
+function isRegionRefusal(status: number, body: string) {
+  return (status === 403 || status === 451) && REGION_WORDS.test(body);
+}
+
 function upstreamError(label: string, status: number, body: string): UpstreamError {
+  const detail = errorBodyMessage(body);
+  const regionRefused = isRegionRefusal(status, body);
   const error = new Error(
-    `${label} failed with HTTP ${status}: ${errorBodyMessage(body)}`,
+    regionRefused
+      ? `${label} is not offered in the country you are in now - its maker serves it in some countries only ` +
+          `(HTTP ${status}: ${detail}). Use another model for this; the others are not affected. ` +
+          `· 你而家身處嘅國家用唔到呢個 model（佢只喺部分國家提供），請改用其他 model；其他 model 唔受影響。`
+      : `${label} failed with HTTP ${status}: ${detail}`,
   ) as UpstreamError;
   error.status = status;
   error.body = body;
   error.retryable = isRetryableStatus(status) || isSilentRejection(status, body);
+  if (regionRefused) error.regionRefused = true;
   return error;
 }
 
@@ -615,7 +640,11 @@ export async function runTask(
             lastError.message.replace(`${route.label}: `, "")
           ).slice(0, 140);
           const code = lastError.status ? `HTTP ${lastError.status}: ` : "";
-          const why = `refused the account (${code}${detail}) - its plan or credit may have run out`;
+          // Another channel is another upstream, which may serve the model
+          // where this one does not.
+          const why = lastError.regionRefused
+            ? `is not offered in the country you are in now (${code}${detail})`
+            : `refused the account (${code}${detail}) - its plan or credit may have run out`;
           if (await switchChannel(why)) continue;
         }
 
