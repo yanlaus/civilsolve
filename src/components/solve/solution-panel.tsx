@@ -76,7 +76,7 @@ import {
 } from "./task-status";
 import { PROVIDER_OPTIONS } from "./upload-form";
 
-/** The solution tabs' order: ChatGPT first, then picker order (SOLUTION_ORDER). */
+/** The solution tabs' order: Claude Haiku first, then picker order (SOLUTION_ORDER). */
 const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
   PROVIDER_OPTIONS.filter((provider) => provider.key === key),
 );
@@ -346,8 +346,8 @@ export default function SolutionPanel({
   // the student back to the question box.
   const [askStep, setAskStep] = useState<{ provider: ProviderKey; step: SolutionStep; at: number } | null>(null);
 
-  // ChatGPT's tab first, then the rest in picker order (the owner's call -
-  // Muse Spark's was first from 30 September to 10 October 2026). The
+  // Claude Haiku's tab first, then the rest in picker order (the owner's
+  // call - Muse Spark's was first from 30 September to 10 October 2026). The
   // judge's A, B... stay in picker order.
   const visibleProviders = SOLUTION_TAB_ORDER.filter(
     (provider) => runs[provider.key].status !== "idle",

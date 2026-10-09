@@ -11,12 +11,14 @@ import type { ProviderKey } from "../../../shared/providers";
 
 // The vendors' own marks, from @lobehub/icons-static-svg 1.95.1 (MIT License,
 // Copyright (c) LobeHub); each logo is a trademark of its owner. ChatGPT wears
-// the OpenAI mark, MiMo Xiaomi MiMo's, and Muse Spark Meta's. Kimi's K is
-// black instead of the colour file's white, which is made for a dark tile.
+// the OpenAI mark, MiMo Xiaomi MiMo's, and Muse Spark Meta's; Claude Haiku
+// shares Claude's. Kimi's K is black instead of the colour file's white,
+// which is made for a dark tile.
 // Drawn as <img> so the gradient ids inside the files cannot clash.
 const LOGOS: Record<ProviderKey, string> = {
   chatgpt,
   claude,
+  haiku: claude,
   deepseek,
   gemini,
   grok,

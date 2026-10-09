@@ -136,17 +136,17 @@ export function StudyNotes({
   /** The browser's print dialog for a kind's notes, when the server cannot make the PDF. */
   onPrint: (kind: StudyKind) => void;
 }) {
-  // What the notes can start from now, the first being the default:
-  // ChatGPT's solution when it has one, as its tab comes first too (Muse
+  // What the notes can start from now, the first being the default: Claude
+  // Haiku's solution when it has one, as its tab comes first too (Muse
   // Spark's until 10 October 2026 - the owner's calls), then the verified
   // answer when the cross-check has given one, then each other finished
   // solution, in tab order.
   const judged = judgeRun.status === "done" ? judgeRun : null;
   const finished = SOLUTION_ORDER.filter((key) => runs[key].status === "done");
   const sources: StudySource[] = [
-    ...finished.filter((key) => key === "chatgpt"),
+    ...finished.filter((key) => key === "haiku"),
     ...(judged ? (["verdict"] as const) : []),
-    ...finished.filter((key) => key !== "chatgpt"),
+    ...finished.filter((key) => key !== "haiku"),
   ];
   const sourceLabel = (source: StudySource) =>
     source === "verdict" ? `Verified answer (${judgeLabel}'s verdict)` : `${nameOf(source)}'s solution`;
@@ -249,7 +249,7 @@ function StudyCard({
   const writers = MODEL_CHOICES.filter((choice) => configured(choice.provider));
 
   // What to start from: the user's pick while it is still on the page, else
-  // the first in the list - ChatGPT's solution, else the verified answer,
+  // the first in the list - Claude Haiku's solution, else the verified answer,
   // else the first finished solution.
   const [sourcePick, setSourcePick] = useState<StudySource | null>(null);
   const source: StudySource | undefined =

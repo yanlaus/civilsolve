@@ -26,20 +26,23 @@ export type ProviderKey =
   | "mimo"
   | "minimax"
   | "kimi"
-  | "muse";
+  | "muse"
+  | "haiku";
 
 /**
  * Every provider, in picker order - the order of the solver cards, the
- * reader and judge lists, the solution tabs (ChatGPT's first - SOLUTION_ORDER)
- * and the letters the judge sees.
+ * reader and judge lists, the solution tabs (Claude Haiku's first -
+ * SOLUTION_ORDER) and the letters the judge sees.
  * The two dearest (Grok, Claude) close the solvers. The solver cards use
  * SOLVER_KEYS, which leaves out the review-only providers.
  */
 export const PROVIDER_KEYS: ProviderKey[] = [
   // The owner's order (26 September 2026): nine cards, three by three.
-  // Muse Spark before DeepSeek since 2 October 2026, at the owner's request.
+  // Muse Spark before DeepSeek since 2 October 2026, at the owner's request;
+  // Claude Haiku in Muse Spark's card since 10 October 2026, and Muse Spark,
+  // review-only from then, last.
   "chatgpt",
-  "muse",
+  "haiku",
   "deepseek",
   "kimi",
   "mimo",
@@ -47,18 +50,20 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "gemini",
   "grok",
   "claude",
+  "muse",
 ];
 
 /**
  * The solution tabs' order, which the study notes' "Start from" follows too:
- * ChatGPT's first, always, then picker order. Muse Spark's was first from
- * 30 September 2026; ChatGPT took its place on 10 October 2026, with every
- * other default Muse Spark held (the owner's call): Meta serves Muse Spark's
- * free tier in some countries only, and students abroad got 403s.
+ * Claude Haiku's first, always, then picker order. Muse Spark's was first
+ * from 30 September 2026; on 10 October 2026 Meta's country limit on its
+ * free tier (students abroad got 403s) took it out of every default - for
+ * part of that day ChatGPT's, then Claude Haiku's, the default solver in its
+ * place (the owner's calls).
  */
 export const SOLUTION_ORDER: ProviderKey[] = [
-  "chatgpt",
-  ...PROVIDER_KEYS.filter((key) => key !== "chatgpt"),
+  "haiku",
+  ...PROVIDER_KEYS.filter((key) => key !== "haiku"),
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
@@ -68,11 +73,12 @@ export function isProviderKey(value: string): value is ProviderKey {
 /**
  * Offered as a reader or reconciler in the interpretation pass and as the
  * cross-check judge, but never as a solver: no card, and /api/solve refuses
- * them. Empty since 26 September 2026. Kimi was here from 25 September, and
- * Gemini for part of 26 September while its free Google key failed; both
- * solve now.
+ * them. Kimi was here from 25 September 2026, and Gemini for part of
+ * 26 September while its free Google key failed; both solve now. Muse Spark
+ * since 10 October 2026, when Claude Haiku took its card (the owner's call):
+ * Meta serves its free tier in some countries only (AGENTS.md).
  */
-export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>();
+export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["muse"]);
 
 /** The solver cards, in picker order: every provider that is not review-only. */
 export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(
@@ -93,6 +99,7 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   minimax: "MiniMax",
   kimi: "Kimi",
   muse: "Muse Spark",
+  haiku: "Claude Haiku",
 };
 
 /**
@@ -198,13 +205,15 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
  * production the same day, though it was 2/2 at "high". Gemini is ticked
  * since 1 October 2026, at the owner's request, on its card's default model
  * (3.8 Flash): billed per call, but both Google projects are capped at their
- * monthly AI Pro credit, and the second key backs the first up. ChatGPT
- * (gpt-5.6-luna at "high" or "max", on the Go subscription) is ticked in
+ * monthly AI Pro credit, and the second key backs the first up. Claude
+ * Haiku (Haiku 5.5 at "xhigh" or "max", on the Go subscription) is ticked in
  * Muse Spark's place since 10 October 2026, at the owner's request: Muse
  * Spark's free tier answered students abroad "This model is not available in
- * your country." (AGENTS.md). Muse Spark is still a card to tick.
+ * your country." (AGENTS.md). ChatGPT stood in for part of that day; it is
+ * no default solver now, so the default judge (ChatGPT) grades no solution
+ * of its own.
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["chatgpt", "deepseek", "gemini"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["haiku", "deepseek", "gemini"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
