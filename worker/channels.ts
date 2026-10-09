@@ -233,6 +233,14 @@ type RouteSpec = {
    * "rejected the strict JSON schema" line - finding that out again.
    */
   startSchema?: Capabilities["schema"];
+  /**
+   * Where the call has to come from, as a Durable Object location hint, for
+   * a model served in some countries only. A task's TaskJob is otherwise
+   * placed near whoever asked, and the upstream judges the country by where
+   * the call comes from - so the same model answers at home and refuses a
+   * student abroad. handleTask in worker/index.ts places the job here instead.
+   */
+  region?: DurableObjectLocationHint;
 };
 
 const POE_SPEC = {
@@ -509,6 +517,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // six values from the B.8 image.
       defaultModel: "muse-spark-1.3-contributor",
       effort: CLAMPED_EFFORT,
+      // Meta offers the contributor tier in some countries only, and the
+      // gateway judges the country by where the call comes from: students
+      // travelling got 403 "This model is not available in your country."
+      // from a job placed near them (9 October 2026), while the same call
+      // from Japan was answered. North America is Meta's home market, so the
+      // job runs there, wherever the student is.
+      region: "wnam",
     },
   },
 };
@@ -599,6 +614,8 @@ export type Route = {
   structured: boolean;
   /** The schema rung to start on (RouteSpec.startSchema); "strict" when unset. */
   startSchema: Capabilities["schema"];
+  /** Where the job has to run for the upstream to serve it (RouteSpec.region); near the user when unset. */
+  region?: DurableObjectLocationHint;
   /** "Claude (via Poe)" - used in every user-facing message. */
   label: string;
   configured: boolean;
@@ -714,6 +731,7 @@ export function resolveRoute(
     streaming: spec.streaming !== false,
     structured: spec.structured !== false,
     startSchema: spec.startSchema ?? "strict",
+    region: spec.region,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
     configured: Boolean(apiKey),
     problem:

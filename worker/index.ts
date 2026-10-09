@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { PROVIDER_KEYS, type HealthResponse, type ProviderKey, type ProviderStatus } from "../shared/providers";
 import { MAX_BODY_BYTES } from "../shared/stream-protocol";
-import { routeStatus, type WorkerEnv } from "./channels";
+import { resolveRoute, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
 import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
@@ -97,8 +97,8 @@ function startInlineSse(c: AppContext, params: RunTaskParams) {
 }
 
 /**
- * The one handler behind /api/solve, /api/interpret, /api/judge, /api/study
- * and /api/ask. The task
+ * The one handler behind /api/solve, /api/interpret, /api/judge, /api/study,
+ * /api/ask and /api/align. The task
  * is built here first so a bad request gets its 400 at once. Then it runs in
  * a TaskJob Durable Object of its own, which carries on when the page goes
  * away and keeps the answer for GET /api/jobs/:id; the job's first event
@@ -119,7 +119,11 @@ async function handleTask(c: AppContext, kind: TaskKind) {
   if (!jobs) return startInlineSse(c, built.params);
 
   const jobId = crypto.randomUUID();
-  const job = jobs.get(jobs.idFromName(jobId));
+  // Near whoever asked, unless the route has to call from somewhere else -
+  // a model served in some countries only (RouteSpec.region: Muse Spark).
+  // The hint counts on creation only; a re-attach finds the job where it is.
+  const { region } = resolveRoute(built.params.provider, c.env, built.params.routeOverride);
+  const job = jobs.get(jobs.idFromName(jobId), region ? { locationHint: region } : undefined);
   const query = new URLSearchParams({ jobId, kind, provider });
   return job.fetch(`https://job/run?${query}`, { method: "POST", body: parsed.raw });
 }
