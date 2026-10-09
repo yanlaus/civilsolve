@@ -30,8 +30,8 @@ export type ProviderKey =
 
 /**
  * Every provider, in picker order - the order of the solver cards, the
- * reader and judge lists, the solution tabs (after Muse Spark's, always first -
- * SOLUTION_ORDER) and the letters the judge sees.
+ * reader and judge lists, the solution tabs (ChatGPT's first - SOLUTION_ORDER)
+ * and the letters the judge sees.
  * The two dearest (Grok, Claude) close the solvers. The solver cards use
  * SOLVER_KEYS, which leaves out the review-only providers.
  */
@@ -51,12 +51,14 @@ export const PROVIDER_KEYS: ProviderKey[] = [
 
 /**
  * The solution tabs' order, which the study notes' "Start from" follows too:
- * Muse Spark's first, always (the owner's call, 30 September 2026), then
- * picker order.
+ * ChatGPT's first, always, then picker order. Muse Spark's was first from
+ * 30 September 2026; ChatGPT took its place on 10 October 2026, with every
+ * other default Muse Spark held (the owner's call): Meta serves Muse Spark's
+ * free tier in some countries only, and students abroad got 403s.
  */
 export const SOLUTION_ORDER: ProviderKey[] = [
-  "muse",
-  ...PROVIDER_KEYS.filter((key) => key !== "muse"),
+  "chatgpt",
+  ...PROVIDER_KEYS.filter((key) => key !== "chatgpt"),
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {
@@ -196,24 +198,30 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
  * production the same day, though it was 2/2 at "high". Gemini is ticked
  * since 1 October 2026, at the owner's request, on its card's default model
  * (3.8 Flash): billed per call, but both Google projects are capped at their
- * monthly AI Pro credit, and the second key backs the first up.
+ * monthly AI Pro credit, and the second key backs the first up. ChatGPT
+ * (gpt-5.6-luna at "high" or "max", on the Go subscription) is ticked in
+ * Muse Spark's place since 10 October 2026, at the owner's request: Muse
+ * Spark's free tier answered students abroad "This model is not available in
+ * your country." (AGENTS.md). Muse Spark is still a card to tick.
  */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "deepseek", "gemini"];
+export const DEFAULT_SOLVERS: ProviderKey[] = ["chatgpt", "deepseek", "gemini"];
 
 /**
  * Default readers and judge for the optional interpretation pass. Two
- * different readers so they can disagree; the judge is a third model.
- * Muse Spark and Gemini Flash read; ChatGPT (gpt-5.6-luna on OpenCode Go, the
- * most reliable solver in the B.8 matrix) reconciles them. The readers were
- * DeepSeek Flash and Muse Spark from 25 September 2026 (Gemini's free
- * AI Studio key failed too often to be the default then), Kimi and Gemini
- * Flash from 26 September, MiMo took Kimi's place on 27 September, and Muse
- * Spark took MiMo's on 3 October (on a one-page beam it read in 21-35 s,
- * MiMo in 18-28 s, both correct) - the owner's picks each time. Gemini is
- * on Vertex AI and its prepaid credit: each reading is a billed Flash call.
+ * different readers so they can disagree. ChatGPT and Gemini Flash read;
+ * ChatGPT (gpt-5.6-luna on OpenCode Go, the most reliable solver in the B.8
+ * matrix) reconciles them too - a separate call, but no longer a third
+ * model. The readers were DeepSeek Flash and Muse Spark from 25 September
+ * 2026 (Gemini's free AI Studio key failed too often to be the default
+ * then), Kimi and Gemini Flash from 26 September, MiMo took Kimi's place on
+ * 27 September, Muse Spark took MiMo's on 3 October (on a one-page beam it
+ * read in 21-35 s, MiMo in 18-28 s, both correct), and ChatGPT took Muse
+ * Spark's on 10 October, when its free tier refused students abroad by
+ * country - the owner's picks each time. Gemini is on Vertex AI and its
+ * prepaid credit: each reading is a billed Flash call.
  */
 export const DEFAULT_INTERPRETERS: [ModelChoice, ModelChoice] = [
-  { provider: "muse" },
+  { provider: "chatgpt" },
   { provider: "gemini", variant: "flash" },
 ];
 export const DEFAULT_VERIFIER: ModelChoice = { provider: "chatgpt" };
