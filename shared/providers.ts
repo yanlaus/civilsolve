@@ -91,7 +91,9 @@ export function isSolverKey(value: string): value is ProviderKey {
 
 export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   chatgpt: "ChatGPT",
-  claude: "Claude",
+  // "Claude" until 11 October 2026: named for its model once Claude Haiku
+  // had a card of its own (the owner's request).
+  claude: "Claude Opus",
   gemini: "Gemini",
   deepseek: "DeepSeek",
   grok: "Grok",

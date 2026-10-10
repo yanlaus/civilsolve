@@ -660,7 +660,7 @@ export type Route = {
   startSchema: Capabilities["schema"];
   /** Where the job has to run for the upstream to serve it (RouteSpec.region); near the user when unset. */
   region?: DurableObjectLocationHint;
-  /** "Claude (via Poe)" - used in every user-facing message. */
+  /** "Claude Opus (via Poe)" - used in every user-facing message. */
   label: string;
   configured: boolean;
   /** Non-empty when the route itself is misconfigured. */
