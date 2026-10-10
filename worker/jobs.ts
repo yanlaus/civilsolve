@@ -5,8 +5,8 @@
 // Why: on a phone, putting the browser in the background makes the OS cut
 // the page's connections. In a plain Worker the task dies with the client
 // (Cloudflare cancels a request ~30 s after its client goes away). A Durable
-// Object has no such limit - it stays alive while its own outbound fetch is
-// in flight - so the model call finishes, the result is stored, and the
+// Object can stay alive while its own outbound fetch is in flight, so the
+// model call finishes, the result is stored, and the
 // page re-attaches with GET /api/jobs/:id when it comes back.
 //
 // What is stored, and for how long: the task's final event only - the
@@ -16,10 +16,12 @@
 // alarm JOB_RETENTION_MS after the job finishes (or, if it never does, after
 // the longest possible run plus that). Whoever holds the job id - a random
 // UUID the browser keeps in localStorage - can read the result until then.
+// Muse's route starts runTask from alarm(); pending input stays in memory.
+// Its timeout is capped below the alarm handler's 15-minute wall limit.
 
 import { DurableObject } from "cloudflare:workers";
 import { MAX_TIMEOUT_MS } from "../shared/stream-protocol";
-import type { WorkerEnv } from "./channels";
+import { resolveRoute, type WorkerEnv } from "./channels";
 import {
   encodeEvent,
   encodeHeartbeat,
@@ -28,6 +30,7 @@ import {
   taskTimeoutFor,
   type TaskEvent,
   type TaskSink,
+  type RunTaskParams,
 } from "./run";
 import { buildTask, isTaskKind } from "./tasks";
 
@@ -54,6 +57,9 @@ export class TaskJob extends DurableObject<WorkerEnv> {
   private terminal: TaskEvent | null = null;
   private startedAt = 0;
   private deadlineAt = 0;
+  private expiresAt = 0;
+  /** Request data stays in memory, including while awaiting alarm dispatch. */
+  private pending: RunTaskParams | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly cancelled = new AbortController();
 
@@ -71,18 +77,53 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     if (request.method === "DELETE" && url.pathname === "/cancel") {
       // Stop pressed in the page. The run ends with an "error: Cancelled."
       // event like any other failure, and that is what gets stored.
-      if (this.running) this.cancelled.abort();
+      if (this.running) {
+        this.cancelled.abort();
+        if (this.pending) {
+          this.pending = null;
+          await this.failBeforeStart("Cancelled.");
+        }
+      }
       return new Response(null, { status: 204 });
     }
     return Response.json({ error: "Not found." }, { status: 404 });
   }
 
-  /** Retention is over: forget the job. */
+  /** Dispatch once, then reuse the single alarm for retention cleanup. */
   async alarm() {
+    if (this.pending) {
+      const params = this.pending;
+      // Consume before any await: alarm redelivery must not start a second call.
+      this.pending = null;
+      try {
+        await this.ctx.storage.setAlarm(this.expiresAt);
+        await runTask(this.hub(), params);
+      } catch {
+        await this.failBeforeStart("The background task could not start. Please try again.");
+      }
+      return;
+    }
+
+    // A late dispatch/redelivery must not erase a running task or its answer.
+    // After an object reset there is no request body to replay: attach returns
+    // the existing job-lost response, and this alarm only cleans up metadata.
+    const expiresAt = this.expiresAt || await this.ctx.storage.get<number>("expiresAt");
+    if (expiresAt && Date.now() < expiresAt) {
+      await this.ctx.storage.setAlarm(this.expiresAt || expiresAt);
+      return;
+    }
     await this.ctx.storage.deleteAll();
     this.jobId = "";
     this.statuses = [];
     this.terminal = null;
+    this.running = false;
+    this.expiresAt = 0;
+  }
+
+  private async failBeforeStart(message: string) {
+    const sink = this.hub();
+    await sink.event({ type: "error", message });
+    await sink.close();
   }
 
   private async start(url: URL, rawBody: string): Promise<Response> {
@@ -109,20 +150,34 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     this.running = true;
     this.startedAt = Date.now();
     this.deadlineAt = this.startedAt + taskTimeoutFor(built.params);
+    this.expiresAt = this.startedAt + MAX_TIMEOUT_MS + JOB_RETENTION_MS;
+    const params = { ...built.params, signal: this.cancelled.signal, deadlineAt: this.deadlineAt };
+    const route = resolveRoute(params.provider, this.env, params.routeOverride);
+    if (route.startInAlarm) this.pending = params;
     await this.ctx.storage.put({
       jobId,
       kind,
       provider,
       createdAt: this.startedAt,
       deadlineAt: this.deadlineAt,
+      expiresAt: this.expiresAt,
     });
     // The safety net: a job that never finishes is still deleted, one
     // retention period after the longest run it could have had.
-    await this.ctx.storage.setAlarm(Date.now() + MAX_TIMEOUT_MS + JOB_RETENTION_MS);
+    await this.ctx.storage.setAlarm(this.expiresAt);
 
     const response = await this.attach();
-    // Not awaited: the task outlives this request and whoever sent it.
-    void runTask(this.hub(), { ...built.params, signal: this.cancelled.signal });
+    if (route.startInAlarm) {
+      try {
+        await this.ctx.storage.setAlarm(Date.now());
+      } catch {
+        this.pending = null;
+        await this.failBeforeStart("The background task could not be scheduled. Please try again.");
+      }
+    } else {
+      // Not awaited: the task outlives this request and whoever sent it.
+      void runTask(this.hub(), params);
+    }
     return response;
   }
 
@@ -197,11 +252,14 @@ export class TaskJob extends DurableObject<WorkerEnv> {
           this.statuses.push(event);
         }
         if (TERMINAL_TYPES.has(event.type)) {
+          if (this.terminal) return;
           this.terminal = event;
           this.running = false;
+          this.pending = null;
+          this.expiresAt = Date.now() + JOB_RETENTION_MS;
           try {
-            await this.ctx.storage.put("terminal", event);
-            await this.ctx.storage.setAlarm(Date.now() + JOB_RETENTION_MS);
+            await this.ctx.storage.put({ terminal: event, expiresAt: this.expiresAt });
+            await this.ctx.storage.setAlarm(this.expiresAt);
           } catch {
             // Still delivered live below; only a later re-attach would miss it.
           }

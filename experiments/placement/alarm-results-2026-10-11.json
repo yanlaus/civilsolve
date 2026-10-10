@@ -1,0 +1,262 @@
+{
+  "date": "2026-10-11",
+  "modelCalls": 0,
+  "measurements": [
+    {
+      "id": "365eddc8a800afd93f4a299b29bef8ad2bce07a1d08beb76d881d99560590214",
+      "location": "default",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "NRT"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "NRT",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658909832,
+      "alarmResult": {
+        "firedAt": 1791658909832,
+        "completedAt": 1791658909836,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "NRT"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "NRT",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658949801,
+      "storageCleared": true
+    },
+    {
+      "id": "220c5203e5795c1dc37f598838bd11d6da0cad06cfe7691e08354c3947008abf",
+      "location": "wnam",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "SJC"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "SJC",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658910281,
+      "alarmResult": {
+        "firedAt": 1791658910282,
+        "completedAt": 1791658910291,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "SJC"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "SJC",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658950152,
+      "storageCleared": true
+    },
+    {
+      "id": "2b59cfefd5860fb5a99216c046c775ffb454b63ce49c04bec11b26a9fd19dccd",
+      "location": "enam",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "IAD"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "IAD",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658937181,
+      "alarmResult": {
+        "firedAt": 1791658937182,
+        "completedAt": 1791658937189,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "IAD"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "IAD",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658951174,
+      "storageCleared": true
+    },
+    {
+      "id": "808307fab709b82c59d73b7aad3721efb53d4dd45c90ce8f6ec02042e2262c87",
+      "location": "weur",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "AMS"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "AMS",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658938156,
+      "alarmResult": {
+        "firedAt": 1791658938156,
+        "completedAt": 1791658938161,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "AMS"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "AMS",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658952493,
+      "storageCleared": true
+    },
+    {
+      "id": "e27590e9f561e06b0674267ecd0d2a8fd9b6b0f9c05dc4ce7a740e2acfaa277a",
+      "location": "us",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "SEA"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "SEA",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658939183,
+      "alarmResult": {
+        "firedAt": 1791658939184,
+        "completedAt": 1791658939195,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "SEA"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "SEA",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658953961,
+      "storageCleared": true
+    },
+    {
+      "id": "a9ac52bfd932849daa9bea6769f475d908af9590bc0426eaf0e94fd609022b99",
+      "location": "eu",
+      "clientCountry": "JP",
+      "baseline": {
+        "trace": {
+          "status": 200,
+          "country": "JP",
+          "colo": "WAW"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "JP",
+          "colo": "WAW",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "scheduledAt": 1791658939740,
+      "alarmResult": {
+        "firedAt": 1791658939740,
+        "completedAt": 1791658939744,
+        "retryCount": 0,
+        "trace": {
+          "status": 200,
+          "country": "US",
+          "colo": "WAW"
+        },
+        "receiver": {
+          "status": 200,
+          "country": "US",
+          "colo": "WAW",
+          "countryHeader": "US",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "retrievedAt": 1791658954801,
+      "storageCleared": true
+    }
+  ],
+  "cleanup": [
+    {
+      "name": "civilsolve-alarm-e03e47-probe",
+      "exitCode": 0
+    },
+    {
+      "name": "civilsolve-alarm-e03e47-receiver",
+      "exitCode": 0
+    }
+  ]
+}

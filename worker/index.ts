@@ -102,7 +102,8 @@ function startInlineSse(c: AppContext, params: RunTaskParams) {
  * is built here first so a bad request gets its 400 at once. Then it runs in
  * a TaskJob Durable Object of its own, which carries on when the page goes
  * away and keeps the answer for GET /api/jobs/:id; the job's first event
- * tells the page its id. Without the JOBS binding it runs inline, as it did
+ * tells the page its id. Without JOBS, routes that do not require alarm
+ * dispatch run inline, as they did
  * before jobs existed.
  */
 async function handleTask(c: AppContext, kind: TaskKind) {
@@ -116,13 +117,18 @@ async function handleTask(c: AppContext, kind: TaskKind) {
   if ("error" in built) return c.json({ error: built.error }, built.status);
 
   const jobs = c.env.JOBS;
-  if (!jobs) return startInlineSse(c, built.params);
+  const route = resolveRoute(built.params.provider, c.env, built.params.routeOverride);
+  if (!jobs) {
+    if (route.startInAlarm) {
+      return c.json({ error: `${route.label} requires the JOBS binding for background execution.` }, 503);
+    }
+    return startInlineSse(c, built.params);
+  }
 
   const jobId = crypto.randomUUID();
-  // Near whoever asked, unless the route has to call from somewhere else -
-  // a model served in some countries only (RouteSpec.region: Muse Spark).
+  // Near whoever asked, unless the route has a preferred location.
   // The hint counts on creation only; a re-attach finds the job where it is.
-  const { region } = resolveRoute(built.params.provider, c.env, built.params.routeOverride);
+  const { region } = route;
   const job = jobs.get(jobs.idFromName(jobId), region ? { locationHint: region } : undefined);
   const query = new URLSearchParams({ jobId, kind, provider });
   return job.fetch(`https://job/run?${query}`, { method: "POST", body: parsed.raw });

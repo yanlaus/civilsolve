@@ -1,0 +1,909 @@
+{
+  "date": "2026-10-11",
+  "sourceCountry": "JP",
+  "locations": [
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "worker",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "NRT"
+      },
+      "receiver": {
+        "status": 404,
+        "received": "error code: 1042\n"
+      },
+      "model": null,
+      "elapsedMs": 15
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "KIX"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "KIX",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 444
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "wnam",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "SJC"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "SJC",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 557
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "MIA"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "MIA",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 402
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "weur",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "LHR"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "LHR",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 763
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "us",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "DFW"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "DFW",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 317
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "eu",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "ARN"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "ARN",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 478
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "worker",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "IAD"
+      },
+      "receiver": {
+        "status": 404,
+        "received": "error code: 1042\n"
+      },
+      "model": null,
+      "elapsedMs": 30
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "IAD"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "IAD",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 168
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "wnam",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "SJC"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "SJC",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 321
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "ATL"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "ATL",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 178
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "weur",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "AMS"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "AMS",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 440
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "us",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "ATL"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "ATL",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 138
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "eu",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "WAW"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "WAW",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 438
+    }
+  ],
+  "headers": [
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "baseline",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "EWR"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "EWR",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 617
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "header-us",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "EWR"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "EWR",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 322
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "declared-us",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "MIA"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "MIA",
+          "countryHeader": "JP",
+          "declaredCountry": "US",
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 703
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "cf-country-us",
+        "muse": false
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "ATL"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "ATL",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": null,
+      "elapsedMs": 342
+    }
+  ],
+  "muse": [
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "NRT"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "NRT",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 1506,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 1959
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "wnam",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "DEN"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "DEN",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 1800,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 2423
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "enam",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "ATL"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "ATL",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 5757,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 6357
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "weur",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "CDG"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "CDG",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 1626,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 2388
+    },
+    {
+      "worker": "edge",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "object",
+        "location": "us",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "objectIncoming": {
+        "country": null,
+        "ingressColo": null,
+        "placement": null
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "DFW"
+      },
+      "receiver": {
+        "status": 200,
+        "received": {
+          "country": "JP",
+          "colo": "DFW",
+          "countryHeader": "JP",
+          "declaredCountry": null,
+          "workerSubrequest": true
+        }
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 1987,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 2294
+    },
+    {
+      "worker": "placed",
+      "httpStatus": 200,
+      "incoming": {
+        "country": "JP",
+        "ingressColo": "NRT",
+        "placement": null
+      },
+      "test": {
+        "target": "worker",
+        "location": "default",
+        "mutation": "baseline",
+        "muse": true
+      },
+      "outboundTrace": {
+        "status": 200,
+        "country": "JP",
+        "colo": "IAD"
+      },
+      "receiver": {
+        "status": 404,
+        "received": "error code: 1042\n"
+      },
+      "model": {
+        "status": 200,
+        "elapsedMs": 3242,
+        "answer": "OK",
+        "error": null
+      },
+      "elapsedMs": 3263
+    }
+  ],
+  "cleanup": [
+    {
+      "name": "civilsolve-geo-fd6dc1-edge",
+      "exitCode": 0
+    },
+    {
+      "name": "civilsolve-geo-fd6dc1-placed",
+      "exitCode": 0
+    },
+    {
+      "name": "civilsolve-geo-fd6dc1-receiver",
+      "exitCode": 0
+    }
+  ]
+}

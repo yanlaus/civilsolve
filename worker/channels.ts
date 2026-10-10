@@ -248,15 +248,12 @@ type RouteSpec = {
    */
   startSchema?: Capabilities["schema"];
   /**
-   * Where the call has to come from, as a Durable Object location hint, for
-   * a model served in some countries only. A task's TaskJob is otherwise
-   * placed near whoever asked; handleTask in worker/index.ts places it here
-   * instead. It does not change the country an upstream sees: Cloudflare
-   * passes the visitor's country on to the job's subrequests wherever it
-   * runs (measured, 9 October 2026 - see the Muse route, and
-   * isRegionRefusal in run.ts).
+   * Preferred TaskJob region. Placement alone does not change the visitor
+   * country propagated by an HTTP invocation.
    */
   region?: DurableObjectLocationHint;
+  /** Start this route from the TaskJob's alarm rather than its HTTP handler. */
+  startInAlarm?: boolean;
 };
 
 const POE_SPEC = {
@@ -533,20 +530,11 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // six values from the B.8 image.
       defaultModel: "muse-spark-1.3-contributor",
       effort: CLAMPED_EFFORT,
-      // Meta offers the contributor tier in some countries only: students
-      // travelling got 403 "This model is not available in your country."
-      // (9 October 2026), while the same call from Japan was answered. The
-      // job runs in North America, Meta's home market, at the owner's
-      // choice - but a student in Hong Kong still got the 403 after that.
-      // Measured with a probe the same day: the hint is honoured (a job
-      // hinted "weur" ran in Amsterdam), but Cloudflare passes the visitor's
-      // country on to every subrequest made on their behalf, the job's
-      // included - the gateway saw "JP" for a Japanese visitor whichever
-      // colo the job ran in. So the placement cannot change the country;
-      // run.ts says so plainly instead (isRegionRefusal). Do not hide the
-      // student's country from the gateway: the restriction is Meta's, on
-      // where the student is.
+      // Owner-selected alarm dispatch (11 October 2026). The paired probe
+      // saw JP in HTTP context and US in alarm context, including outside
+      // US colos. That observation is not a platform geography guarantee.
       region: "wnam",
+      startInAlarm: true,
     },
   },
   // Claude Haiku 5.5 on OpenCode Go (10 October 2026, the owner's pick, in
@@ -658,8 +646,9 @@ export type Route = {
   structured: boolean;
   /** The schema rung to start on (RouteSpec.startSchema); "strict" when unset. */
   startSchema: Capabilities["schema"];
-  /** Where the job has to run for the upstream to serve it (RouteSpec.region); near the user when unset. */
+  /** Preferred job location (RouteSpec.region); near the user when unset. */
   region?: DurableObjectLocationHint;
+  startInAlarm?: boolean;
   /** "Claude Opus (via Poe)" - used in every user-facing message. */
   label: string;
   configured: boolean;
@@ -776,6 +765,7 @@ export function resolveRoute(
     structured: spec.structured !== false,
     startSchema: spec.startSchema ?? "strict",
     region: spec.region,
+    startInAlarm: spec.startInAlarm,
     label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
     configured: Boolean(apiKey),
     problem:

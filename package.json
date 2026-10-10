@@ -6,7 +6,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
-    "check": "tsc --noEmit && tsc --noEmit -p worker"
+    "check": "tsc --noEmit && tsc --noEmit -p worker",
+    "test:jobs": "node --test tests/task-job-alarm.test.mjs tests/task-job-runtime.test.mjs"
   },
   "dependencies": {
     "dompurify": "^3.2.0",

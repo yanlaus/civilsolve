@@ -46,6 +46,8 @@ export type { WorkerEnv };
  * should wait before being told nothing is coming.
  */
 const SAFETY_TIMEOUT_MS = 280_000;
+/** Alarm handlers have a 15-minute wall limit; leave time to finish and store the result. */
+export const ALARM_TASK_TIMEOUT_MS = 14 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_TRANSIENT_RETRIES = 1;
 const RETRY_DELAY_MS = 3_000;
@@ -210,10 +212,9 @@ const REGION_WORDS =
  * The upstream will not serve this model where the request comes from.
  * OpenCode Go answers Muse Spark's contributor tier - which Meta offers in
  * some countries only - with 403 "This model is not available in your
- * country." to a student in Hong Kong (9 October 2026), and still did once
- * the job ran in North America (RouteSpec.region). No retry changes where
- * the student is, so the error says so plainly - not "HTTP 403", and not a
- * refused account.
+ * country." to a student in Hong Kong (9 October 2026), even with the
+ * North America placement hint. Report the upstream's region refusal
+ * without inferring the student's location from a background invocation.
  */
 function isRegionRefusal(status: number, body: string) {
   return (status === 403 || status === 451) && REGION_WORDS.test(body);
@@ -224,9 +225,9 @@ function upstreamError(label: string, status: number, body: string): UpstreamErr
   const regionRefused = isRegionRefusal(status, body);
   const error = new Error(
     regionRefused
-      ? `${label} is not offered in the country you are in now - its maker serves it in some countries only ` +
+      ? `${label} rejected this request because of a country restriction ` +
           `(HTTP ${status}: ${detail}). Use another model for this; the others are not affected. ` +
-          `· 你而家身處嘅國家用唔到呢個 model（佢只喺部分國家提供），請改用其他 model；其他 model 唔受影響。`
+          `· 上游因地區限制拒絕咗呢次請求，請改用其他 model；其他 model 唔受影響。`
       : `${label} failed with HTTP ${status}: ${detail}`,
   ) as UpstreamError;
   error.status = status;
@@ -344,6 +345,8 @@ export type RunTaskParams = {
    * running on the user's quota.
    */
   signal?: AbortSignal;
+  /** Server-owned deadline, including time waiting for alarm dispatch. */
+  deadlineAt?: number;
 };
 
 export type TaskEvent = { type: string } & Record<string, unknown>;
@@ -356,11 +359,12 @@ export type TaskEvent = { type: string } & Record<string, unknown>;
  */
 export function taskTimeoutFor({ provider, env, routeOverride, task }: RunTaskParams) {
   const route = resolveRoute(provider, env, routeOverride);
-  return taskTimeoutMs(
+  const timeout = taskTimeoutMs(
     route.timeoutMs ?? SAFETY_TIMEOUT_MS,
     task.images.length,
     task.referenceImages?.length ?? 0,
   );
+  return route.startInAlarm ? Math.min(timeout, ALARM_TASK_TIMEOUT_MS) : timeout;
 }
 
 /**
@@ -417,19 +421,27 @@ export async function runTask(
   let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
 
   const timeoutMs = taskTimeoutFor(params);
+  const remainingMs = params.deadlineAt === undefined
+    ? timeoutMs
+    : Math.max(0, Math.min(timeoutMs, params.deadlineAt - Date.now()));
   const abort = new AbortController();
-  signal?.addEventListener("abort", () => abort.abort(new Error("Cancelled.")), { once: true });
+  const onCancel = () => abort.abort(new Error("Cancelled."));
+  if (signal?.aborted) onCancel();
+  else signal?.addEventListener("abort", onCancel, { once: true });
   // Marks the error event, so the page can tell "ran out of time, returned
   // nothing" apart from a failure.
   let timedOut = false;
-  const safetyTimer = setTimeout(() => {
+  const onTimeout = () => {
     timedOut = true;
     abort.abort(
       new Error(`${route.label} timed out after ${formatDuration(timeoutMs)} and returned nothing.`),
     );
-  }, timeoutMs);
+  };
+  const safetyTimer = setTimeout(onTimeout, remainingMs);
 
   try {
+    if (remainingMs === 0 && !abort.signal.aborted) onTimeout();
+    abort.signal.throwIfAborted();
     if (route.problem) {
       await write({ type: "error", message: route.problem });
       return;
@@ -514,6 +526,7 @@ export async function runTask(
     let donePayload: Record<string, unknown> | null = null;
 
     for (let step = 0; step < maxSteps; step += 1) {
+      abort.signal.throwIfAborted();
       const request = buildRequest(route, caps, task, effort, streamUpstream);
       // Set only when a flush actually reached the client: until then a
       // failed attempt can still be retried without the user seeing a restart.
@@ -643,7 +656,7 @@ export async function runTask(
           // Another channel is another upstream, which may serve the model
           // where this one does not.
           const why = lastError.regionRefused
-            ? `is not offered in the country you are in now (${code}${detail})`
+            ? `rejected the request because of a country restriction (${code}${detail})`
             : `refused the account (${code}${detail}) - its plan or credit may have run out`;
           if (await switchChannel(why)) continue;
         }
@@ -709,6 +722,7 @@ export async function runTask(
 
     // The model that actually answered: after a switch down a model chain
     // it is not the one the user picked (Gemini Flash is 3.8, then 3.5).
+    abort.signal.throwIfAborted();
     await write({ type: "done", ...donePayload, model: route.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
@@ -720,6 +734,7 @@ export async function runTask(
   } finally {
     clearTimeout(safetyTimer);
     clearInterval(heartbeat);
+    signal?.removeEventListener("abort", onCancel);
     await sink.close();
   }
 }
