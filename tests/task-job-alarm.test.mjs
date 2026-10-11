@@ -205,12 +205,56 @@ test("other providers still start from their HTTP handler", async () => {
   assert.equal(calls, 1);
 });
 
-test("Muse timeout is capped below the alarm wall limit; other providers retain theirs", () => {
-  const muse = params(), other = params("chatgpt");
-  muse.task.images = Array(30).fill(body.images[0]);
-  other.task.images = muse.task.images;
-  assert.equal(taskTimeoutFor(muse), ALARM_TASK_TIMEOUT_MS);
+test("Muse and ChatGPT timeouts stay below the alarm wall limit; other providers retain theirs", () => {
+  const other = params("kimi");
+  other.task.images = Array(30).fill(body.images[0]);
+  for (const provider of ["muse", "chatgpt"]) {
+    const task = params(provider);
+    task.task.images = other.task.images;
+    assert.equal(taskTimeoutFor(task), ALARM_TASK_TIMEOUT_MS);
+  }
   assert.ok(taskTimeoutFor(other) > ALARM_TASK_TIMEOUT_MS);
+  assert.equal(taskTimeoutFor(params("chatgpt")), ALARM_TASK_TIMEOUT_MS);
+});
+
+test("ChatGPT starts only in alarm and keeps its model and session through a 502 retry", async () => {
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    calls++;
+    assert.match(url, /\/responses$/);
+    const request = JSON.parse(init.body);
+    assert.equal(request.model, "gpt-5.6-luna");
+    assert.equal(request.reasoning.effort, "high");
+    sent.push(new Headers(init.headers).get("x-opencode-session"));
+    return calls === 1
+      ? Response.json({ error: { message: "Upstream request failed: Endpoint is unavailable." } }, { status: 502 })
+      : Response.json({ output_text: JSON.stringify({ answer: "The support balances the load." }) });
+  };
+  const { job, storage } = make();
+  const result = events(await start(job, "chatgpt"));
+  assert.equal(calls, 0);
+  assert.ok(storage.alarm <= Date.now());
+  const stored = JSON.stringify([...storage.values]);
+  for (const input of [...body.images, body.notes, body.solution, env.OPENCODE_API_KEY]) assert.ok(!stored.includes(input));
+  await job.alarm();
+  const received = await result;
+  assert.ok(received.some(event => /Retrying/.test(event.message ?? "")));
+  assert.equal(received.at(-1).type, "done");
+  assert.equal(calls, 2);
+  assert.ok(sent[0]);
+  assert.equal(sent[0], sent[1]);
+  await job.alarm();
+  assert.deepEqual((await events(await attach(job))).at(-1), received.at(-1));
+  assert.equal(calls, 2);
+});
+
+test("ChatGPT queued Stop cancels without contacting its endpoint", async () => {
+  const { job } = make();
+  const result = events(await start(job, "chatgpt"));
+  await stop(job);
+  await job.alarm();
+  assert.equal((await result).at(-1).message, "Cancelled.");
+  assert.equal(calls, 0);
 });
 
 test("already cancelled task never calls upstream", async () => {

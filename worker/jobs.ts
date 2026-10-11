@@ -16,7 +16,7 @@
 // alarm JOB_RETENTION_MS after the job finishes (or, if it never does, after
 // the longest possible run plus that). Whoever holds the job id - a random
 // UUID the browser keeps in localStorage - can read the result until then.
-// Muse's route starts runTask from alarm(); pending input stays in memory.
+// Muse and ChatGPT on OpenCode start from alarm(); pending input stays in memory.
 // Its timeout is capped below the alarm handler's 15-minute wall limit.
 
 import { DurableObject } from "cloudflare:workers";

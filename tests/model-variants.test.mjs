@@ -30,6 +30,20 @@ test("Muse replaces standalone Haiku in both presets and remains an alarm solver
   assert.equal(app.resolveRoute(task.params.provider, env, task.params.routeOverride).startInAlarm, true);
 });
 
+test("all ChatGPT task kinds use alarm on OpenCode, while other channels keep HTTP dispatch", () => {
+  for (const kind of ["solve", "interpret", "judge", "study", "ask", "align"]) {
+    const request = kind === "study" ? { ...body, kind: "explain", solutions: [body.solution] } : body;
+    const built = app.buildTask(kind, "chatgpt", request, env);
+    assert.ok(built.params, `${kind}: ${built.error}`);
+    const resolved = app.resolveRoute("chatgpt", env, built.params.routeOverride);
+    assert.equal(resolved.channel, "opencode");
+    assert.equal(resolved.model, "gpt-5.6-luna");
+    assert.equal(resolved.startInAlarm, true);
+  }
+  assert.equal(app.resolveRoute("chatgpt", env, { channel: "poe" }).startInAlarm, undefined);
+  assert.equal(app.resolveRoute("deepseek", env).startInAlarm, undefined);
+});
+
 test("Claude menu has one Haiku and one Opus, with variant-aware credit labels", () => {
   assert.deepEqual(app.MODEL_CHOICES.filter(c => c.provider === "claude").map(app.choiceKey), ["claude:haiku", "claude:opus"]);
   assert.ok(!app.MODEL_CHOICES.some(c => c.provider === "haiku"));

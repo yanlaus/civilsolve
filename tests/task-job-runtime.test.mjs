@@ -6,7 +6,8 @@ import { Miniflare } from "miniflare";
 const { outputFiles: [bundle] } = await build({ entryPoints: ["tests/fixtures/task-job-worker.ts"], bundle: true, write: false, format: "esm", external: ["cloudflare:workers"] });
 const body = JSON.stringify({ images: ["data:image/png;base64,aW1hZ2U="], solution: "A force is balanced by the support.", question: "Why is it balanced?" });
 
-test("real Workers runtime: alarm delivers SSE, survives disconnect, and honours Stop", { timeout: 30000 }, async () => {
+for (const provider of ["muse", "chatgpt"]) {
+test(`real Workers runtime: ${provider} alarm delivers SSE, survives disconnect, and honours Stop`, { timeout: 30000 }, async () => {
   let calls = 0;
   const runtime = new Miniflare({
     modules: true, script: bundle.text, compatibilityDate: "2026-07-01",
@@ -15,11 +16,13 @@ test("real Workers runtime: alarm delivers SSE, survives disconnect, and honours
     outboundService: async request => {
       calls++;
       assert.equal(new URL(request.url).hostname, "mock.invalid");
+      const sent = await request.json();
+      assert.equal(sent.model, provider === "muse" ? "muse-spark-1.3-contributor" : "gpt-5.6-luna");
       await new Promise(resolve => setTimeout(resolve, 150));
       return Response.json({ output_text: JSON.stringify({ answer: "The support balances the load." }) });
     },
   });
-  const call = (path, method = "GET") => runtime.dispatchFetch(`https://test/${path}`, {
+  const call = (path, method = "GET") => runtime.dispatchFetch(`https://test/${path}?provider=${provider}`, {
     method, headers: { authorization: "Bearer local-only" }, ...(method === "POST" ? { body } : {}),
   });
   try {
@@ -49,3 +52,4 @@ test("real Workers runtime: alarm delivers SSE, survives disconnect, and honours
     await runtime.dispose();
   }
 });
+}

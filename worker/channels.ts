@@ -294,6 +294,10 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       modelVar: "OPENCODE_CHATGPT_MODEL",
       defaultModel: "gpt-5.6-luna",
       effort: OPENAI_EFFORT,
+      // Start outside the visitor's HTTP invocation, as Muse does. A student
+      // abroad reported 502 while the same endpoint worked for the owner.
+      // This changes invocation context; overseas recovery still needs testing.
+      startInAlarm: true,
       // Luna is offered at "high" or "max" only: the user's pick is honoured
       // at those two levels and anything lower is raised to "high". "max" maps
       // to reasoning.effort "xhigh", which the gateway accepts.
@@ -302,7 +306,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // reading of B.8 took 223-381 s (204-324 s of it thinking, 15-20k
       // reasoning tokens), past the 280 s default, and the owner's pass timed
       // out (26 September 2026). The reconciler now defaults to "high"
-      // (69-75 s), but "max" stays offered, so it gets the long limit.
+      // (69-75 s), but "max" stays offered. Alarm dispatch caps this at 14 min.
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
     poe: {
