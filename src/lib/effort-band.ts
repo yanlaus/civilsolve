@@ -5,9 +5,9 @@
 // edge rather than being silently raised by the server.
 
 import { EFFORT_KEYS, type EffortKey } from "../../shared/prompt";
-import type { ProviderStatus } from "../../shared/providers";
+import type { ModelStatus } from "../../shared/providers";
 
-export function effortBand(status?: ProviderStatus) {
+export function effortBand(status?: ModelStatus) {
   const floor = status?.forcedEffort ?? status?.minEffort;
   const ceiling = status?.forcedEffort ?? status?.maxEffort;
   const floorIndex = floor ? Math.max(0, EFFORT_KEYS.indexOf(floor as EffortKey)) : 0;

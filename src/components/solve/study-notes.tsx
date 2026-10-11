@@ -14,6 +14,8 @@ import { ChevronDown, Compass, GraduationCap, Languages, Lightbulb, Sparkles } f
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
+  canonicalChoice,
+  modelStatus,
   MODEL_CHOICES,
   parseChoice,
   providerDisplayName,
@@ -136,17 +138,14 @@ export function StudyNotes({
   /** The browser's print dialog for a kind's notes, when the server cannot make the PDF. */
   onPrint: (kind: StudyKind) => void;
 }) {
-  // What the notes can start from now, the first being the default: Claude
-  // Haiku's solution when it has one, as its tab comes first too (Muse
-  // Spark's until 10 October 2026 - the owner's calls), then the verified
-  // answer when the cross-check has given one, then each other finished
-  // solution, in tab order.
+  // Muse's solution first, matching the tabs, then the verified answer and
+  // other finished solutions.
   const judged = judgeRun.status === "done" ? judgeRun : null;
   const finished = SOLUTION_ORDER.filter((key) => runs[key].status === "done");
   const sources: StudySource[] = [
-    ...finished.filter((key) => key === "haiku"),
+    ...finished.filter((key) => key === "muse"),
     ...(judged ? (["verdict"] as const) : []),
-    ...finished.filter((key) => key !== "haiku"),
+    ...finished.filter((key) => key !== "muse"),
   ];
   const sourceLabel = (source: StudySource) =>
     source === "verdict" ? `Verified answer (${judgeLabel}'s verdict)` : `${nameOf(source)}'s solution`;
@@ -244,12 +243,11 @@ function StudyCard({
   onPrint: () => void;
 }) {
   const { title, chinese, blurb, Icon, placeholder } = KINDS[kind];
-  const configured = (key: ProviderKey) =>
-    providerStatus ? providerStatus[key]?.configured !== false : true;
-  const writers = MODEL_CHOICES.filter((choice) => configured(choice.provider));
+  const configured = (choice: ModelChoice) => modelStatus(providerStatus?.[choice.provider], choice.variant)?.configured !== false;
+  const writers = MODEL_CHOICES.filter(configured);
 
   // What to start from: the user's pick while it is still on the page, else
-  // the first in the list - Claude Haiku's solution, else the verified answer,
+  // the first in the list - Muse Spark's solution, else the verified answer,
   // else the first finished solution.
   const [sourcePick, setSourcePick] = useState<StudySource | null>(null);
   const source: StudySource | undefined =
@@ -263,9 +261,9 @@ function StudyCard({
   // they do not derive one - kept inside the model's band (ChatGPT runs at
   // high or max).
   const [pick, setPick] = useState<ModelChoice | null>(null);
-  const writer: ModelChoice = pick ?? (source ? modelOf(source) : writers[0] ?? MODEL_CHOICES[0]);
+  const writer = canonicalChoice(pick ?? (source ? modelOf(source) : writers[0] ?? MODEL_CHOICES[0]));
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
-  const { inBand, clamp } = effortBand(providerStatus?.[writer.provider]);
+  const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[writer.provider], writer.variant));
   const effort = clamp(effortPick);
 
   const active = isStudyActive(run);

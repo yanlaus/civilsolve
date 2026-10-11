@@ -9,6 +9,8 @@ import { ChevronDown, MessageCircleQuestion, RotateCw, Send, X } from "lucide-re
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
+  canonicalChoice,
+  modelStatus,
   MODEL_CHOICES,
   parseChoice,
   providerDisplayName,
@@ -74,9 +76,9 @@ export function AskPanel({
   const [modelPick, setModelPick] = useState<ModelChoice | null>(null);
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
   const box = useRef<HTMLTextAreaElement>(null);
-  const configured = (key: ProviderKey) => (providerStatus ? providerStatus[key]?.configured !== false : true);
-  const model = modelPick ?? defaultModel;
-  const { inBand, clamp } = effortBand(providerStatus?.[model.provider]);
+  const configured = (choice: ModelChoice) => modelStatus(providerStatus?.[choice.provider], choice.variant)?.configured !== false;
+  const model = canonicalChoice(modelPick ?? defaultModel);
+  const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[model.provider], model.variant));
   const effort = clamp(effortPick);
 
   // A new question (or one picked back up after a reload) opens the fold.
@@ -219,7 +221,7 @@ export function AskPanel({
               }}
               className={SELECT_CLASS}
             >
-              {MODEL_CHOICES.filter((choice) => configured(choice.provider)).map((choice) => (
+              {MODEL_CHOICES.filter(configured).map((choice) => (
                 <option key={choiceKey(choice)} value={choiceKey(choice)}>
                   {providerDisplayName(choice.provider, choice.variant)}
                   {choiceKey(choice) === choiceKey(defaultModel) ? " (wrote this solution)" : ""}

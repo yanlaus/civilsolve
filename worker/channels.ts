@@ -23,6 +23,7 @@ import {
   type ChannelKey,
   type ProviderKey,
   type ProviderStatus,
+  type ModelStatus,
 } from "../shared/providers";
 
 export type Dialect = "responses" | "chat-completions" | "gemini" | "messages";
@@ -272,6 +273,18 @@ const OPENCODE_SPEC = {
   defaultUrl: "https://opencode.ai/zen/go/v1",
 };
 
+// Shared with the old standalone Haiku key so recovered runs keep their route.
+const HAIKU_SPEC: RouteSpec = {
+  ...OPENCODE_SPEC,
+  dialect: "messages",
+  pathSuffix: "/messages",
+  modelVar: "OPENCODE_HAIKU_MODEL",
+  defaultModel: "claude-haiku-5-5",
+  effort: HAIKU_EFFORT,
+  minEffort: "high",
+  timeoutMs: LONG_THINKING_TIMEOUT_MS,
+};
+
 const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
   chatgpt: {
     opencode: {
@@ -302,6 +315,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     },
   },
   claude: {
+    opencode: HAIKU_SPEC,
     poe: {
       ...POE_SPEC,
       modelVar: "POE_CLAUDE_MODEL",
@@ -545,16 +559,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
   // read a diagram: the beam image's span, UDL and point load, at "xhigh",
   // with the strict schema held, in 6 s.
   haiku: {
-    opencode: {
-      ...OPENCODE_SPEC,
-      dialect: "messages",
-      pathSuffix: "/messages",
-      modelVar: "OPENCODE_HAIKU_MODEL",
-      defaultModel: "claude-haiku-5-5",
-      effort: HAIKU_EFFORT,
-      minEffort: "high",
-      timeoutMs: LONG_THINKING_TIMEOUT_MS,
-    },
+    opencode: HAIKU_SPEC,
   },
 };
 
@@ -766,7 +771,7 @@ export function resolveRoute(
     startSchema: spec.startSchema ?? "strict",
     region: spec.region,
     startInAlarm: spec.startInAlarm,
-    label: `${PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
+    label: `${provider === "claude" ? (channel === "opencode" ? "Claude Haiku" : "Claude Opus") : PROVIDER_LABELS[provider]} (via ${CHANNEL_LABELS[channel]})`,
     configured: Boolean(apiKey),
     problem:
       channelProblem || (apiKey ? "" : `${spec.keyVar} is not configured on the server.`),
@@ -832,10 +837,14 @@ export function interpretOverride(
  * "flash" is the Google route's own chain, so it needs no entry.
  */
 const VARIANT_ROUTES: Partial<
-  Record<ProviderKey, Partial<Record<ModelVariant, { channel: ChannelKey; modelVar: keyof WorkerEnv; defaultModel: string }>>>
+  Record<ProviderKey, Partial<Record<ModelVariant, { channel: ChannelKey; modelVar?: keyof WorkerEnv; defaultModel?: string }>>>
 > = {
   gemini: {
     pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-3.1-pro-preview" },
+  },
+  claude: {
+    haiku: { channel: "opencode" },
+    opus: { channel: "poe" },
   },
 };
 
@@ -852,23 +861,11 @@ export function variantOverride(
 ): RouteOverride | undefined {
   const spec = variant ? VARIANT_ROUTES[provider]?.[variant] : undefined;
   if (!spec) return undefined;
-  return { channel: spec.channel, model: readVar(env, spec.modelVar) || spec.defaultModel };
+  return { channel: spec.channel, ...(spec.modelVar ? { model: readVar(env, spec.modelVar) || spec.defaultModel } : {}) };
 }
 
-export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStatus {
-  const route = resolveRoute(provider, env);
-  const variants = PROVIDER_VARIANTS[provider];
+function statusOfRoute(route: Route): ModelStatus {
   return {
-    ...(variants
-      ? {
-          variants: Object.fromEntries(
-            variants.map(({ key }) => [
-              key,
-              resolveRoute(provider, env, variantOverride(provider, key, env)).model,
-            ]),
-          ),
-        }
-      : {}),
     channel: route.channel,
     model: route.model,
     configured: route.configured && !route.problem,
@@ -877,6 +874,18 @@ export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStat
     ...(route.maxEffort ? { maxEffort: route.maxEffort } : {}),
     ...(route.fallbackModels.length ? { fallbackModels: route.fallbackModels } : {}),
     ...(route.fallbackChannels.length ? { fallbackChannels: route.fallbackChannels } : {}),
+  };
+}
+
+export function routeStatus(provider: ProviderKey, env: WorkerEnv): ProviderStatus {
+  const status = statusOfRoute(resolveRoute(provider, env));
+  const variants = PROVIDER_VARIANTS[provider];
+  if (!variants) return status;
+  const entries = variants.map(({ key }) => [key, statusOfRoute(resolveRoute(provider, env, variantOverride(provider, key, env)))] as const);
+  return {
+    ...status,
+    variants: Object.fromEntries(entries.map(([key, value]) => [key, value.model])),
+    variantStatuses: Object.fromEntries(entries),
   };
 }
 

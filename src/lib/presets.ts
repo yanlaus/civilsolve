@@ -38,7 +38,7 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Preset> = {
   // owner's call - a billed Flash call on the Vertex AI prepaid credit).
   // Claude Haiku replaced Muse Spark on 10 October 2026, as in
   // DEFAULT_SOLVERS.
-  quick: { providers: ["haiku", "deepseek", "gemini"], effort: "high", verify: false, autoCheck: false },
+  quick: { providers: DEFAULT_SOLVERS, effort: "high", verify: false, autoCheck: false },
 };
 
 export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blurb: string }> = [

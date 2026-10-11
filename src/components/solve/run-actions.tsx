@@ -15,6 +15,8 @@ import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
   choiceKey,
+  canonicalChoice,
+  modelStatus,
   DEFAULT_JUDGE,
   MODEL_CHOICES,
   parseChoice,
@@ -47,7 +49,7 @@ const NO_IMAGES_CLASS =
   "rounded-cs border border-cs-line-soft bg-cs-surface px-4 py-3 text-xs text-cs-ink-3 print:hidden";
 
 function configuredIn(providerStatus: Record<ProviderKey, ProviderStatus> | null) {
-  return (key: ProviderKey) => (providerStatus ? providerStatus[key]?.configured !== false : true);
+  return (choice: ModelChoice) => modelStatus(providerStatus?.[choice.provider], choice.variant)?.configured !== false;
 }
 
 /** Solve this run's upload with one more provider. */
@@ -75,7 +77,7 @@ export function AddSolver({
     (choice) =>
       SOLVER_KEYS.includes(choice.provider) &&
       runs[choice.provider].status === "idle" &&
-      configured(choice.provider),
+      configured(choice),
   );
   const [addPick, setAddPick] = useState<string | null>(null);
   const toAdd =
@@ -167,18 +169,18 @@ export function CrossCheckControls({
   const chosen = (picked ?? finished.slice(0, MAX_JUDGED_SOLUTIONS)).filter((key) =>
     finished.includes(key),
   );
-  const judges = MODEL_CHOICES.filter((choice) => configured(choice.provider));
+  const judges = MODEL_CHOICES.filter(configured);
   const [judgePick, setJudgePick] = useState<ModelChoice | null>(null);
   const judge: ModelChoice =
-    judgePick ??
-    (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : DEFAULT_JUDGE);
+    canonicalChoice(judgePick ??
+    (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : DEFAULT_JUDGE));
 
   // How hard the judge thinks: high by default, the most reliable level
   // measured for grading. A judge's route may not offer every level (ChatGPT
   // runs at high or max); those are disabled, and a pick outside the band
   // moves to its nearest edge rather than being silently raised by the server.
   const [effortPick, setEffortPick] = useState<EffortKey>("high");
-  const { inBand, clamp } = effortBand(providerStatus?.[judge.provider]);
+  const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[judge.provider], judge.variant));
   const judgeEffort = clamp(effortPick);
 
   const solving = PROVIDER_KEYS.some((key) => isRunActive(runs[key]));

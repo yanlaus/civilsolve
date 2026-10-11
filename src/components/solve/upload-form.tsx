@@ -31,9 +31,10 @@ import {
   DEFAULT_JUDGE,
   DEFAULT_SOLVERS,
   DEFAULT_VERIFIER,
-  HIGHER_CREDIT_PROVIDERS,
+  usesMoreCredit,
   LOWER_CREDIT_PROVIDERS,
   MODEL_CHOICES,
+  modelStatus,
   parseChoice,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
@@ -50,6 +51,7 @@ import { parsePageSpec } from "@/lib/page-range";
 import { STEP_IDS } from "@/lib/journey";
 import { DEFAULT_MODE, forgetSavedMode, MODES, PRESETS, type Preset, type SolveMode } from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
+import { effortBand as bandForStatus } from "@/lib/effort-band";
 
 type QueuedFile = {
   id: string;
@@ -228,18 +230,18 @@ export function UploadForm({
   useEffect(() => {
     if (!providerStatus) return;
     setSelectedProviders((current) => {
-      const configured = current.filter((key) => providerStatus[key]?.configured);
+      const configured = current.filter((key) => modelStatus(providerStatus[key], variants[key])?.configured);
       if (configured.length) return configured;
-      const firstConfigured = SOLVER_KEYS.find((key) => providerStatus[key]?.configured);
+      const firstConfigured = SOLVER_KEYS.find((key) => modelStatus(providerStatus[key], variants[key])?.configured);
       return firstConfigured ? [firstConfigured] : current;
     });
-  }, [providerStatus]);
+  }, [providerStatus, variants]);
 
-  const isAvailable = (provider: ProviderKey) =>
-    providerStatus ? providerStatus[provider]?.configured !== false : true;
+  const isAvailable = (provider: ProviderKey, variant = variants[provider]) =>
+    providerStatus ? modelStatus(providerStatus[provider], variant)?.configured !== false : true;
 
   const noneConfigured = Boolean(
-    providerStatus && SOLVER_KEYS.every((key) => !providerStatus[key]?.configured),
+    providerStatus && MODEL_CHOICES.every((choice) => !modelStatus(providerStatus[choice.provider], choice.variant)?.configured),
   );
 
   // Some routes put a floor under the reasoning level (minEffort; a pinned
@@ -249,12 +251,12 @@ export function UploadForm({
   // letting the user pick a level that is silently raised: ChatGPT floors at
   // "high".
   const providerFloor = (key: ProviderKey) => {
-    const status = providerStatus?.[key];
+    const status = modelStatus(providerStatus?.[key], variants[key]);
     const floor = status?.forcedEffort ?? status?.minEffort;
     return floor ? EFFORT_KEYS.indexOf(floor as EffortKey) : -1;
   };
   const providerCeiling = (key: ProviderKey) => {
-    const status = providerStatus?.[key];
+    const status = modelStatus(providerStatus?.[key], variants[key]);
     const ceiling = status?.forcedEffort ?? status?.maxEffort;
     return ceiling ? EFFORT_KEYS.indexOf(ceiling as EffortKey) : EFFORT_KEYS.length;
   };
@@ -270,23 +272,14 @@ export function UploadForm({
   const effortCeiling =
     ceilingIndex < EFFORT_KEYS.length - 1 ? EFFORT_KEYS[ceilingIndex] : undefined;
   const labelsFor = (matches: (key: ProviderKey) => boolean) =>
-    selectedProviders.filter(matches).map((key) => PROVIDER_LABELS[key]).join(" and ");
+    selectedProviders.filter(matches).map((key) => providerDisplayName(key, variants[key])).join(" and ");
   const floorLabels = labelsFor((key) => providerFloor(key) === floorIndex);
   // Each pass model's level is kept inside its route's band, like the
   // judge's (run-actions.tsx): out-of-band levels are disabled, and a pick
   // outside the band moves to its nearest edge (Kimi floors at "medium",
   // ChatGPT at "high").
-  const effortBand = (provider: ProviderKey) => {
-    const floor = Math.max(0, providerFloor(provider));
-    const ceiling = Math.min(EFFORT_KEYS.length - 1, providerCeiling(provider));
-    const inBand = (key: EffortKey) => {
-      const index = EFFORT_KEYS.indexOf(key);
-      return index >= floor && index <= ceiling;
-    };
-    const clamp = (pick: EffortKey): EffortKey =>
-      inBand(pick) ? pick : EFFORT_KEYS[Math.min(Math.max(EFFORT_KEYS.indexOf(pick), floor), ceiling)];
-    return { inBand, clamp };
-  };
+  const effortBand = (choice: ModelChoice) =>
+    bandForStatus(modelStatus(providerStatus?.[choice.provider], choice.variant));
   const passRoles: Array<{
     key: PassRole;
     label: string;
@@ -298,9 +291,9 @@ export function UploadForm({
     { key: "v", label: "Reconciler", value: verifier, set: setVerifier },
   ];
   const passEffort = (role: PassRole, choice: ModelChoice) =>
-    effortBand(choice.provider).clamp(passEffortPicks[role]);
+    effortBand(choice).clamp(passEffortPicks[role]);
   const ceilingLabels = labelsFor((key) => providerCeiling(key) === ceilingIndex);
-  const autoJudgeEffort = effortBand(autoJudge.provider).clamp(autoJudgeEffortPick);
+  const autoJudgeEffort = effortBand(autoJudge).clamp(autoJudgeEffortPick);
   // The cross-check needs two solutions to compare.
   const autoCheckOn = autoCheckEnabled && selectedProviders.length >= 2;
   useEffect(() => {
@@ -310,7 +303,7 @@ export function UploadForm({
 
   /** Fills in every setting from a preset - its own defaults for the rest. */
   function applyPreset(preset: Preset) {
-    setSelectedProviders(preset.providers.filter(isAvailable));
+    setSelectedProviders(preset.providers.filter((provider) => isAvailable(provider, DEFAULT_VARIANTS[provider])));
     setEffort(preset.effort);
     setVerifyEnabled(preset.verify);
     setInterpreterA(DEFAULT_INTERPRETERS[0]);
@@ -348,7 +341,7 @@ export function UploadForm({
       applyPreset(preset);
     } else if (!fromPreset && customSnapshot.current) {
       const saved = customSnapshot.current;
-      setSelectedProviders(saved.providers.filter(isAvailable));
+      setSelectedProviders(saved.providers.filter((provider) => isAvailable(provider, saved.variants[provider])));
       setEffort(saved.effort);
       setVerifyEnabled(saved.verify);
       setInterpreterA(saved.interpreters[0]);
@@ -423,7 +416,7 @@ export function UploadForm({
 
   const canSubmit =
     queuedFiles.length > 0 &&
-    selectedProviders.every(isAvailable) &&
+    selectedProviders.every((provider) => isAvailable(provider)) &&
     !verifyConfigError &&
     !solverConfigError &&
     !pageConfigError &&
@@ -972,21 +965,21 @@ export function UploadForm({
             {/* Three by three - nine solvers - on every screen, at the owner's request. */}
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               {SOLVER_OPTIONS.map((provider) => {
-                const status = providerStatus?.[provider.key];
+                const variant = variants[provider.key];
+                const status = modelStatus(providerStatus?.[provider.key], variant);
                 const available = isAvailable(provider.key);
                 const checked = selectedProviders.includes(provider.key) && available;
-                const higherCredit = HIGHER_CREDIT_PROVIDERS.has(provider.key);
+                const higherCredit = usesMoreCredit(provider.key, variant);
                 const lowerCredit = LOWER_CREDIT_PROVIDERS.has(provider.key);
                 const china = CHINA_PROVIDERS.has(provider.key);
                 const hasBadge = higherCredit || lowerCredit || china;
                 const models = PROVIDER_VARIANTS[provider.key];
-                const variant = variants[provider.key];
                 // Brand, account, model - nothing else. Effort floors are shown
                 // under Thinking Effort, and a model chain announces itself in the
                 // status line when it actually switches.
                 const note = status
                   ? status.configured
-                    ? `${CHANNEL_LABELS[status.channel]} · ${(variant && status.variants?.[variant]) || status.model}`
+                    ? `${CHANNEL_LABELS[status.channel]} · ${status.model}`
                     : `${CHANNEL_LABELS[status.channel]} key not configured`
                   : "checking...";
                 return (
@@ -1024,7 +1017,7 @@ export function UploadForm({
                             type="button"
                             aria-pressed={variant === model.key}
                             title={`${provider.label} ${model.label}`}
-                            disabled={!available}
+                            disabled={!isAvailable(provider.key, model.key)}
                             onClick={(event) => {
                               event.preventDefault();
                               setVariants((current) => ({ ...current, [provider.key]: model.key }));
@@ -1035,7 +1028,7 @@ export function UploadForm({
                                 : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
                             }`}
                           >
-                            {model.key === "flash" ? "Flash" : "Pro"}
+                            {model.shortLabel}
                           </button>
                         ))}
                       </span>
@@ -1045,7 +1038,7 @@ export function UploadForm({
                         {higherCredit ? (
                           <span
                             className="inline-flex items-center gap-1 rounded-full border border-[#ecd3b8] bg-[#fdf3e7] px-2 py-0.5 text-[0.65rem] font-medium leading-none text-[#b35c1e]"
-                            title={`${provider.label} draws more credit per solve than the other providers.`}
+                            title={`${providerDisplayName(provider.key, variant)} draws more credit per solve than the other providers.`}
                           >
                             <Flame className="h-3 w-3" aria-hidden="true" />
                             More credit
@@ -1170,7 +1163,7 @@ export function UploadForm({
               // thinks.
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 {passRoles.map((role) => {
-                  const band = effortBand(role.value.provider);
+                  const band = effortBand(role.value);
                   const effort = passEffort(role.key, role.value);
                   return (
                     <div key={role.key} className="min-w-0 space-y-2">
@@ -1184,7 +1177,7 @@ export function UploadForm({
                           }}
                           className={PASS_SELECT_CLASS}
                         >
-                          {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                          {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
                             <option key={choiceKey(choice)} value={choiceKey(choice)}>
                               {providerDisplayName(choice.provider, choice.variant)}
                             </option>
@@ -1263,7 +1256,7 @@ export function UploadForm({
                     }}
                     className={PASS_SELECT_CLASS}
                   >
-                    {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider)).map((choice) => (
+                    {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
                       <option key={choiceKey(choice)} value={choiceKey(choice)}>
                         {providerDisplayName(choice.provider, choice.variant)}
                       </option>
@@ -1281,11 +1274,11 @@ export function UploadForm({
                       <option
                         key={option.key}
                         value={option.key}
-                        disabled={!effortBand(autoJudge.provider).inBand(option.key)}
+                        disabled={!effortBand(autoJudge).inBand(option.key)}
                       >
                         {option.label}
                         {option.key === "high" ? " (default)" : ""}
-                        {effortBand(autoJudge.provider).inBand(option.key) ? "" : " - not offered"}
+                        {effortBand(autoJudge).inBand(option.key) ? "" : " - not offered"}
                       </option>
                     ))}
                   </select>
