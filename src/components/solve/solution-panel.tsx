@@ -63,7 +63,7 @@ import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { AddSolver, CrossCheckControls } from "./run-actions";
 import { StickyHeading } from "./section-heading";
 import { SolutionArticle } from "./solution-article";
-import { AllView, StepsArticle, type StepAction } from "./solution-views";
+import { StepsArticle, type StepAction } from "./solution-views";
 import { StudyNotes } from "./study-notes";
 import {
   ERROR_BOX,
@@ -86,12 +86,13 @@ const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
 );
 const SOLUTION_TAB_KEYS = SOLUTION_TAB_ORDER.map((provider) => provider.key);
 
-type ViewKey = "all" | "problem" | "assumptions" | "steps" | "answer";
+type ViewKey = "problem" | "assumptions" | "steps" | "answer";
 
-// "All" first and open by default (3 October 2026): the whole solution in
-// one scroll with the final answer on top, so a phone needs no tab-hopping.
+// Solution open by default. "All" - the whole solution in one scroll - came
+// first and open from 3 October 2026 until 12 October, when the owner took
+// it out: everything in it is in the other tabs. The history still shows a
+// solution whole (AllView in solution-views.tsx).
 const VIEWS: Array<{ key: ViewKey; label: string }> = [
-  { key: "all", label: "All 全部" },
   { key: "problem", label: "Problem" },
   { key: "assumptions", label: "Assumptions" },
   { key: "steps", label: "Solution" },
@@ -336,7 +337,7 @@ export default function SolutionPanel({
   pdfJobOf: (target: PdfTarget) => string | null;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
-  const [activeView, setActiveView] = useState<ViewKey>("all");
+  const [activeView, setActiveView] = useState<ViewKey>("steps");
   const [hintMode, setHintModeState] = useState(loadHintMode);
   const setHintMode = (on: boolean) => {
     setHintModeState(on);
@@ -750,8 +751,6 @@ export default function SolutionPanel({
                 onShowAll={() => setHintMode(false)}
                 stepAction={askAction}
               />
-            ) : activeView === "all" ? (
-              <AllView artifact={activeArtifact} stepAction={askAction} />
             ) : activeView === "steps" ? (
               <StepsArticle source={activeArtifact.stepByStep} stepAction={askAction} />
             ) : (
