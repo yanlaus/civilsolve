@@ -61,6 +61,7 @@ import { ProviderLogo } from "./provider-logo";
 import { QuestionImages } from "./question-images";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { AddSolver, CrossCheckControls } from "./run-actions";
+import { StickyHeading } from "./section-heading";
 import { SolutionArticle } from "./solution-article";
 import { AllView, StepsArticle, type StepAction } from "./solution-views";
 import { StudyNotes } from "./study-notes";
@@ -75,6 +76,9 @@ import {
   tookLabel,
 } from "./task-status";
 import { PROVIDER_OPTIONS } from "./upload-form";
+
+/** The Solutions heading, which the model tabs stick under. */
+const SOLUTIONS_HEADING_ID = "solutions-heading";
 
 /** The solution tabs' order: Muse Spark first, then picker order (SOLUTION_ORDER). */
 const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
@@ -371,9 +375,12 @@ export default function SolutionPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const readingAt = useRef<Partial<Record<ProviderKey, number>>>({});
   const pendingScroll = useRef<number | null>(null);
+  /** Where the tabs stick: under the step bar and the Solutions heading. */
+  const stickLine = () =>
+    journeyBarHeight() + (document.getElementById(SOLUTIONS_HEADING_ID)?.parentElement?.offsetHeight ?? 0);
   /** How far the page has scrolled past the top of the panel; 0 or less while the tabs are not stuck. */
   const scrolledInto = () =>
-    panelRef.current ? journeyBarHeight() - panelRef.current.getBoundingClientRect().top : 0;
+    panelRef.current ? stickLine() - panelRef.current.getBoundingClientRect().top : 0;
   const [tabsStuck, setTabsStuck] = useState(false);
   useEffect(() => {
     let frame = 0;
@@ -410,7 +417,7 @@ export default function SolutionPanel({
     if (into === null || !panel) return;
     pendingScroll.current = null;
     const panelTop = panel.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: panelTop - journeyBarHeight() + into, behavior: "instant" });
+    window.scrollTo({ top: panelTop - stickLine() + into, behavior: "instant" });
   }, [activeProvider]);
   // On a phone the tabs overflow sideways: keep the open one in sight. The
   // strip scrolls sideways only - the page itself never moves for it.
@@ -559,13 +566,18 @@ export default function SolutionPanel({
 
       {/* The answers, from the heading to Add a solver: where the step bar's
           "Answers" and the jump button land. */}
-      <div id={STEP_IDS.answers} tabIndex={-1} className="scroll-mt-28 pt-5 outline-none sm:scroll-mt-20">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-cs-ink">
-          <CheckCircle2 className="h-5 w-5 text-cs-success" />
-          Solutions
-        </h2>
-      </div>
+      <div id={STEP_IDS.answers} tabIndex={-1} className="scroll-mt-28 pt-3 outline-none sm:scroll-mt-20">
+      {/* A direct child of the answers block, so it sticks all the way
+          through the summary, the tabs and Add a solver. */}
+      <StickyHeading
+        id={SOLUTIONS_HEADING_ID}
+        icon={CheckCircle2}
+        iconClassName="text-cs-success"
+        title="Solutions"
+        chinese="答案"
+        className="print:hidden"
+      />
+      <div className="mb-2" />
 
       <AnswerSummary
         order={SOLUTION_TAB_KEYS}
@@ -593,7 +605,7 @@ export default function SolutionPanel({
         className="cs-panel overflow-clip rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden"
       >
         <div
-          className={`sticky top-[var(--cs-journey-h,0px)] z-20 border-b-2 border-cs-line-soft bg-cs-surface px-2 pt-1 transition-shadow ${
+          className={`sticky top-[calc(var(--cs-journey-h,0px)+var(--cs-section-h))] z-20 border-b-2 border-cs-line-soft bg-cs-surface px-2 pt-1 transition-shadow ${
             tabsStuck ? "shadow-[0_6px_12px_-8px_var(--cs-shadow)]" : ""
           }`}
         >
@@ -869,15 +881,8 @@ export default function SolutionPanel({
         className="mt-8 scroll-mt-28 outline-none sm:scroll-mt-20 print:hidden"
         aria-labelledby="cross-check-heading"
       >
-        <h2
-          id="cross-check-heading"
-          className="flex flex-wrap items-baseline gap-x-2 font-display text-2xl font-bold text-cs-ink"
-        >
-          <Scale className="h-5 w-5 self-center text-cs-accent" aria-hidden="true" />
-          Cross-check
-          <span className="font-sans text-base font-normal text-cs-ink-3">交叉核對</span>
-        </h2>
-        <p className="mb-3 mt-1 text-xs text-cs-ink-3">
+        <StickyHeading id="cross-check-heading" icon={Scale} title="Cross-check" chinese="交叉核對" />
+        <p className="mb-3 text-xs text-cs-ink-3">
           Optional - a judge model grades the solutions you tick against the question and gives
           the verified answer.
         </p>
