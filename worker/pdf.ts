@@ -192,6 +192,9 @@ ul, ol { margin: 5pt 0; padding-left: 18pt; }
 li { margin: 2pt 0; break-inside: avoid; }
 code, pre { font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 0.92em; }
 pre { white-space: pre-wrap; break-inside: avoid; }
+/* A diagram's prompt for an AI that draws, set apart from the solution. */
+.prompt-label { margin: 6pt 0 2pt; font-size: 9.5pt; color: #444; }
+pre.prompt { border: 0.5pt solid #bbb; padding: 6pt 8pt; font-size: 8.5pt; line-height: 1.45; }
 table { border-collapse: collapse; margin: 6pt 0; break-inside: avoid; }
 th, td { border: 0.5pt solid #999; padding: 3pt 6pt; text-align: left; }
 hr { border: 0; border-top: 0.5pt solid #999; margin: 10pt 0; }
@@ -223,6 +226,20 @@ export async function pdfDocument(content: PdfContent) {
             render(content.solution.stepByStep),
             "<h2>Final Answer</h2>",
             render(content.solution.finalAnswer),
+            // The charts the question asks for: their key points, and the
+            // prompt to paste into an AI that draws (since 12 October 2026).
+            ...(content.solution.diagrams?.length
+              ? [
+                  "<h2>Diagrams to draw</h2>",
+                  ...content.solution.diagrams.flatMap((diagram) => [
+                    `<h3>${renderInlineMath(diagram.title)}</h3>`,
+                    render(diagram.description),
+                    diagram.prompt
+                      ? `<p class="prompt-label">To have it drawn, paste this into an AI that draws pictures, such as Gemini:</p><pre class="prompt">${escapeHtml(diagram.prompt)}</pre>`
+                      : "",
+                  ]),
+                ]
+              : []),
           ]
         : ["<h1>Verified final answer</h1>", render(content.judgement.final_answer)];
   const body = await sanitizeHtml(sections.join("\n"));

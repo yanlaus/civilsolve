@@ -63,6 +63,34 @@ const SOLUTION_FIELDS = [
   "latex_body",
 ] as const;
 
+/** The solution's contract: the six text fields, and the list of diagrams to draw. */
+function solutionShapeContract() {
+  const skeleton = `{${SOLUTION_FIELDS.map((field) => `"${field}": ""`).join(", ")}, "diagrams": [{"title": "", "description": "", "prompt": ""}]}`;
+  return [
+    "",
+    `Return exactly one JSON object with these ${SOLUTION_FIELDS.length + 1} fields - ${SOLUTION_FIELDS.length} strings and the list \`diagrams\`:`,
+    skeleton,
+    "`diagrams` is an empty list `[]` when the question asks for nothing to be drawn. Do not add other fields. Do not nest this object inside another object or array.",
+  ];
+}
+
+/**
+ * Charts and diagrams the question asks the student to draw (12 October
+ * 2026, the owner's request): a solver cannot draw, so it describes each one
+ * in the working, and again in `diagrams` - for the student, and as a prompt
+ * they can paste into an AI that draws, such as Gemini. Plain text in the
+ * prompt: such a tool reads LaTeX as clutter.
+ */
+const DIAGRAM_RULES = [
+  "When the question asks the student to draw, sketch or plot something - a shear force or bending moment diagram, a free-body diagram, an influence line, a graph or curve, a flow net, a Mohr's circle - you cannot draw it, so describe it fully instead:",
+  "- In `step_by_step`, the step that produces it says how to draw it: the axes and their units, every key point with its value, the shape between points (straight, parabolic...), where it crosses zero, where its maximum is, and the sign convention.",
+  "- In `diagrams`, one entry per chart or diagram asked for, in the order the question asks for them:",
+  "  - `title`: what it is, for example \"Bending moment diagram - beam AB\".",
+  "  - `description`: its key points and shape for the student, as short `- ` bullet lines in the same Markdown and `$...$` math as the solution.",
+  "  - `prompt`: a complete instruction a student can paste as it is into an AI that draws pictures, such as Gemini, to get that chart drawn correctly. Open it with \"Create an image:\", so the AI draws rather than describes. Self-contained - the AI sees nothing else: say what to draw and in what style (a clean engineering diagram, white background, black lines, labelled axes with units); the structure or axes with their dimensions; every key point with its position and value; the shape of each segment; where the curve crosses zero and where its maximum is, with values; the sign convention; the labels and the title; and \"Do not add any value that is not listed here.\" Plain text only - no LaTeX, no Markdown, no `$`: write values with their units as plain text, such as 43.3 kN and 2.33 m.",
+  "- `diagrams` is an empty list when the question asks for nothing to be drawn. Do not add a diagram the question does not ask for.",
+];
+
 const INTERPRETATION_FIELDS = [
   "interpreted_problem",
   "diagram_description",
@@ -217,6 +245,8 @@ export function buildTutorPrompt(
     "- Do not leave formulas as plain text when they contain symbols, subscripts, superscripts, fractions, or unit calculations.",
     `- ${UNIT_RULE}`,
     "- Do not use CJK prose such as 代入, 結果, 已知, or 所求 unless the user explicitly requests a Chinese answer.",
+    "",
+    ...DIAGRAM_RULES,
   );
 
   if (extras.revision) {
@@ -225,8 +255,8 @@ export function buildTutorPrompt(
 
   if (extras.enforceShape) {
     sections.push(
-      ...shapeContract(SOLUTION_FIELDS),
-      "If the assignment contains several problems, cover all of them inside these same six fields.",
+      ...solutionShapeContract(),
+      "If the assignment contains several problems, cover all of them inside these same fields.",
     );
   }
 

@@ -8,6 +8,7 @@ import "katex/dist/katex.min.css";
 import { renderInlineMath, renderMarkdownWith, type RenderOptions } from "../../shared/markdown";
 
 export type { RenderOptions };
+export { escapeHtml } from "../../shared/markdown";
 
 /**
  * One model-written field as HTML, sanitized by DOMPurify before it is set

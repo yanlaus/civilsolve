@@ -973,11 +973,27 @@ function budgetEffort(route: Route, effort: EffortKey) {
   return route.effort.kind === "budget" ? route.effort.values[effort] : undefined;
 }
 
-/** Gemini responseSchema is an OpenAPI subset that rejects additionalProperties. */
+/**
+ * Gemini responseSchema is an OpenAPI subset that rejects additionalProperties
+ * - at every level: a solution's `diagrams` list holds objects too (since
+ * 12 October 2026).
+ */
 function geminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const { additionalProperties: _unsupported, ...rest } = schema;
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  return { ...rest, propertyOrdering: [...required] };
+  const out: Record<string, unknown> = { ...rest };
+  if (rest.properties && typeof rest.properties === "object") {
+    out.properties = Object.fromEntries(
+      Object.entries(rest.properties as Record<string, unknown>).map(([key, value]) => [
+        key,
+        value && typeof value === "object" ? geminiSchema(value as Record<string, unknown>) : value,
+      ]),
+    );
+  }
+  if (rest.items && typeof rest.items === "object") {
+    out.items = geminiSchema(rest.items as Record<string, unknown>);
+  }
+  if (Array.isArray(schema.required)) out.propertyOrdering = [...schema.required];
+  return out;
 }
 
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/;
