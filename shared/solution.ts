@@ -13,6 +13,22 @@ export type StructuredSolution = {
   latex_body: string;
 };
 
+/**
+ * A chart or diagram the question asks the student to draw - a shear force
+ * or bending moment diagram, a free-body diagram, a graph (12 October 2026,
+ * the owner's request). The solvers write text only, so each is described in
+ * the working, and again here: for the student, and as a prompt they can
+ * paste into an AI that draws (Gemini, say) to see it drawn.
+ */
+export type SolutionDiagram = {
+  /** What it is: "Bending moment diagram - beam AB". */
+  title: string;
+  /** Its key points and shape, for the student: Markdown with `$...$` math. */
+  description: string;
+  /** A self-contained instruction in plain text, no LaTeX, to paste into an AI that draws. */
+  prompt: string;
+};
+
 export type ProviderArtifact = {
   title: string;
   interpretedProblem: string;
@@ -20,6 +36,8 @@ export type ProviderArtifact = {
   stepByStep: string;
   finalAnswer: string;
   latexBody: string;
+  /** The charts and diagrams the question asks for; absent when it asks for none. */
+  diagrams?: SolutionDiagram[];
 };
 
 export const solutionSchema = {
@@ -32,6 +50,19 @@ export const solutionSchema = {
     step_by_step: { type: "string" },
     final_answer: { type: "string" },
     latex_body: { type: "string" },
+    diagrams: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          prompt: { type: "string" },
+        },
+        required: ["title", "description", "prompt"],
+      },
+    },
   },
   required: [
     "title",
@@ -40,6 +71,7 @@ export const solutionSchema = {
     "step_by_step",
     "final_answer",
     "latex_body",
+    "diagrams",
   ],
 } as const;
 
@@ -1057,7 +1089,12 @@ export function artifactToText(artifact: ProviderArtifact, limit = Infinity) {
   ]
     .filter(Boolean)
     .join("\n\n");
-  const answer = `Final answer:\n${artifact.finalAnswer}`;
+  // The diagrams' key points go too - for a cross-check, a re-generation or
+  // study notes - but not their prompts, which repeat them at length.
+  const diagrams = artifact.diagrams?.length
+    ? `\n\nDiagrams to draw:\n${artifact.diagrams.map((diagram) => `- ${diagram.title}: ${diagram.description}`).join("\n")}`
+    : "";
+  const answer = `Final answer:\n${artifact.finalAnswer}${diagrams}`;
   const budget = limit - head.length - answer.length - 24;
   let working = `Solution:\n${artifact.stepByStep}`;
   if (working.length > budget) {
@@ -1142,5 +1179,60 @@ export function finalizeProviderArtifact(
     });
   }
 
-  return artifact;
+  // Read apart from the six text fields, whose repair pipeline handles
+  // strings only; absent rather than empty, so a solution with none is
+  // stored as before.
+  const diagrams = readDiagrams(rawText);
+  return diagrams.length ? { ...artifact, diagrams } : artifact;
+}
+
+/**
+ * The `diagrams` a response carried: a list of {title, description, prompt},
+ * or what a model wrote instead - other key names, a list of strings, one
+ * object, a wrapper around the whole response, a stream cut short. Nothing
+ * when there is none, or the response is not JSON at all.
+ */
+export function readDiagrams(rawText: string): SolutionDiagram[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalizeJsonCandidate(rawText));
+  } catch {
+    parsed = recoverTruncatedJson(rawText)?.record;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  let record = parsed as Record<string, unknown>;
+  // A wrapper: {"civil_solution": {...}}.
+  const keys = Object.keys(record);
+  if (!("diagrams" in record) && keys.length === 1) {
+    const inner = record[keys[0]];
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) record = inner as Record<string, unknown>;
+  }
+  const value = record.diagrams ?? record.charts ?? record.figures;
+  const entries = Array.isArray(value) ? value : value ? [value] : [];
+  return entries.flatMap((entry, index): SolutionDiagram[] => {
+    const fallbackTitle = `Diagram ${index + 1}`;
+    if (typeof entry === "string") {
+      const prompt = cleanPrompt(entry);
+      return prompt ? [{ title: fallbackTitle, description: "", prompt }] : [];
+    }
+    if (!entry || typeof entry !== "object") return [];
+    const fields = entry as Record<string, unknown>;
+    const pick = (names: string[]) => {
+      const found = names.map((name) => fields[name]).find((field) => typeof field === "string" && field.trim());
+      return typeof found === "string" ? found : "";
+    };
+    const prompt = cleanPrompt(pick(["prompt", "image_prompt", "ai_prompt", "generation_prompt", "instructions"]));
+    const description = fixEscapedNewlines(sanitizeText(pick(["description", "details", "key_points", "summary"])));
+    if (!prompt && !description) return [];
+    return [{ title: sanitizeText(pick(["title", "name", "chart", "type"])) || fallbackTitle, description, prompt }];
+  });
+}
+
+/** A diagram's prompt: plain text, so only its line breaks and stray control characters are seen to. */
+function cleanPrompt(value: string) {
+  return fixEscapedNewlines(value)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

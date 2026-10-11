@@ -511,7 +511,8 @@ export function renderMarkdownWith(
   }
 }
 
-function escapeHtml(text: string) {
+/** Text as HTML: `&`, `<`, `>` and `"` escaped - a diagram's prompt in the printed solution. */
+export function escapeHtml(text: string) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 

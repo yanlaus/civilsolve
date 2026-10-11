@@ -8,6 +8,7 @@ import {
   GraduationCap,
   Image as ImageIcon,
   Languages,
+  LineChart,
   Loader2,
   MessageCircleQuestion,
   RotateCw,
@@ -47,12 +48,13 @@ import {
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
 import { journeyBarHeight, STEP_IDS } from "@/lib/journey";
-import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
+import { escapeHtml, renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AlignState } from "@/hooks/use-align";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { AnswerSummary } from "./answer-summary";
 import { AskPanel } from "./ask-panel";
+import { DiagramList } from "./diagram-prompts";
 import { HintStepper } from "./hint-stepper";
 import MathProse from "./math-prose";
 import { MathTitle } from "./math-title";
@@ -86,7 +88,8 @@ const SOLUTION_TAB_ORDER = SOLUTION_ORDER.flatMap((key) =>
 );
 const SOLUTION_TAB_KEYS = SOLUTION_TAB_ORDER.map((provider) => provider.key);
 
-type ViewKey = "problem" | "assumptions" | "steps" | "answer";
+/** "diagrams": a solution's charts to draw (diagram-prompts.tsx), a tab only when it has some. */
+type ViewKey = "problem" | "assumptions" | "steps" | "answer" | "diagrams";
 
 // Solution open by default. "All" - the whole solution in one scroll - came
 // first and open from 3 October 2026 until 12 October, when the owner took
@@ -118,7 +121,7 @@ function saveHintMode(on: boolean) {
   }
 }
 
-function viewSource(artifact: ProviderArtifact, view: ViewKey) {
+function viewSource(artifact: ProviderArtifact, view: Exclude<ViewKey, "diagrams">) {
   return view === "problem"
     ? artifact.interpretedProblem
     : view === "assumptions"
@@ -460,6 +463,9 @@ export default function SolutionPanel({
 
   const activeRun = runs[activeProvider];
   const activeArtifact = activeRun.status === "done" ? activeRun.solution : null;
+  // Its charts to draw; on a tab with none, a Diagrams pick shows the working.
+  const activeDiagrams = activeArtifact?.diagrams ?? [];
+  const shownView: ViewKey = activeView === "diagrams" && !activeDiagrams.length ? "steps" : activeView;
   const activeLabel = nameOf(activeProvider);
   const hintKey = `${activeProvider}:${solutionVersions[activeProvider] ?? 0}`;
   const askBlocked = !canRerun
@@ -531,6 +537,20 @@ export default function SolutionPanel({
       renderMarkdown(activeArtifact.stepByStep),
       "<h2>Final Answer</h2>",
       renderMarkdown(activeArtifact.finalAnswer),
+      // As in the server's PDF (worker/pdf.ts): each diagram's key points
+      // and its prompt, escaped - it is the model's text.
+      ...(activeArtifact.diagrams?.length
+        ? [
+            "<h2>Diagrams to draw</h2>",
+            ...activeArtifact.diagrams.flatMap((diagram) => [
+              `<h3>${renderTitle(diagram.title)}</h3>`,
+              renderMarkdown(diagram.description),
+              diagram.prompt
+                ? `<p>To have it drawn, paste this into an AI that draws pictures, such as Gemini:</p><pre>${escapeHtml(diagram.prompt)}</pre>`
+                : "",
+            ]),
+          ]
+        : []),
     ].join("\n");
   }, [activeArtifact]);
 
@@ -705,22 +725,29 @@ export default function SolutionPanel({
 
             <div className="flex flex-wrap items-end justify-between gap-x-2 border-b-2 border-cs-line-soft px-2 pt-1">
               <div className={`flex overflow-x-auto ${hintMode ? "opacity-40" : ""}`}>
-                {VIEWS.map((view) => (
+                {[
+                  ...VIEWS,
+                  // Only for a solution with charts to draw.
+                  ...(activeDiagrams.length
+                    ? [{ key: "diagrams" as const, label: `Diagrams 畫圖 (${activeDiagrams.length})` }]
+                    : []),
+                ].map((view) => (
                   <button
                     key={view.key}
                     type="button"
                     disabled={hintMode}
                     onClick={() => setActiveView(view.key)}
-                    className={`relative shrink-0 px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed ${
-                      activeView === view.key && !hintMode
+                    className={`relative inline-flex shrink-0 items-center gap-1.5 px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed ${
+                      shownView === view.key && !hintMode
                         ? "text-cs-accent"
                         : "text-cs-ink-3 hover:text-cs-ink"
                     }`}
                   >
+                    {view.key === "diagrams" ? <LineChart className="h-4 w-4" aria-hidden="true" /> : null}
                     {view.label}
                     <span
                       className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
-                        activeView === view.key && !hintMode ? "bg-cs-accent" : "bg-transparent"
+                        shownView === view.key && !hintMode ? "bg-cs-accent" : "bg-transparent"
                       }`}
                     />
                   </button>
@@ -743,6 +770,29 @@ export default function SolutionPanel({
               </button>
             </div>
 
+            {/* A question with charts to draw: say so where the student reads
+                the working and the answer, and take them to the drawings. */}
+            {activeDiagrams.length && !hintMode && (shownView === "steps" || shownView === "answer") ? (
+              <div className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-cs border border-cs-line bg-cs-muted px-4 py-2.5 sm:mx-7">
+                <LineChart className="h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
+                <span className="min-w-0 flex-1 text-sm text-cs-ink-2">
+                  This question asks you to draw{" "}
+                  {activeDiagrams.length === 1
+                    ? "a diagram: see its key points, and a prompt to have Gemini draw it."
+                    : `${activeDiagrams.length} diagrams: see their key points, and a prompt to have Gemini draw each.`}{" "}
+                  ·{" "}
+                  <span lang="zh-Hant-HK">題目要你畫圖，可以叫 Gemini 幫你畫。</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveView("diagrams")}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-cs border border-cs-accent px-3 py-1 text-sm font-semibold text-cs-accent transition hover:bg-cs-accent hover:text-cs-on-accent"
+                >
+                  Open Diagrams · 睇畫圖
+                </button>
+              </div>
+            ) : null}
+
             {hintMode ? (
               <HintStepper
                 artifact={activeArtifact}
@@ -751,10 +801,14 @@ export default function SolutionPanel({
                 onShowAll={() => setHintMode(false)}
                 stepAction={askAction}
               />
-            ) : activeView === "steps" ? (
+            ) : shownView === "diagrams" ? (
+              <div className="px-4 py-6 sm:px-7">
+                <DiagramList diagrams={activeDiagrams} />
+              </div>
+            ) : shownView === "steps" ? (
               <StepsArticle source={activeArtifact.stepByStep} stepAction={askAction} />
             ) : (
-              <SolutionArticle source={viewSource(activeArtifact, activeView)} />
+              <SolutionArticle source={viewSource(activeArtifact, shownView)} />
             )}
 
             <div className="border-t border-cs-line-soft px-4 pt-4 sm:px-7">

@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import type { ProviderArtifact } from "../../../shared/solution";
 import { splitSolutionSteps, type SolutionStep } from "../../../shared/steps";
+import { DiagramList } from "./diagram-prompts";
 import { MathTitle } from "./math-title";
 import { SolutionArticle } from "./solution-article";
 
@@ -75,6 +76,14 @@ export function AllView({ artifact, stepAction }: { artifact: ProviderArtifact; 
             )}
           </div>
         ))}
+      {artifact.diagrams?.length ? (
+        <div className="mt-2 px-4 sm:px-7">
+          <div className="pb-2 pt-4 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+            Diagrams to draw · 要畫嘅圖
+          </div>
+          <DiagramList diagrams={artifact.diagrams} />
+        </div>
+      ) : null}
     </div>
   );
 }
