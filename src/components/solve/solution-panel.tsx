@@ -996,6 +996,12 @@ function Assessment({
   chinese?: string;
   correct: boolean;
 }) {
+  // The point that matters most first - the judge puts a wrong solution's
+  // first error at the top (shared/prompt.ts) - in English and in Chinese;
+  // the rest a tap away (the owner, 11 October 2026: the assessments read
+  // as paragraphs).
+  const [headline, details] = splitFirstPoint(text);
+  const [headlineChinese, detailsChinese] = splitFirstPoint(chinese ?? "");
   return (
     <div className="min-w-0 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3">
       <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
@@ -1007,18 +1013,40 @@ function Assessment({
         <ProviderLogo provider={provider} className="h-4 w-4 shrink-0" />
         Solution {letter} · {label}
       </div>
-      {text ? <MathProse source={text} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
-      {chinese?.trim() ? (
-        <div className="mt-2 border-t border-cs-line-soft pt-2">
-          <div className="mb-1 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-            繁體中文
-          </div>
-          <MathProse source={chinese} chinese />
-        </div>
+      {headline ? <MathProse source={headline} /> : <p className="text-sm text-cs-ink-3">No assessment given.</p>}
+      {headlineChinese ? <MathProse source={headlineChinese} chinese className="text-cs-ink-2" /> : null}
+      {details || detailsChinese ? (
+        <details className="group/more mt-1 border-t border-cs-line-soft pt-2">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold text-cs-accent">
+            More · 詳情
+            <ChevronDown className="h-3.5 w-3.5 transition group-open/more:rotate-180" aria-hidden="true" />
+          </summary>
+          {details ? <MathProse source={details} className="mt-1" /> : null}
+          {detailsChinese ? (
+            <div className="mt-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+                繁體中文
+              </div>
+              <MathProse source={detailsChinese} chinese />
+            </div>
+          ) : null}
+        </details>
       ) : null}
     </div>
   );
+}
+
+/**
+ * A Markdown list's first point (with anything before it) and the rest; the
+ * whole text first when it is not a list of two or more points - a verdict
+ * written before 11 October 2026 may be prose.
+ */
+function splitFirstPoint(text: string): [string, string] {
+  const lines = text.trim().split("\n");
+  const points = lines.flatMap((line, index) => (/^\s*[-*]\s+/.test(line) ? [index] : []));
+  if (points.length < 2) return [text.trim(), ""];
+  return [lines.slice(0, points[1]).join("\n").trim(), lines.slice(points[1]).join("\n").trim()];
 }
 
 /**
@@ -1234,6 +1262,17 @@ function JudgementCard({
           />
         </summary>
         <div className="border-t border-cs-line-soft px-4 pb-4">
+          {/* Why first, as three short points (Agree / Differ / Decisive
+              reason - shared/prompt.ts), then each solution's assessment. */}
+          {judgement.comparison ? (
+            <div className="mt-4 rounded-cs border-l-4 border-cs-accent bg-cs-muted px-4 py-3">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
+                Why · 原因
+              </div>
+              <MathProse source={judgement.comparison} />
+            </div>
+          ) : null}
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {solvers.map((provider, index) => (
               <Assessment
@@ -1247,15 +1286,6 @@ function JudgementCard({
               />
             ))}
           </div>
-
-          {judgement.comparison ? (
-            <div className="mt-4">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-                Why
-              </div>
-              <MathProse source={judgement.comparison} />
-            </div>
-          ) : null}
 
           {judgement.traditional_chinese ? (
             <div className="mt-4 rounded-cs border border-cs-line-soft bg-cs-muted px-4 py-3">

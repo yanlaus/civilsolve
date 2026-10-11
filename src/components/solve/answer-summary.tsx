@@ -1,7 +1,8 @@
 // The answer summary at the top of the solutions (3 October 2026): every
 // solver's final answer side by side, how far they line up with each other,
-// and the cross-check in one tap until there is a verdict - then its
-// verified answer and a ✓ or ✗ per solver. How they line up comes from a
+// and the cross-check in one tap until there is a verdict - then a ✓ or ✗
+// per solver and a link down to the verified answer, which is shown in the
+// Cross-check section only (since 11 October 2026). How they line up comes from a
 // model that compares the answers once every solver has answered
 // (hooks/use-align.ts, since 9 October 2026, the owner's call), without
 // waiting for or starting the cross-check; the page compared the numbers by
@@ -9,7 +10,7 @@
 // Agreement is no proof - on B.8 four models agreed on the same wrong
 // answer - which is what the cross-check is for.
 
-import { Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
+import { ArrowDown, Check, Hourglass, ListChecks, Loader2, Scale, X } from "lucide-react";
 import type { Alignment } from "../../../shared/align";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
@@ -191,13 +192,17 @@ export function AnswerSummary({
         <p className="mt-0.5 text-sm text-cs-ink-2">{agreement}</p>
       ) : null}
 
+      {/* The verified answer itself is in the Cross-check section only - shown
+          here too, it read as one more solution (the owner, 11 October 2026). */}
       {hasVerdict && judgeRun.judgement.final_answer ? (
-        <div className="mt-3 rounded-cs border-2 border-cs-accent bg-cs-muted px-3 py-2">
-          <div className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
-            Verified answer · 核對後答案 <span className="normal-case tracking-normal">({judgeLabel})</span>
-          </div>
-          <MathProse source={judgeRun.judgement.final_answer} className="text-sm" />
-        </div>
+        <button
+          type="button"
+          onClick={scrollToCrossCheck}
+          className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-cs-accent underline-offset-2 hover:underline"
+        >
+          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+          {judgeLabel}'s verified answer is in the Cross-check · 核對後答案喺下面
+        </button>
       ) : null}
 
       <ul className="mt-3 divide-y divide-cs-line-soft">
