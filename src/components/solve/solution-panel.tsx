@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   BookOpen,
@@ -46,7 +46,7 @@ import {
   type StudySource,
 } from "@/hooks/use-solve";
 import { exportPdf } from "@/lib/exports";
-import { STEP_IDS } from "@/lib/journey";
+import { journeyBarHeight, STEP_IDS } from "@/lib/journey";
 import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AlignState } from "@/hooks/use-align";
@@ -362,10 +362,68 @@ export default function SolutionPanel({
   // another had finished bounced straight back to the finished one, so the
   // failure's message could never be read.
   const userPicked = useRef(false);
+
+  // The model tabs stay at the top of the screen, under the step bar, while
+  // the student reads a solution, so they can switch models mid-way and
+  // compare (the owner's request, 11 October 2026). Each tab keeps how far
+  // into its solution the student had read: a tab opened for the first time
+  // starts at its top, and one opened again goes back to where they were.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const readingAt = useRef<Partial<Record<ProviderKey, number>>>({});
+  const pendingScroll = useRef<number | null>(null);
+  /** How far the page has scrolled past the top of the panel; 0 or less while the tabs are not stuck. */
+  const scrolledInto = () =>
+    panelRef.current ? journeyBarHeight() - panelRef.current.getBoundingClientRect().top : 0;
+  const [tabsStuck, setTabsStuck] = useState(false);
+  useEffect(() => {
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      setTabsStuck(scrolledInto() > 0);
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(check);
+    };
+    check();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
   const pickProvider = (key: ProviderKey) => {
     userPicked.current = true;
+    const into = scrolledInto();
+    if (key !== activeProvider && into > 0) {
+      readingAt.current[activeProvider] = into;
+      pendingScroll.current = readingAt.current[key] ?? 0;
+    }
     setActiveProvider(key);
   };
+  // After the switch, before the paint: the new tab's place, under the bars.
+  useLayoutEffect(() => {
+    const into = pendingScroll.current;
+    const panel = panelRef.current;
+    if (into === null || !panel) return;
+    pendingScroll.current = null;
+    const panelTop = panel.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: panelTop - journeyBarHeight() + into, behavior: "instant" });
+  }, [activeProvider]);
+  // On a phone the tabs overflow sideways: keep the open one in sight. The
+  // strip scrolls sideways only - the page itself never moves for it.
+  const tablistRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = tablistRef.current;
+    const tab = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!list || !tab) return;
+    const listBox = list.getBoundingClientRect();
+    const tabBox = tab.getBoundingClientRect();
+    if (tabBox.left < listBox.left) list.scrollLeft -= listBox.left - tabBox.left + 8;
+    else if (tabBox.right > listBox.right) list.scrollLeft += tabBox.right - listBox.right + 8;
+  }, [activeProvider, visibleProviders.length]);
   // A retried or added solver's tab is where its progress shows.
   const solveWith = (key: ProviderKey, variant?: ModelVariant) => {
     pickProvider(key);
@@ -528,9 +586,18 @@ export default function SolutionPanel({
         onCompareAgain={onCompareAgain}
       />
 
-      <div className="cs-panel overflow-hidden rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden">
-        <div className="border-b-2 border-cs-line-soft px-2 pt-1">
-          <div className="flex overflow-x-auto">
+      {/* overflow-clip, not -hidden: it rounds the corners the same, and a
+          hidden overflow would stop the tabs below from sticking. */}
+      <div
+        ref={panelRef}
+        className="cs-panel overflow-clip rounded-cs-lg border border-cs-line-soft bg-cs-surface shadow-[0_4px_16px_var(--cs-shadow)] print:hidden"
+      >
+        <div
+          className={`sticky top-[var(--cs-journey-h,0px)] z-20 border-b-2 border-cs-line-soft bg-cs-surface px-2 pt-1 transition-shadow ${
+            tabsStuck ? "shadow-[0_6px_12px_-8px_var(--cs-shadow)]" : ""
+          }`}
+        >
+          <div ref={tablistRef} className="flex overflow-x-auto" role="tablist" aria-label="Solutions by model">
             {visibleProviders.map((provider) => {
               const run = runs[provider.key];
               const mark = solverMark(judgeRun, provider.key, solutionVersions);
@@ -538,6 +605,8 @@ export default function SolutionPanel({
                 <button
                   key={provider.key}
                   type="button"
+                  role="tab"
+                  aria-selected={activeProvider === provider.key}
                   onClick={() => pickProvider(provider.key)}
                   className={`relative shrink-0 px-4 py-3 pr-8 text-left text-sm font-semibold transition ${
                     activeProvider === provider.key
