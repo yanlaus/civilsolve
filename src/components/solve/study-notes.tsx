@@ -532,7 +532,7 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
         </div>
       </div>
       {parts[tab] ? (
-        <SolutionArticle source={parts[tab]} />
+        <SolutionArticle source={parts[tab]} measure />
       ) : (
         <p className="px-4 py-6 text-sm text-cs-ink-3 sm:px-7">This part was left out of the notes.</p>
       )}

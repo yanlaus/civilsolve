@@ -96,8 +96,14 @@ const UNIT_RULE =
  * all).
  */
 const READING_FORMAT = [
-  "Write every field as Markdown, the way the page renders it:",
-  "- Put each given quantity, and each thing required, on a `- ` bullet line of its own.",
+  "Write every field as Markdown, the way the page renders it, so a student can take it in at a glance:",
+  // 11 October 2026, the owner: each bullet had been one long sentence of
+  // several facts (a diagram line ran to 200 characters), which read as a
+  // paragraph.
+  "- One fact per line, each a `- ` bullet line of a few words - about 15 words at most. Never chain several facts into one sentence with commas, semicolons or \"and\", and do not open a field with an introduction such as \"The image shows:\".",
+  "- Open a line that names a thing with that thing in bold: `- **Support at A:** pin`, `- **UDL:** $10\\,\\text{kN/m}$ over the full span`.",
+  "- `interpreted_problem`: one short sentence on what the problem is, then bullets.",
+  "- `given`: one quantity per line, its symbol and value first, then what it is: `- $d_1 = 60\\,\\text{mm}$ - inlet diameter`. `required`: one thing asked per line (a multi-part question gets a line per part).",
   "- Format every symbol, formula and value with its unit as LaTeX in Markdown math delimiters: `$...$` inline (for example `$d_1 = 60\\,\\text{mm}$`, `$\\theta = 30^\\circ$`, `$P_A$`), `$$...$$` for a displayed equation. Never leave a formula or a subscripted symbol as plain text such as d_1 = 60 mm.",
   `- ${UNIT_RULE}`,
   "- No headings, no backticks, no code blocks.",
@@ -255,6 +261,14 @@ export function buildInterpretPrompt(
   return sections.join("\n");
 }
 
+/**
+ * How each discrepancy is written: one short line, what it is about in bold
+ * (11 October 2026: a bullet ran to three or four lines, 1,469 characters in
+ * all for a beam).
+ */
+const DISCREPANCY_LINES =
+  "One `- ` bullet line per point, what it is about in bold, then the two sides and what was kept, in a few words: `- **Arrow count:** A 14, B 13 → kept 14, as drawn`. The points that change a value, dimension, support, load or requirement come first; ones that change nothing the solution needs come last.";
+
 /** The discrepancies again, in Chinese, for the review step. */
 const CHINESE_DISCREPANCIES =
   "In the `discrepancies_chinese` field, write the `discrepancies` again in Traditional Chinese as written in Hong Kong, in the same Markdown and the same `$...$` math: translate every ordinary word; keep numbers, units, symbols and formulas exactly as in English.";
@@ -299,7 +313,7 @@ export function buildReviseReadingPrompt(
     "The attached civil engineering assignment images were read, and the reading below came out of it. The user reviewed it - and may have edited it - and asks for changes. Your job is to produce ONE corrected, authoritative reading that follows the user's instructions - do NOT solve the problem.",
     "Re-inspect the images yourself. Follow the user's instructions; where one contradicts what the images show, keep what the images show and say so. Keep everything in the current reading that is right.",
     "The current reading is laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
-    "In the `discrepancies` field, list what you changed from the current reading and why (or state that nothing needed to change).",
+    `In the \`discrepancies\` field, list what you changed from the current reading and why (or state that nothing needed to change). ${DISCREPANCY_LINES}`,
     CHINESE_DISCREPANCIES,
     ...conclusionRule("changes"),
     CHINESE_READING,
@@ -343,7 +357,7 @@ export function buildVerifyPrompt(
     "- Where they disagree, re-inspect the images yourself and adjudicate. Diagram geometry, support types, load magnitudes/positions, and units deserve the closest scrutiny.",
     "- If both interpretations missed or misread something visible in the images, correct it.",
     "The two interpretations are laid out under the page's labels (**Diagram:**, **Given:**, **Required:**); write each part in its own field, without those labels.",
-    "In the `discrepancies` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed).",
+    `In the \`discrepancies\` field, list every disagreement you found and how you resolved it (or state that the interpretations agreed). ${DISCREPANCY_LINES}`,
     CHINESE_DISCREPANCIES,
     ...conclusionRule("readings"),
     CHINESE_READING,
@@ -400,11 +414,15 @@ export function buildJudgePrompt(
     "Then fill the fields:",
     `- \`correct_solutions\`: the letters of the solutions that reach the correct final answers (presentation and rounding differences do not matter), from ${letterList}. An empty list means none is correct or none could be verified.`,
     "- `final_answer`: the correct final answer(s) with units, as you verified them. If no solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
-    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}), each as \`- \` bullet points, one point per line: what it got right, and precisely where it went wrong - which step, what the error is, and what the value should be.`,
-    `- \`assessments_chinese\`: the same ${count} assessments, in the same order and the same bullet points, in Traditional Chinese as written in Hong Kong. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
-    "- `comparison`: where the solutions differ and the decisive reason for the verdict.",
+    // Short lines, marked: an assessment's bullet ran to 350 characters, and
+    // `comparison` came as one 700-character paragraph (11 October 2026,
+    // the owner found the verdict hard to read). The page shows an
+    // assessment's first line on its own, the rest a tap away.
+    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}), each two to four \`- \` bullet lines of one short point each - about 20 words at most. Open each line with ✓ for what it got right or ✗ for what it got wrong, and put the line that matters most first: for a solution with an error, its first ✗ (which step, what is wrong, what the value should be); otherwise its main ✓. For example: \`- ✗ Step 4: the support force has the wrong direction - it should be $+177.1\\,\\text{kN}$\`.`,
+    `- \`assessments_chinese\`: the same ${count} assessments, in the same order and the same bullet points with the same ✓ and ✗, in Traditional Chinese as written in Hong Kong. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
+    "- `comparison`: exactly three `- ` bullet lines of one short sentence each - about 25 words at most - each opening with its bold label: `- **Agree:**` what the solutions have in common, `- **Differ:**` where they part, by letter (\"nothing that changes the answer\" when they do not), and `- **Decisive reason:**` why the verdict falls as it does.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
-    "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
+    "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters, as two to four `- ` bullet lines of one short point each. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
     "Write `final_answer`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
@@ -553,6 +571,9 @@ export function buildStudyPrompt(
     ...brief.chinese(labels.map((part) => `**${part.chinese}**`).join(", ")),
     "",
     "Write `guide` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$Q = A_1 V_1$`), `$$...$$` for a displayed equation - never as plain text such as Q = A1 V1; lists as `- ` bullet lines or numbered `1.` lines; no headings, backticks or code blocks.",
+    // 11 October 2026, the owner: paragraphs of 600 characters were hard to
+    // read. The page keeps single line breaks.
+    "Make it easy to scan: at most two or three short sentences per paragraph, with a blank line between paragraphs. Put each result you work out on a line of its own, and what it means on the next line, opening with `→ ` (for example `$R_A = 43.3\\,\\text{kN}$` then `→ A pushes up harder, as the heavy bag is near it`). Within a numbered point, start a new line rather than run on.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
     "",
