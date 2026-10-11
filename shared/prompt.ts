@@ -522,7 +522,7 @@ const STUDY_BRIEFS: Record<
     parts: [
       "one question that makes the student curious about this problem (\"which support works harder - and where would the plank crack first?\"), then the situation in two or three sentences of everyday words, with the everyday picture, and what the question wants you to find.",
       "the one idea the whole solution hangs on - one only - seen in the picture rather than stated as a rule: at most three short sentences that show why it must be so (for example: press on a plank near one end, and the support at that end feels most of your push), so that the method which follows feels like the obvious thing to do. Any other \"why\" goes in the step where it is used, not here.",
-      "the working as a few numbered points (`1.`, `2.`, ...), one per idea rather than one per line of the solution - checks of the same kind share a point (the three plate-bearing checks are one). Each point: a plain name for what it finds (\"Way 1: the bolt snaps\"), one line on what is happening in the picture, the formula with the numbers put in, the result with its unit, then one line on what that number means. Only when the solution has checks that do not change the answer - spacing, edge distances and other detailing - give them one line at the end of this part; when it has none, leave that line out.",
+      "the working as a few numbered points (`1.`, `2.`, ...), one per idea rather than one per line of the solution - checks of the same kind share a point (the three plate-bearing checks are one). Each point: a plain name for what it finds (\"Way 1: the bolt snaps\"), one line on what is happening in the picture, the formula with the numbers put in and the result with its unit as one displayed equation, then one line on what that number means. Only when the solution has checks that do not change the answer - spacing, edge distances and other detailing - give them one line at the end of this part; when it has none, leave that line out.",
       "the results side by side as `- ` bullet lines, which one governs and why, and the final answer with its unit; then one short \"what if\" (a sentence or two) that changes one thing (double the load, move it to the middle) and says what would happen and why, straight from the picture; and one closing line the student can remember (\"That's all there is to it: work out every way it can fail - the smallest one wins.\").",
     ],
     chinese: (labels) => [
@@ -570,10 +570,15 @@ export function buildStudyPrompt(
     "",
     ...brief.chinese(labels.map((part) => `**${part.chinese}**`).join(", ")),
     "",
-    "Write `guide` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$Q = A_1 V_1$`), `$$...$$` for a displayed equation - never as plain text such as Q = A1 V1; lists as `- ` bullet lines or numbered `1.` lines; no headings, backticks or code blocks.",
+    "Write `guide` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - never as plain text such as Q = A1 V1; lists as `- ` bullet lines or numbered `1.` lines; no headings, backticks or code blocks.",
+    // Laid out like a solution (12 October 2026, the owner: formulas inside
+    // the sentences, left-aligned, were hard to read; the page now shows the
+    // notes the way it shows a solution). A `→ ` line for each result's
+    // meaning, asked for on 11 October, was not liked.
+    "Lay the maths out the way a worked solution does: every formula with its numbers put in, and every result you work out, as a displayed equation `$$...$$` on a line of its own (for example `$$R_A = \\frac{20 \\times 4 + 60 \\times 3}{6} = 43.3\\,\\text{kN}$$`), which the page centres; `$...$` only for a symbol or a short value inside a sentence. Say what a result means in a plain sentence after its equation.",
     // 11 October 2026, the owner: paragraphs of 600 characters were hard to
     // read. The page keeps single line breaks.
-    "Make it easy to scan: at most two or three short sentences per paragraph, with a blank line between paragraphs. Put each result you work out on a line of its own, and what it means on the next line, opening with `→ ` (for example `$R_A = 43.3\\,\\text{kN}$` then `→ A pushes up harder, as the heavy bag is near it`). Within a numbered point, start a new line rather than run on.",
+    "Make it easy to scan: at most two or three short sentences per paragraph, with a blank line between paragraphs. Within a numbered point, start a new line rather than run on.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
     "",

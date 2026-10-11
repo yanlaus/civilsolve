@@ -44,7 +44,6 @@ import {
 import { effortBand } from "@/lib/effort-band";
 import { STEP_IDS } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
-import MathProse from "./math-prose";
 import { PdfButton } from "./pdf-button";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
 import { StickyHeading } from "./section-heading";
@@ -492,11 +491,13 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
   if (!parts) {
     return (
       <>
-        <MathProse source={openStudyLabels(guide)} className="mt-2" />
+        <div className="mt-2">
+          <NotesArticle source={openStudyLabels(guide)} />
+        </div>
         {chinese ? (
           <div className="mt-3">
             <LanguageFold label="繁體中文 · Traditional Chinese">
-              <MathProse source={openStudyLabels(chinese)} chinese />
+              <NotesArticle source={openStudyLabels(chinese)} chinese />
             </LanguageFold>
           </div>
         ) : null}
@@ -549,7 +550,7 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
               )
             }
           >
-            <MathProse source={chineseText} chinese />
+            <NotesArticle source={chineseText} chinese />
           </LanguageFold>
         </div>
       ) : null}
@@ -565,15 +566,33 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
 function CantoneseFirst({ guide, chinese }: { guide: string; chinese: string }) {
   const english = useMemo(() => openStudyLabels(guide), [guide]);
   const cantonese = useMemo(() => openStudyLabels(chinese), [chinese]);
-  if (!cantonese) return <MathProse source={english} className="mt-2" />;
+  if (!cantonese) {
+    return (
+      <div className="mt-2">
+        <NotesArticle source={english} />
+      </div>
+    );
+  }
   return (
     <>
-      <MathProse source={cantonese} chinese className="mt-2" />
+      <div className="mt-2">
+        <NotesArticle source={cantonese} chinese />
+      </div>
       <div className="mt-3">
         <LanguageFold label="English">
-          <MathProse source={english} />
+          <NotesArticle source={english} />
         </LanguageFold>
       </div>
     </>
   );
+}
+
+/**
+ * Notes laid out the way a solution is (12 October 2026, the owner: they
+ * were hard to read) - its type size and line height, and each worked
+ * formula and result centred on a line of its own, as the prompt asks for
+ * them in `$$...$$` - at a readable line length, inside the card's padding.
+ */
+function NotesArticle({ source, chinese = false }: { source: string; chinese?: boolean }) {
+  return <SolutionArticle source={source} chinese={chinese} measure bare />;
 }

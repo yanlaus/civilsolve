@@ -5,24 +5,31 @@ export function SolutionArticle({
   source,
   compact = false,
   measure = false,
+  bare = false,
+  chinese = false,
 }: {
   source: string;
   /** Less padding: one of several sections on the "All" view, or a step of the hints. */
   compact?: boolean;
   /** A readable line length (READABLE_MEASURE in math-prose.tsx), for study notes. */
   measure?: boolean;
+  /** No padding of its own: inside a card that has it, such as a study notes card. */
+  bare?: boolean;
+  /** Traditional Chinese text (lang, and its 已知 / 所求 labels - lib/math-markdown.ts). */
+  chinese?: boolean;
 }) {
-  const html = useMemo(() => renderMarkdown(source), [source]);
+  const html = useMemo(() => renderMarkdown(source, { chinese }), [source, chinese]);
 
   return (
     <article
+      lang={chinese ? "zh-Hant-HK" : undefined}
       // Every heading level in the ink colour and a modest size: sub-headers
       // are the model's choice of #, ##, ### or bold, and ## used to come out
       // large and in the accent colour (brown in Classic and Unicorn) next to
       // dark ### and bold ones - "some sub-headers turned brown" (the owner,
       // 27 September 2026).
       className={`solution-content prose prose-stone ${measure ? "max-w-[70ch]" : "max-w-none"} min-w-0 overflow-x-hidden text-[1rem] leading-8 prose-headings:mb-2 prose-headings:mt-5 prose-headings:font-display prose-headings:text-cs-ink prose-h1:border-b prose-h1:border-cs-line prose-h1:pb-2 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-h4:text-base prose-pre:overflow-x-auto prose-pre:rounded-cs prose-pre:border prose-pre:border-cs-line-soft prose-pre:bg-cs-sunken/70 prose-code:text-cs-ink sm:text-[1.05rem] ${
-        compact ? "px-4 py-2 sm:px-7 sm:py-3" : "px-4 py-6 sm:px-7 sm:py-8"
+        bare ? "" : compact ? "px-4 py-2 sm:px-7 sm:py-3" : "px-4 py-6 sm:px-7 sm:py-8"
       }`}
       dangerouslySetInnerHTML={{ __html: html }}
     />
