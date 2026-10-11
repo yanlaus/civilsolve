@@ -156,6 +156,19 @@ export function prefersReducedMotion() {
 }
 
 /**
+ * The step bar's height, kept on <html> as a CSS variable by the bar itself
+ * (journey-bar.tsx), so whatever else sticks to the top of the screen - the
+ * solution tabs - sits right under it, on a phone and a desktop alike.
+ */
+export const JOURNEY_HEIGHT_VAR = "--cs-journey-h";
+
+/** The step bar's height in pixels, or 0 when it is not on the page. */
+export function journeyBarHeight() {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(JOURNEY_HEIGHT_VAR);
+  return Number.parseFloat(value) || 0;
+}
+
+/**
  * Brings a step's element into view, under the sticky step bar, and moves
  * the keyboard focus to it (the element has tabIndex -1). A folded
  * `<details>` is opened on the way.

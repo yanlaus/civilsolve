@@ -3,9 +3,9 @@
 // look at now when it is out of sight - the solutions used to appear below
 // the interpreted question with nothing to say so (3 October 2026).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Loader2, Minus, X } from "lucide-react";
-import type { JourneyStep, StepState } from "@/lib/journey";
+import { JOURNEY_HEIGHT_VAR, type JourneyStep, type StepState } from "@/lib/journey";
 
 // One colour for the way through (the theme's accent), grey for what is
 // still ahead; a step left out keeps a dashed outline. Every dot sits in a
@@ -69,8 +69,25 @@ export function JourneyBar({
   current: JourneyStep;
   onJump: (step: JourneyStep) => void;
 }) {
+  // Its height, for the solution tabs that stick right under it.
+  const barRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty(JOURNEY_HEIGHT_VAR, `${bar.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(bar);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(JOURNEY_HEIGHT_VAR);
+    };
+  }, []);
+
   return (
     <nav
+      ref={barRef}
       aria-label="Progress"
       className="sticky top-0 z-30 -mx-5 mb-6 border-b border-cs-line-soft bg-cs-page/95 px-2 pb-2 pt-3 backdrop-blur sm:-mx-6 sm:px-6 print:hidden"
     >
