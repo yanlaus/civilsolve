@@ -42,10 +42,12 @@ import {
   type StudySource,
 } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
+import { STEP_IDS } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
 import { PdfButton } from "./pdf-button";
 import { RevisePanel, RevisedWith, RevisionNotice } from "./revise-panel";
+import { StickyHeading } from "./section-heading";
 import { SolutionArticle } from "./solution-article";
 import {
   ERROR_BOX,
@@ -160,16 +162,14 @@ export function StudyNotes({
         : `${nameOf(source)}'s solution`;
 
   return (
-    <section className="mt-8 print:hidden" aria-labelledby="study-notes-heading">
-      <h2
-        id="study-notes-heading"
-        className="flex flex-wrap items-baseline gap-x-2 font-display text-2xl font-bold text-cs-ink"
-      >
-        <GraduationCap className="h-5 w-5 self-center text-cs-accent" aria-hidden="true" />
-        Study notes
-        <span className="font-sans text-base font-normal text-cs-ink-3">溫習筆記</span>
-      </h2>
-      <p className="mb-3 mt-1 text-xs text-cs-ink-3">
+    <section
+      id={STEP_IDS.study}
+      tabIndex={-1}
+      className="mt-8 scroll-mt-28 outline-none sm:scroll-mt-20 print:hidden"
+      aria-labelledby="study-notes-heading"
+    >
+      <StickyHeading id="study-notes-heading" icon={GraduationCap} title="Study notes" chinese="溫習筆記" />
+      <p className="mb-3 text-xs text-cs-ink-3">
         Optional - generate either or both, from the solution you pick. The model is the one that
         wrote that solution unless you pick another.
       </p>

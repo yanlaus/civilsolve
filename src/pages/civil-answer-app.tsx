@@ -198,6 +198,9 @@ export default function CivilAnswerAppPage() {
     interpretation: confirmedInterpretation,
     runs,
     judgeRun,
+    studyRuns,
+    judgeEndedAt: judgeProgress?.endedAt,
+    studyEndedAt: Math.max(0, ...Object.values(studyProgress).map((progress) => progress?.endedAt ?? 0)),
   });
   const jump = useCallback((step: JourneyStep) => {
     if (step.target) scrollToStep(step.target);

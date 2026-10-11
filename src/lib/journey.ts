@@ -1,20 +1,23 @@
 // Where the student is in a run (3 October 2026, the owner's request: in
 // Careful, nothing said the solutions had appeared below the interpreted
-// question). Four steps - upload, check the reading, answers, cross-check -
-// each with a state worked out from the page's own state, for the step bar
-// at the top (components/solve/journey-bar.tsx), the jump button and the
-// automatic scroll from one step to the next.
+// question). Five steps - upload, check the reading, answers, cross-check,
+// and since 11 October 2026 study notes - each with a state worked out from
+// the page's own state, for the step bar at the top
+// (components/solve/journey-bar.tsx), the jump button and the automatic
+// scroll from one step to the next.
 
 import type { InterpretPipeline } from "@/hooks/use-interpret";
 import {
   isRunActive,
+  isStudyActive,
   JUDGE_QUEUED,
   type ConfirmedInterpretation,
   type JudgeRun,
   type ProviderRuns,
+  type StudyRuns,
 } from "@/hooks/use-solve";
 
-export type StepKey = "upload" | "reading" | "answers" | "check";
+export type StepKey = "upload" | "reading" | "answers" | "check" | "study";
 
 /**
  * - `todo`: not reached yet; `now`: the student's move (upload a question);
@@ -42,6 +45,7 @@ export const STEP_IDS = {
   reading: "step-reading",
   answers: "step-answers",
   check: "step-check",
+  study: "step-study",
 } as const;
 
 export type JourneyInput = {
@@ -53,9 +57,23 @@ export type JourneyInput = {
   interpretation: ConfirmedInterpretation | null;
   runs: ProviderRuns;
   judgeRun: JudgeRun;
+  studyRuns: StudyRuns;
+  /** When the verdict and the latest study notes finished, to tell which came last. */
+  judgeEndedAt?: number;
+  studyEndedAt?: number;
 };
 
-export function buildJourney({ preparing, pipeline, plan, interpretation, runs, judgeRun }: JourneyInput) {
+export function buildJourney({
+  preparing,
+  pipeline,
+  plan,
+  interpretation,
+  runs,
+  judgeRun,
+  studyRuns,
+  judgeEndedAt = 0,
+  studyEndedAt = 0,
+}: JourneyInput) {
   const started = Object.values(runs).filter((run) => run.status !== "idle");
   const total = started.length;
   const active = started.filter(isRunActive).length;
@@ -129,20 +147,46 @@ export function buildJourney({ preparing, pipeline, plan, interpretation, runs, 
               : { state: "todo", detail: ["Optional", "可選"] }),
   };
 
-  const steps = [upload, reading, answers, check];
-  return { steps, current: currentStep(steps) };
+  // The notes are on the page once a solution is (study-notes.tsx), and are
+  // written on request, one or both kinds.
+  const notes = Object.values(studyRuns);
+  const writing = notes.some(isStudyActive);
+  const written = notes.filter((run) => run.status === "done").length;
+  const study: JourneyStep = {
+    key: "study",
+    label: "Study notes",
+    chinese: "溫習筆記",
+    ...(done || notes.some((run) => run.status !== "idle") ? { target: STEP_IDS.study } : {}),
+    ...(writing
+      ? { state: "running", detail: ["Writing", "寫緊"] }
+      : written
+        ? { state: "done", detail: [written === 1 ? "Notes ready" : `${written} ready`, written === 1 ? "有筆記" : `${written} 份完成`] }
+        : notes.some((run) => run.status === "error" && !run.stopped)
+          ? { state: "failed", detail: ["Failed", "失敗"] }
+          : { state: "todo", detail: ["Optional", "可選"] }),
+  };
+
+  const steps = [upload, reading, answers, check, study];
+  return { steps, current: currentStep(steps, studyEndedAt > judgeEndedAt) };
 }
 
 /**
  * The step to look at now: the reading while it is read or waits for the
- * student, the cross-check once its verdict is in or it runs, else the
- * answers once there are any, else the upload.
+ * student, the cross-check or the study notes while they run or once they
+ * are in - the one that finished last, when both are - else the answers
+ * once there are any, else the upload.
  */
-function currentStep([upload, reading, answers, check]: JourneyStep[]): JourneyStep {
+function currentStep(
+  [upload, reading, answers, check, study]: JourneyStep[],
+  notesAfterVerdict: boolean,
+): JourneyStep {
   if (reading.state === "running" || reading.state === "yourTurn" || reading.state === "failed") return reading;
   if (upload.state === "running" || upload.state === "now") return upload;
   if (answers.state === "running") return answers;
-  if (check.state === "running" || check.state === "done") return check;
+  if (check.state === "running") return check;
+  if (study.state === "running") return study;
+  if (study.state === "done" && (check.state !== "done" || notesAfterVerdict)) return study;
+  if (check.state === "done") return check;
   if (answers.target) return answers;
   return upload;
 }
