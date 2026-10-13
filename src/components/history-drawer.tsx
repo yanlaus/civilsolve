@@ -12,6 +12,7 @@ import { STUDY_KINDS, STUDY_TITLES } from "../../shared/study";
 import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib/history-store";
 import MathProse from "./solve/math-prose";
 import { ProviderLogo } from "./solve/provider-logo";
+import { SolutionArticle } from "./solve/solution-article";
 import { AllView } from "./solve/solution-views";
 import { MathTitle } from "./solve/math-title";
 
@@ -117,6 +118,15 @@ function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: (
             <PdfLink jobId={entry.verdict.jobId} />
           </div>
           <MathProse source={entry.verdict.finalAnswer} className="text-sm" />
+          {entry.verdict.solution ? (
+            <details className="group/solution mt-2 border-t border-cs-line-soft pt-2">
+              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold text-cs-accent">
+                Full solution · 完整解法
+                <ChevronDown className="h-3.5 w-3.5 transition group-open/solution:rotate-180" aria-hidden="true" />
+              </summary>
+              <SolutionArticle source={entry.verdict.solution} measure bare />
+            </details>
+          ) : null}
         </div>
       ) : null}
 

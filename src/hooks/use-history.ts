@@ -45,7 +45,9 @@ function finishedSignature({ runs, judgeRun, studyRuns, interpretation }: Histor
         ? `${key}:${run.solution.title.length}:${run.solution.stepByStep.length}:${run.solution.finalAnswer.length}`
         : "";
     }),
-    judgeRun.status === "done" ? `verdict:${judgeRun.judgement.final_answer.length}` : "",
+    judgeRun.status === "done"
+      ? `verdict:${judgeRun.judgement.final_answer.length}:${judgeRun.judgement.verified_solution?.length ?? 0}`
+      : "",
     ...STUDY_KINDS.map((kind) => {
       const run = studyRuns[kind];
       return run.status === "done" ? `${kind}:${run.study.guide.length}` : "";
@@ -80,6 +82,9 @@ function entryOf(source: HistorySource, runId: number, thumbnail: string | undef
             .map((index) => judgeRun.solvers[index])
             .filter((key): key is ProviderKey => Boolean(key)),
           finalAnswer: judgeRun.judgement.final_answer,
+          ...(judgeRun.judgement.verified_solution?.trim()
+            ? { solution: judgeRun.judgement.verified_solution }
+            : {}),
           ...(verdictJob ? { jobId: verdictJob } : {}),
         }
       : undefined;

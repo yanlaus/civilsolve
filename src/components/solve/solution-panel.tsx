@@ -509,11 +509,18 @@ export default function SolutionPanel({
     exportPdf(title);
   };
 
-  // The verdict's PDF is its verified final answer and nothing else - the
-  // answer is what gets kept (the owner's call, 27 September 2026).
+  // The verdict's PDF is its verified final answer and, since 14 October
+  // 2026, the full solution behind it - the answer is what gets kept (the
+  // owner's call, 27 September 2026), not the assessments.
   const verdictPrintHtml = useMemo(() => {
     if (judgeRun.status !== "done" || !judgeRun.judgement.final_answer) return "";
-    return ["<h1>Verified final answer</h1>", renderMarkdown(judgeRun.judgement.final_answer)].join("\n");
+    const solution = judgeRun.judgement.verified_solution?.trim();
+    return [
+      "<h1>Verified final answer</h1>",
+      renderMarkdown(judgeRun.judgement.final_answer),
+      solution ? "<h2>Full solution</h2>" : "",
+      solution ? renderMarkdown(solution) : "",
+    ].join("\n");
   }, [judgeRun]);
 
   // Study notes, laid out as their PDF lays them out (studyHtml).
@@ -1295,6 +1302,23 @@ function JudgementCard({
             <PdfButton small key={pdfJobId ?? "verdict"} jobId={pdfJobId} onPrint={onPrint} />
           </div>
           <MathProse source={judgement.final_answer} />
+          {/* The judge's own working behind the answer (since 14 October
+              2026, the owner: the answer alone was not enough to learn
+              from), laid out like a solution; open, and folds away. */}
+          {judgement.verified_solution?.trim() ? (
+            <details open className="group/solution mt-3 rounded-cs border border-cs-line-soft">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm font-semibold text-cs-accent">
+                <span className="min-w-0 flex-1">Full solution · 完整解法</span>
+                <ChevronDown
+                  className="h-4 w-4 shrink-0 text-cs-ink-3 transition group-open/solution:rotate-180"
+                  aria-label="Show or hide the full solution"
+                />
+              </summary>
+              <div className="border-t border-cs-line-soft px-4 py-2">
+                <SolutionArticle source={judgement.verified_solution} measure bare />
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : null}
 
