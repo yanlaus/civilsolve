@@ -444,16 +444,21 @@ export function buildJudgePrompt(
     "Then fill the fields:",
     `- \`correct_solutions\`: the letters of the solutions that reach the correct final answers (presentation and rounding differences do not matter), from ${letterList}. An empty list means none is correct or none could be verified.`,
     "- `final_answer`: the correct final answer(s) with units, as you verified them. If no solution is correct, give your own corrected answer. If something could not be resolved from the images, say exactly what.",
+    // 14 October 2026, the owner: the verified answer alone was not enough
+    // to learn from - it should be a full solution.
+    "- `verified_solution`: your own full worked solution, as you re-derived it, complete enough for a student to follow without the solutions, and reaching exactly the answers in `final_answer`. Lay it out the way a solver lays out its working: a `### ` heading before each problem or part when there are several (for example `### Q1(a)`), every step opening with a bold line of its own that says what the step finds (`**Step 1 - Velocity of the jet**`), then formula -> substitution -> result with units, each as a displayed equation `$$...$$`.",
     // Short lines, marked: an assessment's bullet ran to 350 characters, and
     // `comparison` came as one 700-character paragraph (11 October 2026,
     // the owner found the verdict hard to read). The page shows an
-    // assessment's first line on its own, the rest a tap away.
-    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}), each two to four \`- \` bullet lines of one short point each - about 20 words at most. Open each line with ✓ for what it got right or ✗ for what it got wrong, and put the line that matters most first: for a solution with an error, its first ✗ (which step, what is wrong, what the value should be); otherwise its main ✓. For example: \`- ✗ Step 4: the support force has the wrong direction - it should be $+177.1\\,\\text{kN}$\`.`,
-    `- \`assessments_chinese\`: the same ${count} assessments, in the same order and the same bullet points with the same ✓ and ✗, in Traditional Chinese as written in Hong Kong. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
+    // assessment's first line on its own, the rest a tap away - so the first
+    // line sums up every part (14 October 2026, the owner: on a question in
+    // parts it had shown part (a) alone).
+    `- \`assessments\`: exactly ${count} entries, one per solution in order (${letterList}). Open each with one \`- \` bullet line that sums the solution up across every part of the question: \`- **Overall:** (a) ✓, (b) ✗ wrong sign of $F_x$, (c) ✓\` - for each part ✓ or ✗, and for a ✗ what is wrong in a few words; for a question in one part, \`- **Overall:** ✓ correct\` or \`- **Overall:** ✗\` and the error in a few words. Then the details, part by part in the question's order, two to four \`- \` bullet lines per part of one short point each - about 20 words at most - each opening with the part's label when there are several (\`(b)\`) and ✓ for what it got right or ✗ for what it got wrong (which step, what is wrong, what the value should be). For example: \`- (b) ✗ Step 4: the support force has the wrong direction - it should be $+177.1\\,\\text{kN}$\`.`,
+    `- \`assessments_chinese\`: the same ${count} assessments, in the same order and the same bullet points with the same ✓ and ✗, the first line opening \`- **總結：**\`, in Traditional Chinese as written in Hong Kong. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English.`,
     "- `comparison`: exactly three `- ` bullet lines of one short sentence each - about 25 words at most - each opening with its bold label: `- **Agree:**` what the solutions have in common, `- **Differ:**` where they part, by letter (\"nothing that changes the answer\" when they do not), and `- **Decisive reason:**` why the verdict falls as it does.",
     '- `confidence`: "high", "medium" or "low" in the verdict.',
     "- `traditional_chinese`: the verdict explained again in Traditional Chinese as written in Hong Kong - which solutions are correct, the verified final answer and the decisive reason (each solution's own assessment is in `assessments_chinese`) - referring to the solutions by their letters, as two to four `- ` bullet lines of one short point each. Translate every ordinary word; keep numbers, units, symbols, variable names and formulas exactly as in English. Every other field stays in English.",
-    "Write `final_answer`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
+    "Write `final_answer`, `verified_solution`, `assessments`, `assessments_chinese`, `comparison` and `traditional_chinese` as Markdown, the way the page renders a worked solution: every symbol, formula and value with its unit as LaTeX in Markdown math delimiters - `$...$` inline (for example `$F_x = -142.8\\,\\text{N}$`), `$$...$$` for a displayed equation - never as plain text such as F_x = -142.8 N; several answers or points as `- ` bullet lines; no headings, backticks or code blocks.",
     UNIT_RULE,
     "Return JSON matching the required schema exactly.",
     "",
@@ -480,10 +485,10 @@ export function buildJudgePrompt(
   if (extras.enforceShape) {
     // Bespoke contract: two of the fields are arrays, which the generic
     // all-strings skeleton cannot express.
-    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
+    const skeleton = `{"correct_solutions": [${letters.map((l) => `"${l}"`).join(", ")}], "final_answer": "", "verified_solution": "", "assessments": [${letters.map(() => '""').join(", ")}], "assessments_chinese": [${letters.map(() => '""').join(", ")}], "comparison": "", "confidence": "high", "traditional_chinese": ""}`;
     sections.push(
       "",
-      "Return exactly one JSON object with these 7 fields:",
+      "Return exactly one JSON object with these 8 fields:",
       skeleton,
       `\`correct_solutions\` lists only the correct letters (it may be empty); \`assessments\` and \`assessments_chinese\` have exactly ${count} strings each, in order; \`confidence\` is one of "high", "medium", "low".`,
       "Do not add other fields. Do not nest this object inside another object or array.",

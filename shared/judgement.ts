@@ -26,6 +26,13 @@ export type JudgementResult = {
   correct: number[];
   /** The judge's own verified final answer, with units - not a copy of any solution's. */
   final_answer: string;
+  /**
+   * The judge's own full worked solution, step by step like a solver's
+   * working, reaching `final_answer` (since 14 October 2026, the owner's
+   * request: the verified answer alone was not enough to learn from). Absent
+   * from a verdict stored before.
+   */
+  verified_solution?: string;
   /** One per solution, in order: what it got right and, precisely, where it went wrong. */
   assessments: string[];
   /** The same assessments in Traditional Chinese, one per solution; empty strings if left out. */
@@ -52,6 +59,7 @@ export const judgementSchema = {
       items: { type: "string", enum: SOLUTION_LETTERS },
     },
     final_answer: { type: "string" },
+    verified_solution: { type: "string" },
     assessments: { type: "array", items: { type: "string" } },
     assessments_chinese: { type: "array", items: { type: "string" } },
     comparison: { type: "string" },
@@ -61,6 +69,7 @@ export const judgementSchema = {
   required: [
     "correct_solutions",
     "final_answer",
+    "verified_solution",
     "assessments",
     "assessments_chinese",
     "comparison",
@@ -167,6 +176,7 @@ export function parseJudgement(
     return {
       correct: [],
       final_answer: "",
+      verified_solution: "",
       assessments: Array.from({ length: count }, () => ""),
       assessments_chinese: Array.from({ length: count }, () => ""),
       comparison: text,
@@ -187,6 +197,7 @@ export function parseJudgement(
   const result: JudgementResult = {
     correct: correct ?? [],
     final_answer: read("final_answer") || read("answer"),
+    verified_solution: read("verified_solution") || read("worked_solution") || read("solution"),
     assessments: readAssessments(record.assessments, count),
     assessments_chinese: readAssessments(
       record.assessments_chinese ?? record.assessments_zh ?? record.chinese_assessments,
@@ -223,6 +234,8 @@ export function judgementToText(judgement: JudgementResult, count: number) {
       judgement.assessments[index] ? `Assessment of Solution ${letter(index)}:\n${judgement.assessments[index]}` : "",
     ),
     judgement.comparison ? `Why:\n${judgement.comparison}` : "",
+    // Last: the longest part, and the one a length limit should cut first.
+    judgement.verified_solution ? `Verified full solution:\n${judgement.verified_solution}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

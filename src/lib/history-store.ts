@@ -35,6 +35,8 @@ export type HistoryEntry = {
     correct: ProviderKey[];
     graded: ProviderKey[];
     finalAnswer: string;
+    /** The judge's full worked solution behind the answer (since 14 October 2026). */
+    solution?: string;
     jobId?: string;
   };
   study?: Partial<Record<StudyKind, { study: StudyResult; jobId?: string }>>;

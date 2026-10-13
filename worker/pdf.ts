@@ -241,7 +241,14 @@ export async function pdfDocument(content: PdfContent) {
                 ]
               : []),
           ]
-        : ["<h1>Verified final answer</h1>", render(content.judgement.final_answer)];
+        : [
+            "<h1>Verified final answer</h1>",
+            render(content.judgement.final_answer),
+            // The judge's full working behind it, since 14 October 2026.
+            ...(content.judgement.verified_solution?.trim()
+              ? ["<h2>Full solution</h2>", render(content.judgement.verified_solution)]
+              : []),
+          ];
   const body = await sanitizeHtml(sections.join("\n"));
   return [
     "<!doctype html>",
