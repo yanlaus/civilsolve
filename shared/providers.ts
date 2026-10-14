@@ -99,10 +99,11 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
  * each. Gemini since 26 September 2026, on Google Vertex AI: 3.8 Flash (the
  * route's own chain, falling back to 3.5 Flash) or 3.1 Pro, which was 2/2 on
  * B.8 at "high" in 136-189 s - and since 15 October 2026 (the owner's
- * request) 4 Argon, `gemini-4-argon-contributor` on OpenCode Go. The worker
- * maps a variant onto a model in variantOverride (worker/channels.ts).
+ * request) 4 Argon, `gemini-4-argon-contributor` on OpenCode Go. Kimi since
+ * 15 October 2026 (the owner's request): K2.7 Code, as before, or K3. The
+ * worker maps a variant onto a model in variantOverride (worker/channels.ts).
  */
-export type ModelVariant = "flash" | "pro" | "argon" | "haiku" | "opus";
+export type ModelVariant = "flash" | "pro" | "argon" | "haiku" | "opus" | "k2.7" | "k3";
 
 export const PROVIDER_VARIANTS: Partial<
   Record<ProviderKey, ReadonlyArray<{ key: ModelVariant; label: string; shortLabel: string }>>
@@ -115,6 +116,10 @@ export const PROVIDER_VARIANTS: Partial<
   claude: [
     { key: "haiku", label: "Haiku", shortLabel: "Haiku" },
     { key: "opus", label: "Opus", shortLabel: "Opus" },
+  ],
+  kimi: [
+    { key: "k2.7", label: "K2.7 Code", shortLabel: "K2.7 Code" },
+    { key: "k3", label: "K3", shortLabel: "K3" },
   ],
 };
 
@@ -180,7 +185,8 @@ export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
  * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin;
  * Grok is the heaviest draw per solve on the owner's OpenCode Go plan after
  * Gemini 4 Argon ($4 / $20 per 1M tokens to Grok's $2 / $6, about 1,060
- * requests a month on its own cap - October 2026).
+ * requests a month on its own cap - October 2026) and Kimi K3 ($3 / $15,
+ * about 490 a month, to K2.7 Code's $0.95 / $4 and 6,750).
  */
 export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
   "grok",
@@ -190,7 +196,8 @@ export function usesMoreCredit(provider: ProviderKey, variant?: ModelVariant) {
   return (
     HIGHER_CREDIT_PROVIDERS.has(provider) ||
     (provider === "claude" && variant !== "haiku") ||
-    (provider === "gemini" && variant === "argon")
+    (provider === "gemini" && variant === "argon") ||
+    (provider === "kimi" && variant === "k3")
   );
 }
 
@@ -214,7 +221,8 @@ export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "deepseek", "gemini"];
 /**
  * Default readers and judge for the optional interpretation pass. Two
  * different readers so they can disagree. ChatGPT and Gemini Flash read;
- * ChatGPT (gpt-5.6-luna on OpenCode Go, the most reliable solver in the B.8
+ * ChatGPT (Luna on OpenCode Go - gpt-6-luna since 15 October 2026, and
+ * gpt-5.6-luna before it, the most reliable solver in the B.8
  * matrix) reconciles them too - a separate call, but no longer a third
  * model. The readers were DeepSeek Flash and Muse Spark from 25 September
  * 2026 (Gemini's free AI Studio key failed too often to be the default

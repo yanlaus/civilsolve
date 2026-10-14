@@ -249,6 +249,23 @@ function isRetryable(error: UpstreamError) {
   return error.retryable !== false;
 }
 
+/**
+ * OpenCode Go passing on a failed call to the model's own server as HTTP 400
+ * `{"error":{"type":"server_error","message":"Upstream request failed:
+ * Invalid request parameters..."}}`. Kimi K3 answered so twice in a row on
+ * one session, then took the same request on fresh sessions seven times in
+ * eight (15 October 2026) - a backend's failure, not a parameter it refuses,
+ * though "invalid" and "parameters" read as one to paramRejection, which
+ * dropped the thinking level for nothing.
+ */
+function isRelayedUpstreamFailure(error: UpstreamError) {
+  return (
+    error.status === 400 &&
+    /upstream request failed/i.test(error.body ?? "") &&
+    /"type"\s*:\s*"server_error"/.test(error.body ?? "")
+  );
+}
+
 type DropTarget = "reasoning" | "schema" | "unknown";
 
 const REASONING_WORDS =
@@ -659,6 +676,21 @@ export async function runTask(
             ? `rejected the request because of a country restriction (${code}${detail})`
             : `refused the account (${code}${detail}) - its plan or credit may have run out`;
           if (await switchChannel(why)) continue;
+        }
+
+        // A gateway relaying a failed upstream call as a 400 is retried as it
+        // is, once, before it is read as a rejected parameter - on a new
+        // session: OpenCode Go keeps a session on one backend, and the two
+        // 400s in a row came on one session.
+        if (isRelayedUpstreamFailure(lastError) && transientRetries < MAX_TRANSIENT_RETRIES) {
+          transientRetries += 1;
+          task.session = crypto.randomUUID();
+          await write({
+            type: "status",
+            message: `${route.label} hit a temporary issue. Retrying...`,
+          });
+          await sleep(RETRY_DELAY_MS);
+          continue;
         }
 
         const drop = paramRejection(lastError);

@@ -104,6 +104,8 @@ export type WorkerEnv = {
   OPENCODE_MINIMAX_MODEL?: string;
   MINIMAX_MODEL?: string;
   OPENCODE_KIMI_MODEL?: string;
+  /** The model behind Kimi's "K3" pick (PROVIDER_VARIANTS). */
+  OPENCODE_KIMI_K3_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   OPENCODE_HAIKU_MODEL?: string;
   /** The model behind Gemini's "4 Argon" pick, on OpenCode Go. */
@@ -296,7 +298,11 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "responses",
       pathSuffix: "/responses",
       modelVar: "OPENCODE_CHATGPT_MODEL",
-      defaultModel: "gpt-5.6-luna",
+      // GPT 6 Luna since 15 October 2026 (the owner's call), in 5.6 Luna's
+      // place - half its price on the Go plan ($0.10 / $0.50 per 1M tokens to
+      // $0.20 / $1.20), so about twice the requests a month. The notes below
+      // were measured on 5.6 Luna.
+      defaultModel: "gpt-6-luna",
       effort: OPENAI_EFFORT,
       // Start outside the visitor's HTTP invocation, as Muse does. A student
       // abroad reported 502 while the same endpoint worked for the owner.
@@ -438,8 +444,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "responses",
       pathSuffix: "/responses",
       modelVar: "OPENCODE_GROK_MODEL",
-      defaultModel: "grok-4.6",
+      // Grok 4.7 since 15 October 2026 (the owner's call), at 4.6's price.
+      defaultModel: "grok-4.7",
       effort: CLAMPED_EFFORT,
+      // On the pipe bifurcation at "high" 4.7 sent nothing for the default
+      // 280 s and timed out (15 October 2026).
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
   mimo: {
@@ -533,10 +543,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "chat-completions",
       pathSuffix: "/chat/completions",
       modelVar: "OPENCODE_KIMI_MODEL",
-      // k2.7-code over k3 on cost. At effort "low" it misread a 4 m UDL as 6 m
-      // on the overhanging-beam fixture (13.75/36.25 for 10/30); at "medium"
-      // and above it read the same diagram correctly (55 s / 185 s), hence
-      // the floor.
+      // The "K2.7 Code" pick, the default on cost; "K3" (kimi-k3, the K3
+      // pick since 15 October 2026 - VARIANT_ROUTES) runs on this same route
+      // with its model swapped in. At effort "low" k2.7-code misread a 4 m UDL
+      // as 6 m on the overhanging-beam fixture (13.75/36.25 for 10/30); at
+      // "medium" and above it read the same diagram correctly (55 s / 185 s),
+      // hence the floor.
       defaultModel: "kimi-k2.7-code",
       effort: CLAMPED_EFFORT,
       minEffort: "medium",
@@ -811,7 +823,8 @@ export function resolveRoute(
 // it rather than the solve-time channel. Only providers listed here are
 // pinned; any other pick (DeepSeek, Muse Spark, ...) keeps its normal route.
 //
-// ChatGPT is pinned to gpt-5.6-luna on OpenCode Go - the default judge of
+// ChatGPT is pinned to Luna on OpenCode Go (gpt-6-luna since 15 October 2026,
+// gpt-5.6-luna before) - the default judge of
 // the pass since 22 September 2026, at the owner's request (no Poe). It
 // read on Poe's gpt-5.4-pro before that: correct, but the pro tier
 // over-thinks a transcription task (~95 s vs ~5 s for Gemini) and bills the
@@ -830,7 +843,7 @@ const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
 };
 
 const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
-  chatgpt: "gpt-5.6-luna",
+  chatgpt: "gpt-6-luna",
   gemini: "gemini-3.8-flash,gemini-3.5-flash",
   claude: "claude-opus-4.8",
 };
@@ -871,6 +884,10 @@ const VARIANT_ROUTES: Partial<
   gemini: {
     pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-3.1-pro-preview" },
     argon: { channel: "opencode" },
+  },
+  // Kimi's "k2.7" pick is the route's own model, so it needs no entry.
+  kimi: {
+    k3: { channel: "opencode", modelVar: "OPENCODE_KIMI_K3_MODEL", defaultModel: "kimi-k3" },
   },
   claude: {
     haiku: { channel: "opencode" },
