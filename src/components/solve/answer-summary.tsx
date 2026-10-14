@@ -16,6 +16,7 @@ import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   DEFAULT_JUDGE,
+  modelStatus,
   PROVIDER_KEYS,
   providerDisplayName,
   type ModelChoice,
@@ -58,14 +59,13 @@ export function AnswerSummary({
   judgeRun,
   nameOf,
   judgeLabel,
+  queuedJudge,
   markOf,
   providerStatus,
   canRerun,
   locked,
   onPick,
   onCrossCheck,
-  canQueue = false,
-  onQueueCrossCheck,
   onStopJudge,
   alignment = { status: "idle" },
   onCompareAgain,
@@ -76,6 +76,8 @@ export function AnswerSummary({
   judgeRun: JudgeRun;
   nameOf: (key: ProviderKey) => string;
   judgeLabel: string;
+  /** The judge and level the run's cross-check uses, for one Custom queued to run at once. */
+  queuedJudge?: { choice: ModelChoice; effort?: EffortKey };
   /** What the verdict says about a solver, when there is one. */
   markOf: (key: ProviderKey) => "correct" | "wrong" | null;
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
@@ -84,10 +86,7 @@ export function AnswerSummary({
   /** Opens a solver's tab. */
   onPick: (key: ProviderKey) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
-  /** Whether a cross-check can be asked for now and sent once the solvers are done. */
-  canQueue?: boolean;
-  onQueueCrossCheck?: (judge: ModelChoice, effort: EffortKey) => void;
-  /** Takes a queued cross-check back. */
+  /** Takes back the cross-check Custom queued for when the solvers are done. */
   onStopJudge?: () => void;
   /** How the answers line up with each other (hooks/use-align.ts). */
   alignment?: AlignState;
@@ -137,20 +136,18 @@ export function AnswerSummary({
   const judging = isJudgeActive(judgeRun);
   const toJudge = PROVIDER_KEYS.filter((key) => runs[key].status === "done").slice(0, MAX_JUDGED_SOLUTIONS);
   const judgeEffort = effortBand(providerStatus?.[DEFAULT_JUDGE.provider]).clamp("high");
-  // Greyed out until two solutions are in (the owner, 4 October 2026). A tap
-  // while other solvers still run is queued: sent once, when they are done,
-  // so the verdict grades them all.
+  // Greyed out until two solutions are in (the owner, 4 October 2026), and
+  // ready from then on: the solvers still running are not waited for (the
+  // owner, 14 October 2026) - they are left out of this verdict.
   const queued = judgeRun.status === "waiting" && judgeRun.message === JUDGE_QUEUED;
-  const queueable = running.length > 0 && canQueue && Boolean(onQueueCrossCheck);
   const blocked = !canRerun
     ? "Needs this run's images, which this browser no longer has."
     : locked
       ? "Waits until the new upload is ready."
       : toJudge.length < 2
         ? "Needs at least two finished solutions."
-        : running.length && !queueable
-          ? "Waits for the solvers still running."
-          : "";
+        : "";
+  const leftOut = running.map(nameOf).join(", ");
   const judgeName = providerDisplayName(DEFAULT_JUDGE.provider, DEFAULT_JUDGE.variant);
   // Clear of the sticky step bar (lib/journey.ts).
   const scrollToCrossCheck = () => scrollToStep(STEP_IDS.check);
@@ -264,6 +261,25 @@ export function AnswerSummary({
             <span className="font-semibold">答案出齊就核對一次</span> · The cross-check runs once, when
             the answers are in.
           </span>
+          {/* Two answers are enough to run it now (the owner, 14 October 2026). */}
+          {queuedJudge && !blocked ? (
+            <button
+              type="button"
+              onClick={() =>
+                onCrossCheck(
+                  queuedJudge.choice,
+                  toJudge,
+                  queuedJudge.effort ??
+                    effortBand(
+                      modelStatus(providerStatus?.[queuedJudge.choice.provider], queuedJudge.choice.variant),
+                    ).clamp("high"),
+                )
+              }
+              className="text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
+            >
+              Run now with {toJudge.length} · 而家核對
+            </button>
+          ) : null}
           {onStopJudge ? (
             <button
               type="button"
@@ -280,11 +296,7 @@ export function AnswerSummary({
           <button
             type="button"
             disabled={judging || Boolean(blocked)}
-            onClick={() =>
-              queueable
-                ? onQueueCrossCheck?.(DEFAULT_JUDGE, judgeEffort)
-                : onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)
-            }
+            onClick={() => onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)}
             className={`flex w-full items-center justify-center gap-2 rounded-cs px-4 py-2.5 text-sm font-semibold transition ${
               judging || blocked
                 ? "cursor-not-allowed bg-cs-sunken text-cs-ink-3"
@@ -296,9 +308,9 @@ export function AnswerSummary({
           </button>
           <span className="text-xs text-cs-ink-3">
             {(blocked && `${blocked} `) ||
-              (queueable
-                ? `${judgeName} grades the solutions once every solver is done - one model call. `
-                : `${judgeName} grades ${toJudge.length} solutions - one model call. `)}
+              `${judgeName} grades ${toJudge.length} solutions - one model call. ${
+                leftOut ? `${leftOut} ${running.length === 1 ? "is" : "are"} still solving and not in it. ` : ""
+              }`}
             <button type="button" onClick={scrollToCrossCheck} className="font-semibold text-cs-accent underline-offset-2 hover:underline">
               Choose the judge
             </button>

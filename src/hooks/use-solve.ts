@@ -312,12 +312,13 @@ export function useSolve() {
   const judgeTaskRef = useRef<RunningTask | null>(null);
   const runRef = useRef<SavedRun | null>(null);
   /**
-   * The wave of solvers a run started with, while it is still going and was
-   * sent from this page (not re-attached after a reload): a cross-check asked
-   * for now is sent once, when it ends (queueCrossCheck). Null otherwise.
+   * The wave of solvers a run started with (or re-attached to), while it is
+   * still going. The run's judge is sent once it ends - Custom's automatic
+   * cross-check - unless one was run before that (`judgeTaken`: a cross-check
+   * runs as soon as two solutions are in, the owner, 14 October 2026).
+   * `sentHere` is false for a run picked back up after a reload.
    */
-  const waveRef = useRef<object | null>(null);
-  const [canQueueCrossCheck, setCanQueueCrossCheck] = useState(false);
+  const waveRef = useRef<{ sentHere: boolean; judgeTaken: boolean } | null>(null);
   /**
    * Whether this run's answers were sent from this page - by Solve, a retry,
    * a solver added or a re-generation - rather than only picked back up
@@ -456,7 +457,7 @@ export function useSolve() {
       // Waiting for the solvers, not sent yet: it is taken off the run, so
       // nothing is sent when they finish.
       const run = runRef.current;
-      if (waveRef.current && run?.judge && !run.judge.jobId) {
+      if (waveRef.current?.sentHere && run?.judge && !run.judge.jobId) {
         run.judge = null;
         persist();
         setJudgeRun({ status: "idle" });
@@ -485,7 +486,6 @@ export function useSolve() {
     bodySavedRef.current = null;
     runRef.current = null;
     waveRef.current = null;
-    setCanQueueCrossCheck(false);
     setSentHere(false);
     setRunId(null);
     setBody(null);
@@ -814,21 +814,22 @@ export function useSolve() {
         if (run.study?.[kind]?.jobId) void studyOne(context, kind, null);
       }
 
-      const wave = {};
-      waveRef.current = body ? wave : null;
-      setCanQueueCrossCheck(Boolean(body));
+      // A cross-check already sent (a restored run) is re-attached to at once
+      // too: it may have been sent before every solver was done.
+      const judgeSent = Boolean(run.judge?.jobId);
+      if (judgeSent) void judgeOne(context, null);
+
+      const wave = { sentHere: Boolean(body), judgeTaken: judgeSent };
+      waveRef.current = wave;
       setSentHere(Boolean(body));
       void (async () => {
         // A copy: a solver added while these run is started on its own.
         await runPool([...run.providers], SOLVE_CONCURRENCY, (provider) =>
           solveOne(context, provider, body),
         );
-        if (waveRef.current === wave) {
-          waveRef.current = null;
-          setCanQueueCrossCheck(false);
-        }
-        // The judge the run started with, or one asked for while it ran.
-        if (!run.judge || signal.aborted) return;
+        if (waveRef.current === wave) waveRef.current = null;
+        // The judge the run started with, unless one was run meanwhile.
+        if (!run.judge || signal.aborted || wave.judgeTaken) return;
         await judgeOne(context, body);
       })();
     },
@@ -1017,7 +1018,9 @@ export function useSolve() {
   /**
    * Runs the cross-check now, over the chosen finished solutions (two to
    * MAX_JUDGED_SOLUTIONS, in picker order): one that was not switched on,
-   * that failed, or whose verdict predates a solver added since.
+   * that failed, or whose verdict predates a solver added since. Solvers
+   * still running are not waited for (the owner, 14 October 2026); a judge
+   * the run was to send when they finish is not sent after this one.
    */
   const crossCheck = useCallback(
     (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey = "high") => {
@@ -1025,6 +1028,7 @@ export function useSolve() {
       const body = bodyRef.current;
       if (!run || !body) return;
       const signal = currentSignal();
+      if (waveRef.current) waveRef.current.judgeTaken = true;
       run.judge = { provider: judge.provider, variant: judge.variant, effort };
       setVariants(variantsOf(run));
       persist();
@@ -1032,26 +1036,6 @@ export function useSolve() {
       void judgeOne({ run, signal, solutions: solutionsRef.current }, body, providers);
     },
     [currentSignal, persist, judgeOne],
-  );
-
-  /**
-   * A cross-check asked for while the run's solvers are still going (3
-   * October 2026: in Careful it runs only when the student asks): the judge
-   * goes on the run and is sent once, when the solvers are done, over the
-   * first finished solutions - as if the run had started with it. Its Stop
-   * takes it off again. Does nothing once the solvers are done (crossCheck
-   * runs it then) or for a run picked back up after a reload.
-   */
-  const queueCrossCheck = useCallback(
-    (judge: ModelChoice, effort: EffortKey = "high") => {
-      const run = runRef.current;
-      if (!run || !waveRef.current) return;
-      run.judge = { provider: judge.provider, variant: judge.variant, effort };
-      setVariants(variantsOf(run));
-      persist();
-      setJudgeRun({ status: "waiting", judge: judge.provider, message: JUDGE_QUEUED });
-    },
-    [persist],
   );
 
   /**
@@ -1211,8 +1195,6 @@ export function useSolve() {
     stopProvider,
     refineProvider,
     crossCheck,
-    queueCrossCheck,
-    canQueueCrossCheck,
     sentHere,
     stopJudge,
     refineVerdict,

@@ -3,13 +3,14 @@
 // solver, a card of its own under the solutions), or run the answer
 // cross-check over the finished solutions (the controls at the top of the
 // cross-check section, above its verdict) - one that was not switched on,
-// that failed, or whose verdict came before a solver was added or retried.
+// that failed, or whose verdict came before a solver was added or retried;
+// since 14 October 2026 as soon as two are in, without waiting for the rest.
 // The two were one panel until 3 October 2026 (the owner's call). Both reuse
 // the run's images, notes, thinking level and confirmed reading, which the
 // page keeps in memory and in this browser's IndexedDB
 // (lib/upload-store.ts), so they work after a reload too.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Scale } from "lucide-react";
 import { MAX_JUDGED_SOLUTIONS } from "../../../shared/judgement";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
@@ -31,6 +32,7 @@ import {
 import {
   isJudgeActive,
   isRunActive,
+  JUDGE_QUEUED,
   type JudgeRun,
   type ProviderRuns,
   type RunVariants,
@@ -165,10 +167,27 @@ export function CrossCheckControls({
 
   // The finished solutions, in picker order (the judge's A, B...).
   const finished = PROVIDER_KEYS.filter((key) => runs[key].status === "done");
-  const [picked, setPicked] = useState<ProviderKey[] | null>(null);
-  const chosen = (picked ?? finished.slice(0, MAX_JUDGED_SOLUTIONS)).filter((key) =>
-    finished.includes(key),
-  );
+  const finishedKey = finished.join(",");
+  // Each solution is ticked as it comes in (the owner, 14 October 2026), up
+  // to what the judge compares; a tick the user changes holds until that
+  // solution is replaced - retried, re-generated, or a new run.
+  const [ticks, setTicks] = useState<Partial<Record<ProviderKey, boolean>>>({});
+  useEffect(() => {
+    setTicks((current) => {
+      const kept = (Object.keys(current) as ProviderKey[]).filter((key) => finishedKey.split(",").includes(key));
+      return kept.length === Object.keys(current).length
+        ? current
+        : Object.fromEntries(kept.map((key) => [key, current[key]]));
+    });
+  }, [finishedKey]);
+  let room = MAX_JUDGED_SOLUTIONS - finished.filter((key) => ticks[key] === true).length;
+  const chosen = finished.filter((key) => {
+    const set = ticks[key];
+    if (set !== undefined) return set;
+    if (room <= 0) return false;
+    room -= 1;
+    return true;
+  });
   const judges = MODEL_CHOICES.filter(configured);
   const [judgePick, setJudgePick] = useState<ModelChoice | null>(null);
   const judge: ModelChoice =
@@ -183,8 +202,12 @@ export function CrossCheckControls({
   const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[judge.provider], judge.variant));
   const judgeEffort = clamp(effortPick);
 
-  const solving = PROVIDER_KEYS.some((key) => isRunActive(runs[key]));
-  const judging = isJudgeActive(judgeRun);
+  // Ready once two solutions are in: the solvers still running are not
+  // waited for (the owner, 14 October 2026) - and neither is a cross-check
+  // Custom queued for when they are done, which this one replaces.
+  const solving = PROVIDER_KEYS.filter((key) => isRunActive(runs[key]));
+  const queued = judgeRun.status === "waiting" && judgeRun.message === JUDGE_QUEUED;
+  const judging = isJudgeActive(judgeRun) && !queued;
   const hasVerdict = judgeRun.status === "done" || judgeRun.status === "error";
 
   if (!canRerun) {
@@ -197,20 +220,13 @@ export function CrossCheckControls({
   }
 
   function togglePicked(key: ProviderKey) {
-    const current = chosen;
-    setPicked(
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : PROVIDER_KEYS.filter((item) => item === key || current.includes(item)),
-    );
+    setTicks((current) => ({ ...current, [key]: !chosen.includes(key) }));
   }
 
   const blocked =
     finished.length < 2
       ? "Needs at least two finished solutions."
-      : solving
-        ? "Waits for the solvers still running."
-        : chosen.length < 2
+      : chosen.length < 2
           ? "Tick at least two solutions."
           : chosen.length > MAX_JUDGED_SOLUTIONS
             ? `The judge compares up to ${MAX_JUDGED_SOLUTIONS} solutions - untick some.`
@@ -287,6 +303,9 @@ export function CrossCheckControls({
       <p className={HINT_CLASS}>
         {blocked ||
           "One extra model call. The judge sees Solution A, B... and never learns which model wrote which."}
+        {!blocked && solving.length
+          ? ` ${solving.map(nameOf).join(", ")} ${solving.length === 1 ? "is" : "are"} still solving and not in this check.`
+          : ""}
       </p>
     </div>
   );
