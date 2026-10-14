@@ -21,7 +21,10 @@
 // - on a computer (5 October 2026) the PDF is downloaded, then WhatsApp Web
 //   opens in a new tab for the student to attach it to a chat. A browser
 //   blocks a tab opened long after the click, so when making the PDF took
-//   that long, the page asks for one more click to open WhatsApp.
+//   that long, the page asks for one more click to open WhatsApp. Every
+//   click downloads the PDF again (15 October 2026, the owner's request): a
+//   student whose first download went missing got only WhatsApp Web before.
+// Labelled "Send to WhatsApp" since 15 October 2026 (the owner's request).
 
 import { useMemo, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Loader2, MessageCircle, Printer } from "lucide-react";
@@ -37,8 +40,7 @@ type PdfState =
   /**
    * `forever`: the server keeps the file for good; otherwise only while it
    * keeps the answer. `file`: the PDF itself, kept for the share sheet or
-   * the download. `downloaded`: it is in the computer's downloads already,
-   * so the next click only opens WhatsApp.
+   * the download.
    */
   | {
       status: "ready";
@@ -46,7 +48,6 @@ type PdfState =
       forever: boolean;
       file: File | null;
       copied?: boolean;
-      downloaded?: boolean;
       nudge?: Nudge;
     }
   | { status: "error"; message: string };
@@ -134,16 +135,26 @@ function openWhatsAppWeb() {
   return Boolean(tab);
 }
 
+const SEND_LABEL = "Send to WhatsApp";
+
 const TAP_AGAIN: Nudge = {
-  text: "The PDF is ready - tap WhatsApp again to open the share sheet, then pick WhatsApp.",
+  text: `The PDF is ready - tap ${SEND_LABEL} again to open the share sheet, then pick WhatsApp.`,
   strong: true,
 };
 
-/** After the download, on a computer. */
+/**
+ * After the download, on a computer. The page cannot tell whether the
+ * browser let the download through, so it says where to get it again.
+ */
 function desktopNudge(fileName: string, opened: boolean): Nudge {
   return opened
-    ? { text: `Downloaded ${fileName}. In WhatsApp, open the chat and attach it - drag it in, or use the paperclip.` }
-    : { text: `Downloaded ${fileName}. Click WhatsApp again to open WhatsApp Web, then attach it to the chat.`, strong: true };
+    ? {
+        text: `Downloading ${fileName}. In WhatsApp, open the chat and attach it - drag it in, or use the paperclip. Not in your downloads? Click ${SEND_LABEL} again.`,
+      }
+    : {
+        text: `Downloading ${fileName}. Click ${SEND_LABEL} again to open WhatsApp Web (it downloads the PDF again too), then attach it to the chat.`,
+        strong: true,
+      };
 }
 
 export function PdfButton({
@@ -183,7 +194,7 @@ export function PdfButton({
         if (!mobile) {
           downloadFile(file);
           const opened = openWhatsAppWeb();
-          setState({ ...ready, downloaded: !opened, nudge: desktopNudge(file.name, opened) });
+          setState({ ...ready, nudge: desktopNudge(file.name, opened) });
           return;
         }
         if (!canShareFile(file)) {
@@ -226,14 +237,12 @@ export function PdfButton({
     );
   }
 
-  /** On a computer: the PDF to the downloads (unless it is there already), then WhatsApp Web. */
-  function sendFromComputer(file: File, alreadyDownloaded: boolean) {
-    if (!alreadyDownloaded) downloadFile(file);
+  /** On a computer: the PDF to the downloads - on every click - then WhatsApp Web. */
+  function sendFromComputer(file: File) {
+    downloadFile(file);
     const opened = openWhatsAppWeb();
     setState((current) =>
-      current.status === "ready"
-        ? { ...current, downloaded: !opened, nudge: desktopNudge(file.name, opened) }
-        : current,
+      current.status === "ready" ? { ...current, nudge: desktopNudge(file.name, opened) } : current,
     );
   }
 
@@ -250,12 +259,12 @@ export function PdfButton({
           {!mobile && file ? (
             <button
               type="button"
-              onClick={() => sendFromComputer(file, Boolean(state.downloaded))}
+              onClick={() => sendFromComputer(file)}
               className={whatsAppClass}
               title="Downloads the PDF, then opens WhatsApp Web to attach it to a chat"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              WhatsApp
+              {SEND_LABEL}
             </button>
           ) : canShareFile(file) ? (
             <button
@@ -265,7 +274,7 @@ export function PdfButton({
               title="Opens the share sheet with the PDF - pick WhatsApp, then the chat"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              WhatsApp
+              {SEND_LABEL}
             </button>
           ) : (
             <a
@@ -276,7 +285,7 @@ export function PdfButton({
               title="Opens WhatsApp with a message holding the PDF's link"
             >
               <MessageCircle className={icon} aria-hidden="true" />
-              WhatsApp link
+              Send link to WhatsApp
             </a>
           )}
           <button type="button" onClick={() => void copyLink(state.url)} className={`${LIGHT_BUTTON} ${size}`}>
@@ -332,7 +341,7 @@ export function PdfButton({
           ) : (
             <MessageCircle className={icon} aria-hidden="true" />
           )}
-          {working && state.forWhatsApp ? `Preparing... ${formatClock(now - state.startedAt)}` : "WhatsApp"}
+          {working && state.forWhatsApp ? `Preparing... ${formatClock(now - state.startedAt)}` : SEND_LABEL}
         </button>
       </span>
       {state.status === "error" ? (
