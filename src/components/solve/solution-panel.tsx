@@ -270,8 +270,6 @@ export default function SolutionPanel({
   onStopProvider,
   onRefineProvider,
   onCrossCheck,
-  canQueueCrossCheck,
-  onQueueCrossCheck,
   alignment,
   onCompareAgain,
   askThreads,
@@ -309,12 +307,9 @@ export default function SolutionPanel({
   /** Re-generates one finished solution with the user's instructions. */
   onRefineProvider: (provider: ProviderKey, instructions: string) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
-  /** Whether a cross-check asked for now waits for the solvers and is sent once they are done. */
-  canQueueCrossCheck: boolean;
   /** How the answers line up with each other, compared once every solver answered (hooks/use-align.ts). */
   alignment: AlignState;
   onCompareAgain: () => void;
-  onQueueCrossCheck: (judge: ModelChoice, effort: EffortKey) => void;
   /** Questions about each solution, and their answers (hooks/use-ask.ts). */
   askThreads: AskThreads;
   askProgress: Record<string, Progress>;
@@ -613,14 +608,17 @@ export default function SolutionPanel({
         judgeRun={judgeRun}
         nameOf={nameOf}
         judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
+        queuedJudge={
+          judgeRun.status !== "idle"
+            ? { choice: { provider: judgeRun.judge, variant: variants.judge }, effort: variants.judgeEffort }
+            : undefined
+        }
         markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
         providerStatus={providerStatus}
         canRerun={canRerun}
         locked={locked}
         onPick={pickProvider}
         onCrossCheck={onCrossCheck}
-        canQueue={canQueueCrossCheck}
-        onQueueCrossCheck={onQueueCrossCheck}
         onStopJudge={onStopJudge}
         alignment={alignment}
         onCompareAgain={onCompareAgain}
@@ -1206,7 +1204,12 @@ function JudgementCard({
   // Re-generated (or retried) since the verdict: the verdict is about the
   // version before.
   const changed = solvers.filter((provider) => changedSinceVerdict(judgeRun, provider, solutionVersions));
-  const skipped = judgeRun.skipped.filter((provider) => runs[provider].status !== "done");
+  // Left out when the verdict was asked for: failed, or - a cross-check runs
+  // as soon as two solutions are in - still solving.
+  const skipped = judgeRun.skipped.filter(
+    (provider) => runs[provider].status !== "done" && !isRunActive(runs[provider]),
+  );
+  const pending = judgeRun.skipped.filter((provider) => isRunActive(runs[provider]));
   const headlineTone =
     judgement.correct.length === 0
       ? "text-cs-danger"
@@ -1277,6 +1280,12 @@ function JudgementCard({
           Not in this verdict: {notGraded.map(nameOf).join(", ")}{" "}
           finished after it. Run the cross-check again above to include{" "}
           {notGraded.length === 1 ? "it" : "them"}.
+        </p>
+      ) : null}
+      {pending.length ? (
+        <p className="mt-1 text-xs text-cs-ink-3">
+          Not in this verdict: {pending.map(nameOf).join(", ")} {pending.length === 1 ? "is" : "are"}{" "}
+          still solving. Run the cross-check again above once {pending.length === 1 ? "it is" : "they are"} in.
         </p>
       ) : null}
       {changed.length ? (

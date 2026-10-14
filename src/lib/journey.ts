@@ -182,8 +182,10 @@ function currentStep(
 ): JourneyStep {
   if (reading.state === "running" || reading.state === "yourTurn" || reading.state === "failed") return reading;
   if (upload.state === "running" || upload.state === "now") return upload;
-  if (answers.state === "running") return answers;
+  // A cross-check can run while solvers still do (since 14 October 2026):
+  // the student who started it is waiting for it.
   if (check.state === "running") return check;
+  if (answers.state === "running") return answers;
   if (study.state === "running") return study;
   if (study.state === "done" && (check.state !== "done" || notesAfterVerdict)) return study;
   if (check.state === "done") return check;
