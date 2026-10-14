@@ -136,7 +136,7 @@ export function buildTask(
     };
   }
   // Which of the provider's models to run, when it offers several (Gemini:
-  // "flash" or "pro"). Absent means its default.
+  // "flash", "pro" or "argon"). Absent means its default.
   const variant = body.variant;
   if (variant !== undefined && !isVariantOf(providerName, variant)) {
     const offered = PROVIDER_VARIANTS[providerName]?.map((entry) => entry.key).join(", ");

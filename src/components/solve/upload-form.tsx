@@ -1010,7 +1010,9 @@ export function UploadForm({
                     <span className="text-sm font-semibold text-cs-ink">{provider.label}</span>
                     {models ? (
                       // Buttons inside the card's <label> do not toggle its checkbox.
-                      <span className="flex w-fit overflow-hidden rounded-full border border-cs-line text-[0.7rem] font-semibold">
+                      // Chips that wrap: Gemini's three models do not fit one
+                      // row of a phone's three-column grid.
+                      <span className="flex flex-wrap gap-1 text-[0.7rem] font-semibold">
                         {models.map((model) => (
                           <button
                             key={model.key}
@@ -1022,10 +1024,10 @@ export function UploadForm({
                               event.preventDefault();
                               setVariants((current) => ({ ...current, [provider.key]: model.key }));
                             }}
-                            className={`px-2 py-0.5 transition ${
+                            className={`whitespace-nowrap rounded-full border px-2 py-0.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${
                               variant === model.key
-                                ? "bg-cs-accent text-cs-on-accent"
-                                : "bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
+                                ? "border-cs-accent bg-cs-accent text-cs-on-accent"
+                                : "border-cs-line bg-cs-surface text-cs-ink-2 hover:text-cs-accent"
                             }`}
                           >
                             {model.shortLabel}
