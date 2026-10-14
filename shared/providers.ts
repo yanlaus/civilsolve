@@ -98,10 +98,11 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
  * default: the card gets a switch, and the reader and judge lists one entry
  * each. Gemini since 26 September 2026, on Google Vertex AI: 3.8 Flash (the
  * route's own chain, falling back to 3.5 Flash) or 3.1 Pro, which was 2/2 on
- * B.8 at "high" in 136-189 s. The worker maps a variant onto a model in
- * variantOverride (worker/channels.ts).
+ * B.8 at "high" in 136-189 s - and since 15 October 2026 (the owner's
+ * request) 4 Argon, `gemini-4-argon-contributor` on OpenCode Go. The worker
+ * maps a variant onto a model in variantOverride (worker/channels.ts).
  */
-export type ModelVariant = "flash" | "pro" | "haiku" | "opus";
+export type ModelVariant = "flash" | "pro" | "argon" | "haiku" | "opus";
 
 export const PROVIDER_VARIANTS: Partial<
   Record<ProviderKey, ReadonlyArray<{ key: ModelVariant; label: string; shortLabel: string }>>
@@ -109,6 +110,7 @@ export const PROVIDER_VARIANTS: Partial<
   gemini: [
     { key: "flash", label: "3.8 Flash", shortLabel: "Flash" },
     { key: "pro", label: "3.1 Pro", shortLabel: "Pro" },
+    { key: "argon", label: "4 Argon", shortLabel: "4 Argon" },
   ],
   claude: [
     { key: "haiku", label: "Haiku", shortLabel: "Haiku" },
@@ -176,14 +178,20 @@ export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
  * Providers whose upstream account bills noticeably more per solve than the
  * rest. The picker shows a badge so the cost is visible before a solve, not
  * after. Claude runs as Opus on Poe, the priciest bot there by a wide margin;
- * Grok is the heaviest draw per solve on the owner's OpenCode Go plan.
+ * Grok is the heaviest draw per solve on the owner's OpenCode Go plan after
+ * Gemini 4 Argon ($4 / $20 per 1M tokens to Grok's $2 / $6, about 1,060
+ * requests a month on its own cap - October 2026).
  */
 export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
   "grok",
 ]);
 
 export function usesMoreCredit(provider: ProviderKey, variant?: ModelVariant) {
-  return HIGHER_CREDIT_PROVIDERS.has(provider) || (provider === "claude" && variant !== "haiku");
+  return (
+    HIGHER_CREDIT_PROVIDERS.has(provider) ||
+    (provider === "claude" && variant !== "haiku") ||
+    (provider === "gemini" && variant === "argon")
+  );
 }
 
 /**

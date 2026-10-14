@@ -106,6 +106,8 @@ export type WorkerEnv = {
   OPENCODE_KIMI_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   OPENCODE_HAIKU_MODEL?: string;
+  /** The model behind Gemini's "4 Argon" pick, on OpenCode Go. */
+  OPENCODE_GEMINI_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
   /** The model behind Gemini's "Pro" pick (PROVIDER_VARIANTS). */
   GOOGLE_GEMINI_PRO_MODEL?: string;
@@ -116,6 +118,8 @@ export type WorkerEnv = {
   // --- Endpoint overrides (proxies) --------------------------------------
   POE_BASE_URL?: string;
   OPENCODE_BASE_URL?: string;
+  /** OpenCode Go's Google-protocol base, for Gemini 4 Argon (see its route). */
+  OPENCODE_GEMINI_BASE_URL?: string;
   MINIMAX_BASE_URL?: string;
   GOOGLE_BASE_URL?: string;
   /** For an AI Studio key: https://generativelanguage.googleapis.com/v1beta */
@@ -372,6 +376,26 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
       urlVar: "GOOGLE_BACKUP_BASE_URL",
       defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
+      effort: GEMINI_LEVEL,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+    },
+    // The "4 Argon" pick (15 October 2026, the owner's request): Gemini 4 on
+    // the OpenCode Go subscription, not the Google credit. The gateway serves
+    // it on Google's own API - models/{id}:streamGenerateContent, the key in
+    // x-goog-api-key - and only under its documented base, opencode.ai/
+    // inference/go/v1: the /zen/go/v1 base the other routes use answers that
+    // path with an HTML page. Probed that day: the strict responseSchema held,
+    // thinkingLevel low / medium / high all accepted, streamed. The dearest
+    // model on the plan ($4 / $20 per 1M tokens, about 1,060 requests a month
+    // on its own cap), hence the More credit badge; as a "contributor" model
+    // its prompts and answers may be used to train Google's models.
+    opencode: {
+      dialect: "gemini",
+      keyVar: "OPENCODE_API_KEY",
+      modelVar: "OPENCODE_GEMINI_MODEL",
+      defaultModel: "gemini-4-argon-contributor",
+      urlVar: "OPENCODE_GEMINI_BASE_URL",
+      defaultUrl: "https://opencode.ai/inference/go/v1",
       effort: GEMINI_LEVEL,
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
@@ -837,14 +861,16 @@ export function interpretOverride(
 /** Health payload for one provider. Never exposes key values. */
 /**
  * The models behind a provider's picks (PROVIDER_VARIANTS), other than the
- * route's own model: Gemini's "pro" runs GOOGLE_GEMINI_PRO_MODEL on Google.
- * "flash" is the Google route's own chain, so it needs no entry.
+ * route's own model: Gemini's "pro" runs GOOGLE_GEMINI_PRO_MODEL on Google,
+ * and "argon" its OpenCode Go route (Gemini 4). "flash" is the Google
+ * route's own chain, so it needs no entry.
  */
 const VARIANT_ROUTES: Partial<
   Record<ProviderKey, Partial<Record<ModelVariant, { channel: ChannelKey; modelVar?: keyof WorkerEnv; defaultModel?: string }>>>
 > = {
   gemini: {
     pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-3.1-pro-preview" },
+    argon: { channel: "opencode" },
   },
   claude: {
     haiku: { channel: "opencode" },
