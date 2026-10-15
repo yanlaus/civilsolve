@@ -80,6 +80,7 @@ export function PresetFlow({
   solvers,
   effortLabel,
   judge,
+  tapJudge,
 }: {
   /** The reading check's two readers, or null when it is off. */
   readers: [ModelChoice, ModelChoice] | null;
@@ -88,6 +89,8 @@ export function PresetFlow({
   effortLabel: string;
   /** The cross-check's judge, or null when there is none. */
   judge: ModelChoice | null;
+  /** Who a tapped cross-check goes to, shown when there is no judge set (Expert: Claude Opus). */
+  tapJudge?: ModelChoice;
 }) {
   return (
     <ol className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-3" aria-label="What this run does">
@@ -120,8 +123,15 @@ export function PresetFlow({
       </Stage>
       <Step />
       {/* Without a judge set, the cross-check is still there - on a tap. */}
-      <Stage icon={Scale} label="Check" chinese="核對" off={!judge} offLabel="When you tap it · 撳先做">
-        {judge ? <Model choice={judge} /> : null}
+      <Stage icon={Scale} label="Check" chinese="核對" off={!judge && !tapJudge} offLabel="When you tap it · 撳先做">
+        {judge ? (
+          <Model choice={judge} />
+        ) : tapJudge ? (
+          <>
+            <Model choice={tapJudge} />
+            <span className="text-xs text-cs-ink-3">When you tap it · 撳先做</span>
+          </>
+        ) : null}
       </Stage>
     </ol>
   );

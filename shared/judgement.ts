@@ -125,10 +125,27 @@ export function readCorrect(value: unknown, count: number): number[] | null {
   return [...found].sort((a, b) => a - b);
 }
 
+/** An assessment's opening line, in English or Chinese ("- **Overall:**", "- **總結：**"). */
+const OVERALL_LEAD = /^\s*(?:[-*]\s*)?\*\*\s*(?:Overall|總結)/i;
+
+/**
+ * One assessment per solution from a list of their points: Claude Opus on Poe
+ * wrote each point as an entry of its own (16 October 2026: 13 entries for
+ * three solutions), each solution's run opening with its Overall line. Null
+ * unless the Overall lines say exactly where each of the `count` begins.
+ */
+function regroupAssessments(entries: unknown[], count: number): string[] | null {
+  if (entries.length <= count || !entries.every((entry) => typeof entry === "string")) return null;
+  const points = entries as string[];
+  const starts = points.flatMap((point, index) => (OVERALL_LEAD.test(point) ? [index] : []));
+  if (starts.length !== count || starts[0] !== 0) return null;
+  return starts.map((start, index) => points.slice(start, starts[index + 1] ?? points.length).join("\n"));
+}
+
 function readAssessments(value: unknown, count: number): string[] {
   const out: string[] = Array.from({ length: count }, () => "");
   if (Array.isArray(value)) {
-    value.slice(0, count).forEach((entry, index) => {
+    (regroupAssessments(value, count) ?? value.slice(0, count)).forEach((entry, index) => {
       if (typeof entry === "string") out[index] = cleanModelText(entry);
     });
   } else if (value && typeof value === "object") {

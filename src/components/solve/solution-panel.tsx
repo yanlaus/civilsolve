@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { SOLUTION_LETTERS } from "../../../shared/judgement";
 import {
+  DEFAULT_JUDGE,
   PROVIDER_KEYS,
   PROVIDER_VARIANTS,
   providerDisplayName,
@@ -270,6 +271,7 @@ export default function SolutionPanel({
   onStopProvider,
   onRefineProvider,
   onCrossCheck,
+  crossCheckJudge = DEFAULT_JUDGE,
   alignment,
   onCompareAgain,
   askThreads,
@@ -307,6 +309,8 @@ export default function SolutionPanel({
   /** Re-generates one finished solution with the user's instructions. */
   onRefineProvider: (provider: ProviderKey, instructions: string) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** Who a tapped cross-check goes to on this run (Expert: Claude Opus). */
+  crossCheckJudge?: ModelChoice;
   /** How the answers line up with each other, compared once every solver answered (hooks/use-align.ts). */
   alignment: AlignState;
   onCompareAgain: () => void;
@@ -619,6 +623,7 @@ export default function SolutionPanel({
         locked={locked}
         onPick={pickProvider}
         onCrossCheck={onCrossCheck}
+        crossCheckJudge={crossCheckJudge}
         onStopJudge={onStopJudge}
         alignment={alignment}
         onCompareAgain={onCompareAgain}
@@ -960,6 +965,7 @@ export default function SolutionPanel({
           canRerun={canRerun}
           locked={locked}
           onCrossCheck={onCrossCheck}
+          defaultJudge={crossCheckJudge}
         />
 
         {judgeRun.status !== "idle" ? (

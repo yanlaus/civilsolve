@@ -66,6 +66,7 @@ export function AnswerSummary({
   locked,
   onPick,
   onCrossCheck,
+  crossCheckJudge = DEFAULT_JUDGE,
   onStopJudge,
   alignment = { status: "idle" },
   onCompareAgain,
@@ -86,6 +87,8 @@ export function AnswerSummary({
   /** Opens a solver's tab. */
   onPick: (key: ProviderKey) => void;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** Who the one-tap cross-check goes to on this run (Expert: Claude Opus). */
+  crossCheckJudge?: ModelChoice;
   /** Takes back the cross-check Custom queued for when the solvers are done. */
   onStopJudge?: () => void;
   /** How the answers line up with each other (hooks/use-align.ts). */
@@ -129,13 +132,16 @@ export function AnswerSummary({
             ? "The answers partly agree · 答案部分一致"
             : "The answers differ · 答案各有不同";
 
-  // The one-tap cross-check: the default judge, at high (or the nearest level
-  // its route offers), over the first finished solutions in picker order -
-  // the same as the cross-check section's defaults.
+  // The one-tap cross-check: the run's judge (ChatGPT by default, Claude Opus
+  // in Expert), at high (or the nearest level its route offers), over the
+  // first finished solutions in picker order - the same as the cross-check
+  // section's defaults.
   const hasVerdict = judgeRun.status === "done";
   const judging = isJudgeActive(judgeRun);
   const toJudge = PROVIDER_KEYS.filter((key) => runs[key].status === "done").slice(0, MAX_JUDGED_SOLUTIONS);
-  const judgeEffort = effortBand(providerStatus?.[DEFAULT_JUDGE.provider]).clamp("high");
+  const judgeEffort = effortBand(
+    modelStatus(providerStatus?.[crossCheckJudge.provider], crossCheckJudge.variant),
+  ).clamp("high");
   // Greyed out until two solutions are in (the owner, 4 October 2026), and
   // ready from then on: the solvers still running are not waited for (the
   // owner, 14 October 2026) - they are left out of this verdict.
@@ -148,7 +154,7 @@ export function AnswerSummary({
         ? "Needs at least two finished solutions."
         : "";
   const leftOut = running.map(nameOf).join(", ");
-  const judgeName = providerDisplayName(DEFAULT_JUDGE.provider, DEFAULT_JUDGE.variant);
+  const judgeName = providerDisplayName(crossCheckJudge.provider, crossCheckJudge.variant);
   // Clear of the sticky step bar (lib/journey.ts).
   const scrollToCrossCheck = () => scrollToStep(STEP_IDS.check);
 
@@ -296,7 +302,7 @@ export function AnswerSummary({
           <button
             type="button"
             disabled={judging || Boolean(blocked)}
-            onClick={() => onCrossCheck(DEFAULT_JUDGE, toJudge, judgeEffort)}
+            onClick={() => onCrossCheck(crossCheckJudge, toJudge, judgeEffort)}
             className={`flex w-full items-center justify-center gap-2 rounded-cs px-4 py-2.5 text-sm font-semibold transition ${
               judging || blocked
                 ? "cursor-not-allowed bg-cs-sunken text-cs-ink-3"

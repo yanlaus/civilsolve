@@ -150,6 +150,7 @@ export function CrossCheckControls({
   canRerun,
   locked,
   onCrossCheck,
+  defaultJudge = DEFAULT_JUDGE,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -161,6 +162,8 @@ export function CrossCheckControls({
   /** True while the page prepares or reads a new upload. */
   locked: boolean;
   onCrossCheck: (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey) => void;
+  /** The judge picked until one has run: the run's (Expert: Claude Opus). */
+  defaultJudge?: ModelChoice;
 }) {
   const configured = configuredIn(providerStatus);
   const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
@@ -192,7 +195,7 @@ export function CrossCheckControls({
   const [judgePick, setJudgePick] = useState<ModelChoice | null>(null);
   const judge: ModelChoice =
     canonicalChoice(judgePick ??
-    (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : DEFAULT_JUDGE));
+    (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : defaultJudge));
 
   // How hard the judge thinks: high by default, the most reliable level
   // measured for grading. A judge's route may not offer every level (ChatGPT
