@@ -776,22 +776,30 @@ export default function SolutionPanel({
             </div>
 
             {/* A question with charts to draw: say so where the student reads
-                the working and the answer, and take them to the drawings. */}
+                the working and the answer, and take them to the drawings. The
+                English, the Chinese and the button each on a line of their own
+                on a phone - side by side, the button left the words a column
+                three words wide (the owner, 16 October 2026). */}
             {activeDiagrams.length && !hintMode && (shownView === "steps" || shownView === "answer") ? (
-              <div className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-cs border border-cs-line bg-cs-muted px-4 py-2.5 sm:mx-7">
-                <LineChart className="h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
-                <span className="min-w-0 flex-1 text-sm text-cs-ink-2">
-                  This question asks you to draw{" "}
-                  {activeDiagrams.length === 1
-                    ? "a diagram: see its key points, and a prompt to have Gemini draw it."
-                    : `${activeDiagrams.length} diagrams: see their key points, and a prompt to have Gemini draw each.`}{" "}
-                  ·{" "}
-                  <span lang="zh-Hant-HK">題目要你畫圖，可以叫 Gemini 幫你畫。</span>
-                </span>
+              <div className="mx-4 mt-4 rounded-cs border border-cs-line bg-cs-muted px-4 py-3 sm:mx-7 sm:flex sm:items-center sm:gap-4">
+                <div className="flex min-w-0 flex-1 items-start gap-2">
+                  <LineChart className="mt-0.5 h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
+                  <div className="min-w-0 text-sm leading-6 text-cs-ink-2">
+                    <p>
+                      This question asks you to draw{" "}
+                      {activeDiagrams.length === 1
+                        ? "a diagram: see its key points, and a prompt to have Gemini draw it."
+                        : `${activeDiagrams.length} diagrams: see their key points, and a prompt to have Gemini draw each.`}
+                    </p>
+                    <p lang="zh-Hant-HK" className="mt-1">
+                      題目要你畫圖，可以叫 Gemini 幫你畫。
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setActiveView("diagrams")}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-cs border border-cs-accent px-3 py-1 text-sm font-semibold text-cs-accent transition hover:bg-cs-accent hover:text-cs-on-accent"
+                  className="mt-3 flex w-full items-center justify-center gap-1 rounded-cs border border-cs-accent px-3 py-1.5 text-sm font-semibold text-cs-accent transition hover:bg-cs-accent hover:text-cs-on-accent sm:mt-0 sm:w-auto sm:shrink-0"
                 >
                   Open Diagrams · 睇畫圖
                 </button>
