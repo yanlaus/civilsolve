@@ -38,6 +38,8 @@ import {
   type JudgementResult,
 } from "../../shared/judgement";
 import {
+  canonicalChoice,
+  DEFAULT_JUDGE,
   isProviderKey,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
@@ -284,6 +286,8 @@ export function useSolve() {
   const [progress, setProgress] = useState<ProgressMap>({});
   const [judgeProgress, setJudgeProgress] = useState<Progress | null>(null);
   const [variants, setVariants] = useState<RunVariants>({ solvers: {} });
+  /** Who a tapped cross-check goes to on this run (SavedRun.crossCheckJudge): Expert's is Claude Opus. */
+  const [crossCheckJudge, setCrossCheckJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
   const [interpretation, setInterpretation] = useState<ConfirmedInterpretation | null>(null);
   const [solutionVersions, setSolutionVersions] = useState<SolutionVersions>({});
   const versionsRef = useRef<SolutionVersions>({});
@@ -488,6 +492,7 @@ export function useSolve() {
     waveRef.current = null;
     setSentHere(false);
     setRunId(null);
+    setCrossCheckJudge(DEFAULT_JUDGE);
     setBody(null);
     setRuns(IDLE_RUNS);
     setJudgeRun({ status: "idle" });
@@ -792,6 +797,7 @@ export function useSolve() {
       const signal = currentSignal();
       runRef.current = run;
       setRunId(run.savedAt);
+      setCrossCheckJudge(canonicalChoice(run.crossCheckJudge ?? DEFAULT_JUDGE));
       solutionsRef.current = new Map();
       doneRef.current = new Map();
       judgeDoneRef.current = null;
@@ -844,6 +850,8 @@ export function useSolve() {
       judge: (ModelChoice & { effort?: EffortKey }) | null = null,
       picked: Partial<Record<ProviderKey, ModelVariant>> = {},
       extras?: InterpretationExtras,
+      /** Who a tapped cross-check goes to (the preset's judge); DEFAULT_JUDGE when unset. */
+      crossCheckJudge?: ModelChoice,
     ) => {
       setRuns(waitingRuns(providers, "Submitting..."));
       extrasRef.current = body.interpretation ? extras : undefined;
@@ -865,6 +873,7 @@ export function useSolve() {
           variants: Object.fromEntries(
             providers.filter((provider) => picked[provider]).map((provider) => [provider, picked[provider]]),
           ),
+          ...(crossCheckJudge ? { crossCheckJudge } : {}),
         },
         body,
       );
@@ -1195,6 +1204,7 @@ export function useSolve() {
     stopProvider,
     refineProvider,
     crossCheck,
+    crossCheckJudge,
     sentHere,
     stopJudge,
     refineVerdict,

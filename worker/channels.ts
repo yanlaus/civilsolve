@@ -336,6 +336,12 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // Newest Opus on Poe. There is no Opus 5 bot there yet.
       defaultModel: "claude-opus-4.8",
       effort: CLAMPED_EFFORT,
+      // Takes the strict schema and does not hold it. Judging the pipe
+      // bifurcation (16 October 2026, as Expert's judge) it wrote each
+      // assessment's points as entries of their own - 13 for three solutions
+      // - and on another run put "C" in verified_solution and left the
+      // assessments empty. The prompt spells out the fields instead.
+      structured: false,
     },
   },
   gemini: {

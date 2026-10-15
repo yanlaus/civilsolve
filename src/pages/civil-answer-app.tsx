@@ -55,6 +55,7 @@ type PendingSolve = {
   body: SolveRequestBody;
   variants: Partial<Record<ProviderKey, ModelVariant>>;
   autoCheck: SolveSubmission["autoCheck"];
+  crossCheckJudge: SolveSubmission["crossCheckJudge"];
   /** The reconciler, which also re-generates the reading when asked. */
   verifierLabel: string;
 };
@@ -81,6 +82,7 @@ export default function CivilAnswerAppPage() {
     stopProvider,
     refineProvider,
     crossCheck,
+    crossCheckJudge,
     sentHere,
     stopJudge,
     refineVerdict,
@@ -278,6 +280,7 @@ export default function CivilAnswerAppPage() {
     verify,
     variants,
     autoCheck,
+    crossCheckJudge,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
@@ -331,6 +334,7 @@ export default function CivilAnswerAppPage() {
           body,
           variants,
           autoCheck,
+          crossCheckJudge,
           verifierLabel: providerDisplayName(verify.verifier.provider, verify.verifier.variant),
         });
         setPrepStatus("");
@@ -338,7 +342,7 @@ export default function CivilAnswerAppPage() {
         return;
       }
 
-      start(providers, body, judgeOf(autoCheck), variants);
+      start(providers, body, judgeOf(autoCheck), variants, undefined, crossCheckJudge);
       scrollToStepWhenReady(STEP_IDS.answers);
     } catch (prepError) {
       // Nothing was sent: back to the form to fix the upload.
@@ -353,7 +357,7 @@ export default function CivilAnswerAppPage() {
 
   function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve || pipeline.status !== "review") return;
-    const { providers, body, variants, autoCheck } = pendingSolve;
+    const { providers, body, variants, autoCheck, crossCheckJudge } = pendingSolve;
     // Kept above the solutions: the Chinese and who read it go with the run.
     const extras = {
       chinese: pipeline.interpretation.traditional_chinese?.trim() || undefined,
@@ -362,7 +366,7 @@ export default function CivilAnswerAppPage() {
     };
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, judgeOf(autoCheck), variants, extras);
+    start(providers, { ...body, interpretation: confirmedText }, judgeOf(autoCheck), variants, extras, crossCheckJudge);
     // The reading folds away and the solutions start below it: go to them.
     scrollToStepWhenReady(STEP_IDS.answers);
   }
@@ -528,6 +532,7 @@ export default function CivilAnswerAppPage() {
             onStopProvider={stopProvider}
             onRefineProvider={refineProvider}
             onCrossCheck={crossCheck}
+            crossCheckJudge={crossCheckJudge}
             alignment={alignment}
             onCompareAgain={compareAgain}
             askThreads={asks.threads}

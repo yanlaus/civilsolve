@@ -10,7 +10,7 @@
 // page works without it.
 
 import type { EffortKey } from "../../shared/prompt";
-import { isProviderKey, type ModelVariant, type ProviderKey } from "../../shared/providers";
+import { isProviderKey, type ModelChoice, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import type { StudyKind } from "../../shared/study";
 
 const KEY = "civilsolve:last-run";
@@ -50,6 +50,11 @@ export type SavedRun = {
   providers: ProviderKey[];
   solveJobs: Partial<Record<ProviderKey, string>>;
   judge: SavedJudge | null;
+  /**
+   * Who a tapped cross-check goes to: the preset's judge (Expert: Claude
+   * Opus, since 16 October 2026) or Custom's pick. DEFAULT_JUDGE when unset.
+   */
+  crossCheckJudge?: ModelChoice;
   /** The model picked for each solver that offers several (Gemini Flash or Pro). */
   variants?: Partial<Record<ProviderKey, ModelVariant>>;
   /** The study notes asked for, by kind (shared/study.ts). */

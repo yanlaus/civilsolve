@@ -49,7 +49,17 @@ import {
 import { isAcceptedUpload, isPdfFile, type UploadItem } from "@/lib/attachments";
 import { parsePageSpec } from "@/lib/page-range";
 import { STEP_IDS } from "@/lib/journey";
-import { DEFAULT_MODE, forgetSavedMode, MODES, PRESETS, type Preset, type SolveMode } from "@/lib/presets";
+import {
+  DEFAULT_MODE,
+  DEFAULT_TIER,
+  forgetSavedMode,
+  MODES,
+  PRESETS,
+  TIERS,
+  type Preset,
+  type SolveMode,
+  type Tier,
+} from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
 import { effortBand as bandForStatus } from "@/lib/effort-band";
 
@@ -80,6 +90,11 @@ export type SolveSubmission = {
   variants: Partial<Record<ProviderKey, ModelVariant>>;
   /** The judge that cross-checks the solutions once they are in; null for none. */
   autoCheck: { judge: ModelChoice; effort: EffortKey } | null;
+  /**
+   * Who the run's cross-check goes to when the student taps it - the
+   * preset's judge (Expert: Claude Opus), or the one picked in Custom.
+   */
+  crossCheckJudge: ModelChoice;
 };
 
 /** Each provider's first model (Gemini: Flash). */
@@ -87,9 +102,9 @@ const DEFAULT_VARIANTS: Partial<Record<ProviderKey, ModelVariant>> = Object.from
   Object.entries(PROVIDER_VARIANTS).map(([provider, list]) => [provider, list![0].key]),
 );
 
-/** The preset a saved mode stands for, or null for Custom. */
-function presetOf(mode: SolveMode): Preset | null {
-  return mode === "custom" ? null : PRESETS[mode];
+/** The preset a mode and tier stand for, or null for Custom. */
+function presetOf(mode: SolveMode, tier: Tier): Preset | null {
+  return mode === "custom" ? null : PRESETS[mode][tier];
 }
 
 const MAX_FILES = 10;
@@ -180,7 +195,9 @@ export function UploadForm({
   // below and hides them; Custom shows them all.
   const [mode, setMode] = useState<SolveMode>(DEFAULT_MODE);
   useEffect(forgetSavedMode, []);
-  const [verifyEnabled, setVerifyEnabled] = useState(() => presetOf(DEFAULT_MODE)?.verify ?? false);
+  // Smart or Expert, for Careful and Quick (16 October 2026); Custom has none.
+  const [tier, setTier] = useState<Tier>(DEFAULT_TIER);
+  const [verifyEnabled, setVerifyEnabled] = useState(() => presetOf(DEFAULT_MODE, DEFAULT_TIER)?.verify ?? false);
   const [interpreterA, setInterpreterA] = useState<ModelChoice>(DEFAULT_INTERPRETERS[0]);
   const [interpreterB, setInterpreterB] = useState<ModelChoice>(DEFAULT_INTERPRETERS[1]);
   const [verifier, setVerifier] = useState<ModelChoice>(DEFAULT_VERIFIER);
@@ -193,13 +210,13 @@ export function UploadForm({
   // The model on each solver card that offers several - its first, by default
   // (Gemini: Flash).
   const [variants, setVariants] = useState<Partial<Record<ProviderKey, ModelVariant>>>(DEFAULT_VARIANTS);
-  const [effort, setEffort] = useState<EffortKey>(() => presetOf(DEFAULT_MODE)?.effort ?? "high");
+  const [effort, setEffort] = useState<EffortKey>(() => presetOf(DEFAULT_MODE, DEFAULT_TIER)?.effort ?? "high");
   const [selectedProviders, setSelectedProviders] = useState<ProviderKey[]>(
-    () => presetOf(DEFAULT_MODE)?.providers ?? DEFAULT_SOLVERS,
+    () => presetOf(DEFAULT_MODE, DEFAULT_TIER)?.providers ?? DEFAULT_SOLVERS,
   );
   // The cross-check, run by itself once the solutions are in (3 October
   // 2026; until then it was started from the solutions only).
-  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(DEFAULT_MODE)?.autoCheck ?? false);
+  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(DEFAULT_MODE, DEFAULT_TIER)?.autoCheck ?? false);
   const [autoJudge, setAutoJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
   const [autoJudgeEffortPick, setAutoJudgeEffortPick] = useState<EffortKey>("high");
   /** The Custom settings, kept while a preset is picked, for when the user comes back. */
@@ -303,17 +320,26 @@ export function UploadForm({
 
   /** Fills in every setting from a preset - its own defaults for the rest. */
   function applyPreset(preset: Preset) {
-    setSelectedProviders(preset.providers.filter((provider) => isAvailable(provider, DEFAULT_VARIANTS[provider])));
+    const presetVariants = { ...DEFAULT_VARIANTS, ...preset.variants };
+    setSelectedProviders(preset.providers.filter((provider) => isAvailable(provider, presetVariants[provider])));
     setEffort(preset.effort);
     setVerifyEnabled(preset.verify);
-    setInterpreterA(DEFAULT_INTERPRETERS[0]);
-    setInterpreterB(DEFAULT_INTERPRETERS[1]);
-    setVerifier(DEFAULT_VERIFIER);
+    setInterpreterA(preset.readers?.[0] ?? DEFAULT_INTERPRETERS[0]);
+    setInterpreterB(preset.readers?.[1] ?? DEFAULT_INTERPRETERS[1]);
+    setVerifier(preset.reconciler ?? DEFAULT_VERIFIER);
     setPassEffortPicks(PASS_DEFAULT_EFFORT);
-    setVariants(DEFAULT_VARIANTS);
+    setVariants(presetVariants);
     setAutoCheckEnabled(preset.autoCheck);
-    setAutoJudge(DEFAULT_JUDGE);
+    setAutoJudge(preset.judge ?? DEFAULT_JUDGE);
     setAutoJudgeEffortPick("high");
+  }
+
+  /** Smart or Expert: the preset on screen is filled in again with that tier's models. */
+  function chooseTier(next: Tier) {
+    if (next === tier) return;
+    setTier(next);
+    const preset = presetOf(mode, next);
+    if (preset) applyPreset(preset);
   }
 
   /**
@@ -336,7 +362,7 @@ export function UploadForm({
         judgeEffort: autoJudgeEffortPick,
       };
     }
-    const preset = presetOf(next);
+    const preset = presetOf(next, tier);
     if (preset) {
       applyPreset(preset);
     } else if (!fromPreset && customSnapshot.current) {
@@ -583,6 +609,7 @@ export function UploadForm({
         selectedProviders.filter((key) => variants[key]).map((key) => [key, variants[key]]),
       ),
       autoCheck: autoCheckOn ? { judge: autoJudge, effort: autoJudgeEffort } : null,
+      crossCheckJudge: autoJudge,
     });
   }
 
@@ -925,7 +952,41 @@ export function UploadForm({
             </button>
           ))}
         </div>
+        {mode !== "custom" ? (
+          // Smart or Expert: which models the preset runs (16 October 2026).
+          <div className="mt-2 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Which models?">
+            {TIERS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                role="radio"
+                aria-checked={tier === option.key}
+                onClick={() => chooseTier(option.key)}
+                className={`rounded-cs border-2 px-2 py-1.5 text-center text-sm transition ${
+                  tier === option.key
+                    ? "border-cs-accent bg-cs-muted font-semibold text-cs-accent"
+                    : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
+                }`}
+              >
+                {option.chinese} <span className="text-xs font-normal">{option.title}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <p className="mt-2 text-xs text-cs-ink-3">{MODES.find((option) => option.key === mode)?.blurb}</p>
+        {mode !== "custom" ? (
+          <p className="mt-1 text-xs text-cs-ink-3">
+            {TIERS.find((option) => option.key === tier)?.blurb}
+            {tier === "expert" ? (
+              // The credit badges' fixed orange (CLAUDE.md).
+              <span className="mt-1 flex items-start gap-1 font-semibold text-[#b35c1e]">
+                <Flame className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Uses more credit and takes longer: Gemini 4 Argon, Kimi K3 and Grok 4.7 have small monthly
+                allowances; the cross-check uses Claude Opus. · 用多啲額度、慢啲。
+              </span>
+            ) : null}
+          </p>
+        ) : null}
         {mode !== "custom" ? (
           // What the preset will run, stage by stage with the models' logos,
           // and the way into the details.
@@ -936,6 +997,7 @@ export function UploadForm({
               solvers={selectedProviders.map((key) => ({ provider: key, variant: variants[key] }))}
               effortLabel={EFFORT_OPTIONS.find((option) => option.key === effort)?.label ?? effort}
               judge={autoCheckOn ? autoJudge : null}
+              tapJudge={autoJudge}
             />
             <button
               type="button"
