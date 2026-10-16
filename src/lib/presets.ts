@@ -33,12 +33,13 @@ export type Preset = {
   readers?: [ModelChoice, ModelChoice];
   reconciler?: ModelChoice;
   /**
-   * The default judge cross-checks the solutions once they are in. Off in
-   * both presets since 3 October 2026 (the owner's call): the cross-check
-   * runs once, when the student taps it - before the answers are in too.
+   * The judge cross-checks the solutions once they are all in. On in Careful
+   * since 16 October 2026 (the owner's call; off in both presets from 3
+   * October until then); off in Quick, where it runs once, when the student
+   * taps it - before the answers are in too.
    */
   autoCheck: boolean;
-  /** Who that tap sends the cross-check to; DEFAULT_JUDGE when unset. */
+  /** Who the cross-check goes to, by itself or on a tap; DEFAULT_JUDGE when unset. */
   judge?: ModelChoice;
 };
 
@@ -52,24 +53,25 @@ export const EXPERT_JUDGE: ModelChoice = { provider: "claude", variant: "opus" }
  * (about 490, 1,060 and 845 requests), and Grok is slow (236 s on the pipe
  * bifurcation; once nothing for 280 s).
  */
-const EXPERT_SOLVERS: Pick<Preset, "providers" | "variants" | "effort" | "autoCheck" | "judge"> = {
+const EXPERT_SOLVERS: Pick<Preset, "providers" | "variants" | "effort" | "judge"> = {
   providers: ["kimi", "gemini", "grok"],
   variants: { kimi: "k3", gemini: "argon" },
   effort: "high",
-  autoCheck: false,
   judge: EXPERT_JUDGE,
 };
 
 export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>> = {
   careful: {
     // The owner's default solvers, the reading checked by the default readers
-    // and reconciler first; the cross-check (ChatGPT at high, the most
-    // reliable judge measured - AGENTS.md) when the student asks for it.
-    smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: false },
-    // Grok 4.7 and Gemini 4 Argon read, Kimi K3 reconciles.
+    // and reconciler first, and the cross-check (ChatGPT at high, the most
+    // reliable judge measured - AGENTS.md) once the answers are in: 7 calls.
+    smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: true, autoCheck: true },
+    // Grok 4.7 and Gemini 4 Argon read, Kimi K3 reconciles, Claude Opus
+    // cross-checks once the answers are in.
     expert: {
       ...EXPERT_SOLVERS,
       verify: true,
+      autoCheck: true,
       readers: [{ provider: "grok" }, { provider: "gemini", variant: "argon" }],
       reconciler: { provider: "kimi", variant: "k3" },
     },
@@ -79,7 +81,7 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>>
     // Go subscription, and Gemini (3.8 Flash) since 4 October 2026 (the
     // owner's call - a billed Flash call on the Vertex AI prepaid credit).
     smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: false, autoCheck: false },
-    expert: { ...EXPERT_SOLVERS, verify: false },
+    expert: { ...EXPERT_SOLVERS, verify: false, autoCheck: false },
   },
 };
 
@@ -106,7 +108,7 @@ export const MODES: Array<{ key: SolveMode; title: string; chinese: string; blur
     key: "careful",
     title: "Careful",
     chinese: "穩陣",
-    blurb: "Checks the reading of the question first, then three models solve. Tap Cross-check to have a judge grade the answers.",
+    blurb: "Checks the reading of the question first, then three models solve, and a judge grades their answers once they are all in.",
   },
   {
     key: "quick",
