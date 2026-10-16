@@ -18,7 +18,7 @@ import { filesToImageDataUrls } from "@/lib/attachments";
 import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type JourneyStep } from "@/lib/journey";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
-import { loadQuestion, questionFiles } from "@/lib/question-store";
+import { loadQuestion, questionFiles, questionFromBody } from "@/lib/question-store";
 import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
@@ -415,6 +415,28 @@ export default function CivilAnswerAppPage() {
     return true;
   }
 
+  /**
+   * Solve again for the question on the page (17 October 2026, the owner's
+   * request): the form opens at How should it solve?, with the question's
+   * files still in it - or, after a reload, refilled from the run's body.
+   * Its answers stay on the page until the student solves.
+   */
+  function solveThisAgain(hasFiles: boolean) {
+    if (!hasFiles) {
+      const body = getBody();
+      if (!body?.images.length) return;
+      const question = questionFromBody(runId ?? Date.now(), body);
+      setPrefill({
+        id: Date.now(),
+        files: questionFiles(question),
+        notes: question.notes,
+        ...(question.reference ? { reference: question.reference } : {}),
+      });
+    }
+    setFormCollapsed(false);
+    scrollToStepWhenReady(SOLVE_MODE_ID);
+  }
+
   function expandForm() {
     setFormCollapsed(false);
     scrollToStepWhenReady(STEP_IDS.upload);
@@ -479,6 +501,7 @@ export default function CivilAnswerAppPage() {
           onNewQuestion={newQuestion}
           onPlanChange={onPlanChange}
           prefill={prefill}
+          onSolveAgain={solveThisAgain}
           footer={
             notifyAvailable ? (
               <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 text-xs text-cs-ink-3">

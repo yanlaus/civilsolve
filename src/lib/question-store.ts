@@ -27,14 +27,19 @@ export type SavedQuestion = {
   reference?: SavedReference;
 };
 
-/** Keeps the question of the run saved at `savedAt`, then drops the oldest beyond the limit. */
-export async function saveQuestion(savedAt: number, body: SolveRequestBody): Promise<void> {
-  if (!body.images.length) return;
+/** The question a run was sent: its pages, notes and lecture notes, from its request body. */
+export function questionFromBody(savedAt: number, body: SolveRequestBody): SavedQuestion {
   const reference =
     body.referenceText || body.referenceImages?.length
       ? { referenceText: body.referenceText ?? "", referenceImages: body.referenceImages ?? [] }
       : undefined;
-  const question: SavedQuestion = { savedAt, images: body.images, notes: body.notes, ...(reference ? { reference } : {}) };
+  return { savedAt, images: body.images, notes: body.notes, ...(reference ? { reference } : {}) };
+}
+
+/** Keeps the question of the run saved at `savedAt`, then drops the oldest beyond the limit. */
+export async function saveQuestion(savedAt: number, body: SolveRequestBody): Promise<void> {
+  if (!body.images.length) return;
+  const question = questionFromBody(savedAt, body);
   try {
     await inStore("questions", "readwrite", (store) => store.put(question));
     const keys = await inStore<IDBValidKey[]>("questions", "readonly", (store) => store.getAllKeys());
