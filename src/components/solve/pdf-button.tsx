@@ -16,8 +16,10 @@
 //   opens the sheet only straight from a tap - not after waiting for the
 //   server - so the page keeps the PDF it fetched and shares it the moment
 //   the button is tapped; when the tap that started it has expired by the
-//   time the PDF is made, the page asks for one more. A browser that cannot
-//   share files sends WhatsApp a link to the PDF instead;
+//   time the PDF is made, the page asks for one more. On an iPad it always
+//   asks (17 October 2026): its sheet is a popover, and opened after the
+//   wait it sat in the top left corner, mostly off screen. A browser that
+//   cannot share files sends WhatsApp a link to the PDF instead;
 // - on a computer (5 October 2026) the PDF is downloaded, then WhatsApp Web
 //   opens in a new tab for the student to attach it to a chat. A browser
 //   blocks a tab opened long after the click, so when making the PDF took
@@ -76,6 +78,17 @@ function isMobileDevice() {
   const hints = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
   if (typeof hints?.mobile === "boolean") return hints.mobile;
   return /Mobile/i.test(agent);
+}
+
+/**
+ * An iPad, where the share sheet is a popover pointing at what opened it.
+ * Opened once the PDF had been fetched, not straight from a tap, it came up
+ * in the top left corner with most of it off screen (the owner, 17 October
+ * 2026) - so on an iPad it opens only from a tap.
+ */
+function isTablet() {
+  const agent = navigator.userAgent;
+  return /iPad/.test(agent) || (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1);
 }
 
 /** The file name the server gave the PDF. */
@@ -142,6 +155,12 @@ const TAP_AGAIN: Nudge = {
   strong: true,
 };
 
+/** On an iPad, every time: the sheet opens from the tap, beside the button. */
+const TAP_TO_SHARE: Nudge = {
+  text: `The PDF is ready - tap ${SEND_LABEL} to share it, then pick WhatsApp.`,
+  strong: true,
+};
+
 /**
  * After the download, on a computer. The page cannot tell whether the
  * browser let the download through, so it says where to get it again.
@@ -171,6 +190,7 @@ export function PdfButton({
   const [state, setState] = useState<PdfState>({ status: "idle" });
   const now = useNow(state.status === "working");
   const mobile = useMemo(isMobileDevice, []);
+  const tablet = useMemo(isTablet, []);
   const size = small ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
   const icon = small ? "h-3.5 w-3.5" : "h-4 w-4";
 
@@ -199,6 +219,11 @@ export function PdfButton({
         }
         if (!canShareFile(file)) {
           setState({ ...ready, nudge: { text: "This browser cannot attach the file, so WhatsApp gets a link to the PDF." } });
+          return;
+        }
+        // On an iPad the sheet opens only from a tap (isTablet).
+        if (tablet) {
+          setState({ ...ready, nudge: TAP_TO_SHARE });
           return;
         }
         // Quick enough (a PDF made before), the tap still counts and the
