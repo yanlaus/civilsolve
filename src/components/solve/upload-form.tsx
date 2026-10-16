@@ -103,13 +103,15 @@ export type SolveSubmission = {
 };
 
 /**
- * A question from the history to solve again (16 October 2026): its pages,
- * the student's notes and its lecture notes fill the form, replacing what
- * was there, and the student picks how to solve it. A new `id` refills it.
+ * A question to solve again (16 October 2026): its pages, the student's
+ * notes and its lecture notes fill the form, replacing what was there, and
+ * the student picks how to solve it. A new `id` refills it. From the History
+ * it carries the entry's title; without one it is the question on the page
+ * (17 October 2026), whose files the form no longer had after a reload.
  */
 export type FormPrefill = {
   id: number;
-  title: string;
+  title?: string;
   files: File[];
   notes: string;
   reference?: SavedReference;
@@ -179,6 +181,7 @@ export function UploadForm({
   onNewQuestion,
   onPlanChange,
   prefill = null,
+  onSolveAgain,
 }: {
   /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
@@ -211,14 +214,20 @@ export function UploadForm({
   onPlanChange?: (plan: { verify: boolean; autoCheck: boolean }) => void;
   /** A question from the history, to solve again. */
   prefill?: FormPrefill | null;
+  /**
+   * Solve again, on the folded line: the page opens the form at How should
+   * it solve? - refilling it from the run's body when `hasFiles` is false.
+   */
+  onSolveAgain?: (hasFiles: boolean) => void;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
-  // A saved question's lecture notes, sent again as they were, and where the
-  // question came from (Solve again in the History).
+  // A saved question's lecture notes, sent again as they were, and - while
+  // the student picks how to solve it again - where it came from: a History
+  // entry's title, or none for the question on the page.
   const [savedReference, setSavedReference] = useState<SavedReference | null>(null);
-  const [prefilledFrom, setPrefilledFrom] = useState("");
+  const [again, setAgain] = useState<{ title?: string } | null>(null);
   /** The folded line's pages, open full screen (17 October 2026). */
   const [viewing, setViewing] = useState(false);
   const prefillId = prefill?.id;
@@ -239,7 +248,7 @@ export function UploadForm({
     setNotes(prefill.notes);
     setLectureFiles([]);
     setSavedReference(prefill.reference ?? null);
-    setPrefilledFrom(prefill.title);
+    setAgain({ title: prefill.title });
     setFileError("");
     // Only a new prefill refills the form; the student's edits after it stay.
   }, [prefillId]);
@@ -602,6 +611,7 @@ export function UploadForm({
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
+    setAgain(null);
     onSolve({
       uploads: pageSelections.map((entry) => ({ file: entry.item.file, pages: entry.chosen })),
       lectureFiles: lectureFiles.map((item) => item.file),
@@ -636,7 +646,7 @@ export function UploadForm({
     setNotes("");
     setFileError("");
     setSavedReference(null);
-    setPrefilledFrom("");
+    setAgain(null);
     onNewQuestion?.();
   }
 
@@ -719,6 +729,21 @@ export function UploadForm({
                 Enlarge · 放大
               </button>
             ) : null}
+            {!busy && onSolveAgain && (queuedFiles.length || pageImages.length) ? (
+              // The question on the page, solved again another way (the owner,
+              // 17 October 2026) - as from the History, without going there.
+              <button
+                type="button"
+                onClick={() => {
+                  if (queuedFiles.length) setAgain({});
+                  onSolveAgain(queuedFiles.length > 0);
+                }}
+                className="cs-primary inline-flex items-center gap-1 rounded-cs bg-cs-accent px-3 py-1.5 text-xs font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover"
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                Solve again · 再解一次
+              </button>
+            ) : null}
             {!busy ? (
               <button
                 type="button"
@@ -767,13 +792,20 @@ export function UploadForm({
           <Upload className="h-4 w-4 text-cs-accent" />
           Upload Assignment Materials
         </p>
-        {prefilledFrom && queuedFiles.length ? (
+        {again && queuedFiles.length ? (
           <p className="mb-3 flex items-start gap-2 rounded-cs border border-cs-accent bg-cs-muted px-3 py-2 text-sm text-cs-ink-2">
             <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
-            <span>
-              From your history: <span className="font-semibold">{prefilledFrom}</span>. Pick how to solve it
-              again below, then Solve. · 由紀錄載入，喺下面揀解題模式再解一次。
-            </span>
+            {again.title ? (
+              <span>
+                From your history: <span className="font-semibold">{again.title}</span>. Pick how to solve it
+                again below, then Solve. · 由紀錄載入，喺下面揀解題模式再解一次。
+              </span>
+            ) : (
+              <span>
+                Solving this question again: pick how to solve it below, then Solve. The answers above stay
+                until you do. · 再解同一條題目：喺下面揀解題模式。
+              </span>
+            )}
           </p>
         ) : null}
 
