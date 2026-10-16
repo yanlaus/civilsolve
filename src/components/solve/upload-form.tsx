@@ -219,18 +219,6 @@ export function UploadForm({
   const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => presetOf(DEFAULT_MODE, DEFAULT_TIER)?.autoCheck ?? false);
   const [autoJudge, setAutoJudge] = useState<ModelChoice>(DEFAULT_JUDGE);
   const [autoJudgeEffortPick, setAutoJudgeEffortPick] = useState<EffortKey>("high");
-  /** The Custom settings, kept while a preset is picked, for when the user comes back. */
-  const customSnapshot = useRef<{
-    providers: ProviderKey[];
-    effort: EffortKey;
-    verify: boolean;
-    interpreters: [ModelChoice, ModelChoice, ModelChoice];
-    passEfforts: Record<PassRole, EffortKey>;
-    variants: Partial<Record<ProviderKey, ModelVariant>>;
-    autoCheck: boolean;
-    judge: ModelChoice;
-    judgeEffort: EffortKey;
-  } | null>(null);
   const [fileError, setFileError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -343,42 +331,15 @@ export function UploadForm({
   }
 
   /**
-   * Picks a mode. A preset fills in the settings; Custom brings back the
-   * user's own settings from before they picked a preset, or - with
-   * `fromPreset`, the "Customise" link - starts from the preset's.
+   * Picks a mode. A preset fills in the settings; Custom starts from the
+   * settings on screen - the preset picked last, its models included (the
+   * owner, 16 October 2026: until then Custom brought back the student's
+   * own earlier Custom settings, so the models changed on the way in).
    */
-  function chooseMode(next: SolveMode, fromPreset = false) {
-    if (next === mode && !fromPreset) return;
-    if (mode === "custom" && next !== "custom") {
-      customSnapshot.current = {
-        providers: selectedProviders,
-        effort,
-        verify: verifyEnabled,
-        interpreters: [interpreterA, interpreterB, verifier],
-        passEfforts: passEffortPicks,
-        variants,
-        autoCheck: autoCheckEnabled,
-        judge: autoJudge,
-        judgeEffort: autoJudgeEffortPick,
-      };
-    }
+  function chooseMode(next: SolveMode) {
+    if (next === mode) return;
     const preset = presetOf(next, tier);
-    if (preset) {
-      applyPreset(preset);
-    } else if (!fromPreset && customSnapshot.current) {
-      const saved = customSnapshot.current;
-      setSelectedProviders(saved.providers.filter((provider) => isAvailable(provider, saved.variants[provider])));
-      setEffort(saved.effort);
-      setVerifyEnabled(saved.verify);
-      setInterpreterA(saved.interpreters[0]);
-      setInterpreterB(saved.interpreters[1]);
-      setVerifier(saved.interpreters[2]);
-      setPassEffortPicks(saved.passEfforts);
-      setVariants(saved.variants);
-      setAutoCheckEnabled(saved.autoCheck);
-      setAutoJudge(saved.judge);
-      setAutoJudgeEffortPick(saved.judgeEffort);
-    }
+    if (preset) applyPreset(preset);
     setMode(next);
   }
 
@@ -1001,7 +962,7 @@ export function UploadForm({
             />
             <button
               type="button"
-              onClick={() => chooseMode("custom", true)}
+              onClick={() => chooseMode("custom")}
               className="text-sm font-semibold text-cs-accent underline-offset-2 hover:underline"
             >
               Customise · 自訂設定
