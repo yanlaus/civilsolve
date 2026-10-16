@@ -1,15 +1,18 @@
 // This app's IndexedDB in the browser - one database, so one version:
 // - "uploads" (version 1): the last run's request body (upload-store.ts);
 // - "history" (version 2, 3 October 2026): the questions solved, with their
-//   answers as text (history-store.ts), keyed by the run's savedAt.
+//   answers as text (history-store.ts), keyed by the run's savedAt;
+// - "questions" (version 3, 16 October 2026): the question behind each of
+//   the latest history entries - its pages, notes and lecture notes - so it
+//   can be solved again (question-store.ts), keyed by the same savedAt.
 // Nothing here ever leaves the device. Each operation opens and closes its
 // own connection, so a newer version in another tab is never blocked for
 // long.
 
 const DB_NAME = "civilsolve";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
-export type StoreName = "uploads" | "history";
+export type StoreName = "uploads" | "history" | "questions";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -18,6 +21,7 @@ function openDb(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains("uploads")) db.createObjectStore("uploads");
       if (!db.objectStoreNames.contains("history")) db.createObjectStore("history", { keyPath: "savedAt" });
+      if (!db.objectStoreNames.contains("questions")) db.createObjectStore("questions", { keyPath: "savedAt" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
