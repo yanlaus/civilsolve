@@ -18,9 +18,11 @@ import {
   SlidersHorizontal,
   Upload,
   X,
+  ZoomIn,
 } from "lucide-react";
 import type { InterpretConfig } from "@/hooks/use-interpret";
 import { PresetFlow } from "./preset-flow";
+import { PageViewer } from "./question-images";
 import { ProviderLogo } from "./provider-logo";
 import { EFFORT_KEYS, type EffortKey } from "../../../shared/prompt";
 import {
@@ -61,6 +63,7 @@ import {
   type Tier,
 } from "@/lib/presets";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
+import type { SavedReference } from "@/lib/question-store";
 import { effortBand as bandForStatus } from "@/lib/effort-band";
 
 type QueuedFile = {
@@ -95,7 +98,25 @@ export type SolveSubmission = {
    * preset's judge (Expert: Claude Opus), or the one picked in Custom.
    */
   crossCheckJudge: ModelChoice;
+  /** A saved question's lecture notes, as they were sent; sent again with any added. */
+  savedReference?: SavedReference;
 };
+
+/**
+ * A question from the history to solve again (16 October 2026): its pages,
+ * the student's notes and its lecture notes fill the form, replacing what
+ * was there, and the student picks how to solve it. A new `id` refills it.
+ */
+export type FormPrefill = {
+  id: number;
+  title: string;
+  files: File[];
+  notes: string;
+  reference?: SavedReference;
+};
+
+/** The "How should it solve?" section, where Solve again lands. */
+export const SOLVE_MODE_ID = "how-should-it-solve";
 
 /** Each provider's first model (Gemini: Flash). */
 const DEFAULT_VARIANTS: Partial<Record<ProviderKey, ModelVariant>> = Object.fromEntries(
@@ -157,6 +178,7 @@ export function UploadForm({
   onCollapse,
   onNewQuestion,
   onPlanChange,
+  prefill = null,
 }: {
   /** What GET /api/health reported (hooks/use-health.ts); null until it answers. */
   providerStatus: Record<ProviderKey, ProviderStatus> | null;
@@ -187,10 +209,40 @@ export function UploadForm({
   onNewQuestion?: () => void;
   /** What the form will run - the reading check and the cross-check - for the step bar. */
   onPlanChange?: (plan: { verify: boolean; autoCheck: boolean }) => void;
+  /** A question from the history, to solve again. */
+  prefill?: FormPrefill | null;
 }) {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
+  // A saved question's lecture notes, sent again as they were, and where the
+  // question came from (Solve again in the History).
+  const [savedReference, setSavedReference] = useState<SavedReference | null>(null);
+  const [prefilledFrom, setPrefilledFrom] = useState("");
+  /** The folded line's pages, open full screen (17 October 2026). */
+  const [viewing, setViewing] = useState(false);
+  const prefillId = prefill?.id;
+  useEffect(() => {
+    if (!prefill) return;
+    setQueuedFiles((current) => {
+      for (const item of current) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return prefill.files.map((file, index) => {
+        let previewUrl: string | undefined;
+        try {
+          previewUrl = URL.createObjectURL(file);
+        } catch {
+          // Preview is best-effort.
+        }
+        return { id: `${prefill.id}-${index}-${file.name}`, file, previewUrl };
+      });
+    });
+    setNotes(prefill.notes);
+    setLectureFiles([]);
+    setSavedReference(prefill.reference ?? null);
+    setPrefilledFrom(prefill.title);
+    setFileError("");
+    // Only a new prefill refills the form; the student's edits after it stay.
+  }, [prefillId]);
   // Careful, Quick or Custom (lib/presets.ts): a preset fills in the settings
   // below and hides them; Custom shows them all.
   const [mode, setMode] = useState<SolveMode>(DEFAULT_MODE);
@@ -571,6 +623,7 @@ export function UploadForm({
       ),
       autoCheck: autoCheckOn ? { judge: autoJudge, effort: autoJudgeEffort } : null,
       crossCheckJudge: autoJudge,
+      ...(savedReference ? { savedReference } : {}),
     });
   }
 
@@ -582,6 +635,8 @@ export function UploadForm({
     setQueuedFiles([]);
     setNotes("");
     setFileError("");
+    setSavedReference(null);
+    setPrefilledFrom("");
     onNewQuestion?.();
   }
 
@@ -595,22 +650,35 @@ export function UploadForm({
     return (
       <div id={STEP_IDS.upload} tabIndex={-1} className="scroll-mt-28 space-y-3 outline-none sm:scroll-mt-20 print:hidden">
         <div className="cs-panel flex flex-wrap items-center gap-3 rounded-cs-lg border border-cs-line-soft bg-cs-surface px-4 py-3 shadow-[0_1px_3px_var(--cs-shadow)]">
-          <div className="flex shrink-0 items-center -space-x-4">
-            {pageImages.length ? (
-              pageImages.slice(0, 3).map((src, index) => (
-                <img
-                  key={index}
-                  src={src}
-                  alt={index === 0 ? "The question's first page" : ""}
-                  className="h-12 w-10 rounded border border-cs-line bg-white object-cover object-top shadow-[0_1px_3px_var(--cs-shadow)]"
-                />
-              ))
-            ) : (
-              <span className="flex h-12 w-10 items-center justify-center rounded border border-cs-line bg-cs-muted text-cs-ink-3">
-                <FileImage className="h-4 w-4" aria-hidden="true" />
+          {pageImages.length ? (
+            // The pages open full screen, to be enlarged (the owner, 17 October 2026).
+            <button
+              type="button"
+              onClick={() => setViewing(true)}
+              className="group relative shrink-0 rounded"
+              title="Open the question full screen · 放大睇題目"
+              aria-label="Enlarge the question"
+            >
+              {/* The pages alone in the overlap, or the badge would count as one. */}
+              <span className="flex items-center -space-x-4">
+                {pageImages.slice(0, 3).map((src, index) => (
+                  <img
+                    key={index}
+                    src={src}
+                    alt={index === 0 ? "The question's first page" : ""}
+                    className="h-12 w-10 rounded border border-cs-line bg-white object-cover object-top shadow-[0_1px_3px_var(--cs-shadow)] transition group-hover:border-cs-accent"
+                  />
+                ))}
               </span>
-            )}
-          </div>
+              <span className="absolute -bottom-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-cs-accent text-cs-on-accent shadow-[0_1px_3px_var(--cs-shadow)]">
+                <ZoomIn className="h-3 w-3" aria-hidden="true" />
+              </span>
+            </button>
+          ) : (
+            <span className="flex h-12 w-10 shrink-0 items-center justify-center rounded border border-cs-line bg-cs-muted text-cs-ink-3">
+              <FileImage className="h-4 w-4" aria-hidden="true" />
+            </span>
+          )}
           <div className="min-w-[11rem] flex-1">
             <p className="text-sm font-semibold text-cs-ink">Your question · 你嘅題目</p>
             <p className="truncate text-xs text-cs-ink-3">
@@ -619,7 +687,8 @@ export function UploadForm({
               {notes.trim() ? ` · "${notes.trim()}"` : ""}
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          {/* Wraps on a phone: three buttons do not fit one line there. */}
+          <div className="flex max-w-full flex-wrap gap-2">
             {solving ? (
               <button
                 type="button"
@@ -640,6 +709,16 @@ export function UploadForm({
                 Edit · 修改
               </button>
             ) : null}
+            {pageImages.length ? (
+              <button
+                type="button"
+                onClick={() => setViewing(true)}
+                className="inline-flex items-center gap-1 rounded-cs border border-cs-line px-3 py-1.5 text-xs font-semibold text-cs-ink-2 transition hover:border-cs-accent hover:text-cs-accent"
+              >
+                <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
+                Enlarge · 放大
+              </button>
+            ) : null}
             {!busy ? (
               <button
                 type="button"
@@ -652,6 +731,7 @@ export function UploadForm({
             ) : null}
           </div>
         </div>
+        {viewing && pageImages.length ? <PageViewer images={pageImages} onClose={() => setViewing(false)} /> : null}
         {bannerError ? (
           <div className="rounded-cs border border-[#f0c1bc] bg-[rgba(192,57,43,0.08)] px-4 py-3 text-sm text-cs-danger">
             {bannerError}
@@ -687,6 +767,15 @@ export function UploadForm({
           <Upload className="h-4 w-4 text-cs-accent" />
           Upload Assignment Materials
         </p>
+        {prefilledFrom && queuedFiles.length ? (
+          <p className="mb-3 flex items-start gap-2 rounded-cs border border-cs-accent bg-cs-muted px-3 py-2 text-sm text-cs-ink-2">
+            <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-cs-accent" aria-hidden="true" />
+            <span>
+              From your history: <span className="font-semibold">{prefilledFrom}</span>. Pick how to solve it
+              again below, then Solve. · 由紀錄載入，喺下面揀解題模式再解一次。
+            </span>
+          </p>
+        ) : null}
 
         <label
           className={`cs-panel relative block cursor-pointer overflow-hidden rounded-cs-lg border-2 border-dashed bg-cs-surface px-6 py-12 text-center shadow-[0_1px_3px_var(--cs-shadow)] transition ${
@@ -886,9 +975,31 @@ export function UploadForm({
             ))}
           </ul>
         ) : null}
+        {savedReference ? (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-cs border border-cs-line-soft bg-cs-surface px-3 py-2 text-sm">
+            <span className="flex min-w-0 items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0 text-cs-accent" />
+              <span className="text-cs-ink-2">
+                Lecture notes from the saved question
+                {savedReference.referenceImages.length
+                  ? ` · ${savedReference.referenceImages.length} page${savedReference.referenceImages.length === 1 ? "" : "s"}`
+                  : ""}
+                {savedReference.referenceText ? " · text" : ""} · 原本嘅溫習筆記
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setSavedReference(null)}
+              aria-label="Remove the saved lecture notes"
+              className="shrink-0 text-cs-ink-3 transition hover:text-cs-danger"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
       </section>
 
-      <section>
+      <section id={SOLVE_MODE_ID} tabIndex={-1} className="scroll-mt-28 outline-none sm:scroll-mt-20">
         <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
           <SlidersHorizontal className="h-4 w-4 text-cs-accent" />
           How should it solve?

@@ -3,12 +3,15 @@
 // every solver's solution as text, the verdict and the study notes - the
 // answers on the server are deleted after 24 hours, these are not. It never
 // leaves the device (AGENTS.md); "Delete" and "Clear all" in the history
-// remove it. At most MAX_ENTRIES, the oldest dropped first.
+// remove it. At most MAX_ENTRIES, the oldest dropped first. The question's
+// pages themselves are kept apart, for the latest entries only, so they can
+// be solved again (question-store.ts, since 16 October 2026).
 
 import type { StudyKind, StudyResult } from "../../shared/study";
 import type { ModelVariant, ProviderKey } from "../../shared/providers";
 import type { ProviderArtifact } from "../../shared/solution";
 import { inStore, updateRecord } from "./idb";
+import { clearQuestions, deleteQuestion } from "./question-store";
 
 export type HistorySolution = {
   artifact: ProviderArtifact;
@@ -53,7 +56,10 @@ export async function saveEntry(
     await updateRecord<HistoryEntry>("history", savedAt, merge);
     const keys = await inStore<IDBValidKey[]>("history", "readonly", (store) => store.getAllKeys());
     const excess = (keys as number[]).sort((a, b) => a - b).slice(0, Math.max(0, keys.length - MAX_ENTRIES));
-    for (const key of excess) await inStore("history", "readwrite", (store) => store.delete(key));
+    for (const key of excess) {
+      await inStore("history", "readwrite", (store) => store.delete(key));
+      await deleteQuestion(key);
+    }
   } catch {
     // The history is a convenience; the page works without it.
   }
@@ -75,6 +81,7 @@ export async function deleteEntry(savedAt: number): Promise<void> {
   } catch {
     // Nothing to delete.
   }
+  await deleteQuestion(savedAt);
 }
 
 export async function clearHistory(): Promise<void> {
@@ -83,6 +90,7 @@ export async function clearHistory(): Promise<void> {
   } catch {
     // Nothing to clear.
   }
+  await clearQuestions();
 }
 
 /** A small JPEG of a page, for the history's list: about 240 px on its longer side. */

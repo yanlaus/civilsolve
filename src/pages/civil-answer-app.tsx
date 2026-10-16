@@ -5,7 +5,7 @@ import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { JourneyBar, JumpButton } from "@/components/solve/journey-bar";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { UploadForm, type SolveSubmission } from "@/components/solve/upload-form";
+import { SOLVE_MODE_ID, UploadForm, type FormPrefill, type SolveSubmission } from "@/components/solve/upload-form";
 import { useAlign } from "@/hooks/use-align";
 import { useAsk } from "@/hooks/use-ask";
 import { useCompletionAlert } from "@/hooks/use-completion-alert";
@@ -18,12 +18,15 @@ import { filesToImageDataUrls } from "@/lib/attachments";
 import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type JourneyStep } from "@/lib/journey";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
+import { loadQuestion, questionFiles } from "@/lib/question-store";
 import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
 import {
   estimateBodyBytes,
   formatBytes,
   MAX_BODY_BYTES,
   MAX_IMAGES,
+  MAX_REFERENCE_IMAGES,
+  MAX_REFERENCE_TEXT,
   type SolveRequestBody,
 } from "../../shared/stream-protocol";
 
@@ -116,6 +119,7 @@ export default function CivilAnswerAppPage() {
     questionImages,
     notes: getBody()?.notes ?? "",
     pdfJobOf,
+    getBody,
   });
   // Set when the page came back with the last run's results - the jobs kept
   // running on the server while the page was closed or reloaded.
@@ -281,6 +285,7 @@ export default function CivilAnswerAppPage() {
     variants,
     autoCheck,
     crossCheckJudge,
+    savedReference,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
@@ -302,14 +307,22 @@ export default function CivilAnswerAppPage() {
         );
       }
 
-      let referenceText = "";
-      let referenceImages: string[] = [];
+      // A saved question's lecture notes go again as they were sent, ahead of
+      // any added this time, within the same limits.
+      let referenceText = savedReference?.referenceText ?? "";
+      let referenceImages: string[] = [...(savedReference?.referenceImages ?? [])];
       if (lectureFiles.length > 0) {
         setPrepStatus("Preparing lecture notes...");
         const payload = await lectureNotesToPayload(lectureFiles);
-        referenceText = payload.referenceText;
-        referenceImages = payload.referenceImages;
+        referenceText = [referenceText, payload.referenceText].filter(Boolean).join("\n\n");
+        referenceImages = [...referenceImages, ...payload.referenceImages];
       }
+      if (referenceImages.length > MAX_REFERENCE_IMAGES) {
+        throw new Error(
+          `Lecture notes are limited to ${MAX_REFERENCE_IMAGES} image pages, and these come to ${referenceImages.length}. Remove some, or the saved question's notes.`,
+        );
+      }
+      referenceText = referenceText.slice(0, MAX_REFERENCE_TEXT);
 
       const body: SolveRequestBody = {
         images,
@@ -382,6 +395,26 @@ export default function CivilAnswerAppPage() {
     window.scrollTo({ top: 0 });
   }
 
+  // Solve again (16 October 2026): a question from the History back in the
+  // form - its pages, notes and lecture notes - for the student to pick how to
+  // solve it; the run on the page is cleared as by New question.
+  const [prefill, setPrefill] = useState<FormPrefill | null>(null);
+  async function solveAgain(savedAt: number, title: string) {
+    const question = await loadQuestion(savedAt);
+    if (!question) return false;
+    setHistoryOpen(false);
+    newQuestion();
+    setPrefill({
+      id: Date.now(),
+      title,
+      files: questionFiles(question),
+      notes: question.notes,
+      ...(question.reference ? { reference: question.reference } : {}),
+    });
+    scrollToStepWhenReady(SOLVE_MODE_ID);
+    return true;
+  }
+
   function expandForm() {
     setFormCollapsed(false);
     scrollToStepWhenReady(STEP_IDS.upload);
@@ -403,7 +436,7 @@ export default function CivilAnswerAppPage() {
         </div>
         {historyOpen ? (
           <Suspense fallback={null}>
-            <HistoryDrawer onClose={() => setHistoryOpen(false)} />
+            <HistoryDrawer onClose={() => setHistoryOpen(false)} onSolveAgain={solveAgain} />
           </Suspense>
         ) : null}
         <header className="pb-9 pt-4 text-center print:hidden">
@@ -445,6 +478,7 @@ export default function CivilAnswerAppPage() {
           onCollapse={hasRun || pipeline.status === "review" ? () => setFormCollapsed(true) : undefined}
           onNewQuestion={newQuestion}
           onPlanChange={onPlanChange}
+          prefill={prefill}
           footer={
             notifyAvailable ? (
               <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 text-xs text-cs-ink-3">

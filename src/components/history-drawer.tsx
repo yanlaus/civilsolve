@@ -3,13 +3,17 @@
 // verdict and the study notes, kept as text after the server has deleted the
 // answers (lib/history-store.ts). Read-only; a kept answer's PDF link works
 // for good once the PDF was made, and within 24 hours of solving it can
-// still be made. Lazy-loaded with the math renderer.
+// still be made. Since 16 October 2026 one of the latest questions - their
+// pages are kept (lib/question-store.ts) - can be solved again: Solve again
+// puts it back in the form, to pick Careful, Quick or Custom. Lazy-loaded
+// with the math renderer.
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, ChevronDown, FileDown, History, Languages, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, FileDown, History, Languages, RotateCcw, Trash2, X } from "lucide-react";
 import { providerDisplayName, SOLUTION_ORDER, type ProviderKey } from "../../shared/providers";
 import { STUDY_KINDS, STUDY_TITLES } from "../../shared/study";
 import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib/history-store";
+import { MAX_SAVED_QUESTIONS, savedQuestionKeys } from "@/lib/question-store";
 import MathProse from "./solve/math-prose";
 import { ProviderLogo } from "./solve/provider-logo";
 import { SolutionArticle } from "./solve/solution-article";
@@ -54,7 +58,18 @@ function PdfLink({ jobId }: { jobId?: string }) {
   );
 }
 
-function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: () => void; onDelete: () => void }) {
+function EntryView({
+  entry,
+  onBack,
+  onDelete,
+  onSolveAgain,
+}: {
+  entry: HistoryEntry;
+  onBack: () => void;
+  onDelete: () => void;
+  /** Puts the question back in the form; absent when its pages are no longer kept. */
+  onSolveAgain?: () => void;
+}) {
   const keys = solvedBy(entry);
   const [active, setActive] = useState<ProviderKey | undefined>(keys[0]);
   const shown = active && entry.solutions[active] ? active : keys[0];
@@ -93,6 +108,22 @@ function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: (
           {entry.notes ? <div className="mt-1 text-xs text-cs-ink-3">Your notes: {entry.notes}</div> : null}
         </div>
       </div>
+
+      {onSolveAgain ? (
+        <button
+          type="button"
+          onClick={onSolveAgain}
+          className="cs-primary flex w-full items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2.5 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover sm:w-auto"
+        >
+          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+          Solve again · 再解一次
+        </button>
+      ) : (
+        <p className="text-xs text-cs-ink-3">
+          Its pages are no longer kept - only the latest {MAX_SAVED_QUESTIONS} questions can be solved again. ·
+          呢條題目嘅原圖已經冇保留。
+        </p>
+      )}
 
       {entry.interpretation ? (
         <details className="group rounded-cs border border-cs-line-soft bg-cs-surface">
@@ -198,10 +229,23 @@ function EntryView({ entry, onBack, onDelete }: { entry: HistoryEntry; onBack: (
   );
 }
 
-export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
+export default function HistoryDrawer({
+  onClose,
+  onSolveAgain,
+}: {
+  onClose: () => void;
+  /** Puts a kept question back in the form; false when its pages could not be read. */
+  onSolveAgain?: (savedAt: number, title: string) => Promise<boolean>;
+}) {
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
-  const refresh = () => listEntries().then(setEntries);
+  /** The entries whose pages are kept, so they can be solved again. */
+  const [solvable, setSolvable] = useState<Set<number>>(new Set());
+  const refresh = () =>
+    Promise.all([listEntries(), savedQuestionKeys()]).then(([list, keys]) => {
+      setEntries(list);
+      setSolvable(keys);
+    });
 
   useEffect(() => {
     void refresh();
@@ -251,7 +295,19 @@ export default function HistoryDrawer({ onClose }: { onClose: () => void }) {
           {entries === null ? (
             <p className="text-sm text-cs-ink-3">Loading...</p>
           ) : opened ? (
-            <EntryView entry={opened} onBack={() => setOpenId(null)} onDelete={() => void remove(opened.savedAt)} />
+            <EntryView
+              entry={opened}
+              onBack={() => setOpenId(null)}
+              onDelete={() => void remove(opened.savedAt)}
+              onSolveAgain={
+                onSolveAgain && solvable.has(opened.savedAt)
+                  ? () =>
+                      void onSolveAgain(opened.savedAt, opened.title).then((ok) => {
+                        if (!ok) void refresh();
+                      })
+                  : undefined
+              }
+            />
           ) : entries.length ? (
             <>
               <ul className="space-y-2">

@@ -1,8 +1,10 @@
 // Writes the run on the page into the history (lib/history-store.ts) as its
 // answers come in: every finished solution, the verdict and the study notes,
-// with the question's first page as a thumbnail. A run picked back up after
-// a reload only ever adds to its entry - a solution still re-attaching does
-// not wipe the one already kept.
+// with the question's first page as a thumbnail - and the question itself,
+// its pages, notes and lecture notes, so it can be solved again
+// (question-store.ts). A run picked back up after a reload only ever adds to
+// its entry - a solution still re-attaching does not wipe the one already
+// kept.
 
 import { useEffect, useRef } from "react";
 import { PROVIDER_KEYS, SOLUTION_ORDER, type ProviderKey } from "../../shared/providers";
@@ -16,6 +18,8 @@ import type {
   StudyRuns,
 } from "@/hooks/use-solve";
 import { makeThumbnail, saveEntry, type HistoryEntry } from "@/lib/history-store";
+import { saveQuestion } from "@/lib/question-store";
+import type { SolveRequestBody } from "../../shared/stream-protocol";
 
 /** How long the page waits for more answers before writing (a burst of them writes once). */
 const WRITE_DELAY_MS = 1000;
@@ -30,6 +34,8 @@ type HistorySource = {
   questionImages: string[];
   notes: string;
   pdfJobOf: (target: PdfTarget) => string | null;
+  /** The run's request body - its pages, notes and lecture notes - kept to solve it again. */
+  getBody: () => SolveRequestBody | null;
 };
 
 /**
@@ -114,6 +120,8 @@ export function useHistory(source: HistorySource) {
   const latest = useRef(source);
   latest.current = source;
   const thumbnails = useRef(new Map<number, string | undefined>());
+  /** The runs whose question is kept already: once per run. */
+  const questionsKept = useRef(new Set<number>());
   const { runId } = source;
   const signature = finishedSignature(source);
 
@@ -125,6 +133,11 @@ export function useHistory(source: HistorySource) {
         thumbnails.current.set(runId, await makeThumbnail(images[0]));
       }
       await saveEntry(runId, entryOf(latest.current, runId, thumbnails.current.get(runId)));
+      const body = latest.current.getBody();
+      if (!questionsKept.current.has(runId) && body?.images.length) {
+        questionsKept.current.add(runId);
+        await saveQuestion(runId, body);
+      }
     }, WRITE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [runId, signature]);
