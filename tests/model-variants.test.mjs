@@ -18,8 +18,8 @@ const body = { images: [image], solution: "The support balances the load.", ques
 const route = (variant, config = env) => app.resolveRoute("claude", config, app.variantOverride("claude", variant, config));
 
 test("Muse replaces standalone Haiku in both presets and remains an alarm solver", () => {
-  assert.deepEqual(app.DEFAULT_SOLVERS, ["muse", "deepseek", "gemini"]);
-  for (const mode of ["quick", "careful"]) assert.deepEqual(app.PRESETS[mode].providers, app.DEFAULT_SOLVERS);
+  assert.deepEqual(app.DEFAULT_SOLVERS, ["muse", "gemini", "claude"]);
+  for (const mode of ["quick", "careful"]) assert.deepEqual(app.PRESETS[mode].smart.providers, app.DEFAULT_SOLVERS);
   assert.equal(app.DEFAULT_MODE, "quick");
   assert.equal(app.SOLVER_KEYS.length, 9);
   assert.ok(app.SOLVER_KEYS.includes("muse"));
@@ -37,7 +37,7 @@ test("all ChatGPT task kinds use alarm on OpenCode, while other channels keep HT
     assert.ok(built.params, `${kind}: ${built.error}`);
     const resolved = app.resolveRoute("chatgpt", env, built.params.routeOverride);
     assert.equal(resolved.channel, "opencode");
-    assert.equal(resolved.model, "gpt-5.6-luna");
+    assert.equal(resolved.model, "gpt-6-luna");
     assert.equal(resolved.startInAlarm, true);
   }
   assert.equal(app.resolveRoute("chatgpt", env, { channel: "poe" }).startInAlarm, undefined);
@@ -114,8 +114,35 @@ test("old Haiku runs and old unversioned Claude picks retain their original mode
   try { assert.deepEqual(app.loadRun(), saved); } finally { delete globalThis.window; }
 });
 
+test("China tier: its own solvers and readers, MiMo V2.6 Pro judging with DeepSeek behind it", () => {
+  for (const mode of ["quick", "careful"]) {
+    assert.deepEqual(app.PRESETS[mode].china.providers, ["deepseek", "minimax", "qwen"]);
+    assert.equal(app.choiceKey(app.PRESETS[mode].china.judge), "mimo:pro");
+  }
+  assert.equal(app.PRESETS.careful.china.autoCheck, true);
+  assert.equal(app.PRESETS.quick.china.autoCheck, false);
+  assert.deepEqual(app.PRESETS.careful.china.readers.map(app.choiceKey), ["glm", "minimax"]);
+  assert.equal(app.choiceKey(app.PRESETS.careful.china.reconciler), "deepseek");
+  assert.equal(app.choiceKey(app.JUDGE_FALLBACKS["mimo:pro"]), "deepseek");
+  // Tier-only: no card, no reader or judge pick; GLM never solves, Qwen does.
+  for (const key of ["qwen", "glm"]) {
+    assert.ok(!app.SOLVER_KEYS.includes(key));
+    assert.ok(!app.MODEL_CHOICES.some(c => c.provider === key));
+  }
+  assert.ok(app.buildTask("solve", "glm", body, env).error);
+  const qwen = app.buildTask("solve", "qwen", body, env);
+  assert.ok(qwen.params, qwen.error);
+  const qwenRoute = app.resolveRoute("qwen", env, qwen.params.routeOverride);
+  assert.equal(qwenRoute.dialect, "messages");
+  assert.equal(qwenRoute.model, "qwen3.7-plus");
+  assert.equal(app.resolveRoute("glm", env).model, "glm-5.3-flash");
+  const pro = app.resolveRoute("mimo", env, app.variantOverride("mimo", "pro", env));
+  assert.equal(pro.model, "mimo-v2.6-pro");
+  assert.equal(app.resolveRoute("mimo", env).model, "mimo-v2.6-flash");
+});
+
 test("Gemini keeps its Flash/Pro models and backup account behavior", () => {
-  assert.deepEqual(app.PROVIDER_VARIANTS.gemini.map(v => v.shortLabel), ["Flash", "Pro"]);
+  assert.deepEqual(app.PROVIDER_VARIANTS.gemini.map(v => v.shortLabel), ["Flash", "Pro", "4 Argon"]);
   const config = { GOOGLE_BACKUP_API_KEY: "fake-backup" };
   const pro = app.resolveRoute("gemini", config, app.variantOverride("gemini", "pro", config));
   assert.equal(pro.channel, "google-backup");

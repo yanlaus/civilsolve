@@ -2,17 +2,19 @@ import chatgpt from "@/assets/providers/chatgpt.svg";
 import claude from "@/assets/providers/claude.svg";
 import deepseek from "@/assets/providers/deepseek.svg";
 import gemini from "@/assets/providers/gemini.svg";
+import glm from "@/assets/providers/glm.svg";
 import grok from "@/assets/providers/grok.svg";
 import kimi from "@/assets/providers/kimi.svg";
 import mimo from "@/assets/providers/mimo.svg";
 import minimax from "@/assets/providers/minimax.svg";
 import muse from "@/assets/providers/muse.svg";
+import qwen from "@/assets/providers/qwen.svg";
 import type { ProviderKey } from "../../../shared/providers";
 
 // The vendors' own marks, from @lobehub/icons-static-svg 1.95.1 (MIT License,
 // Copyright (c) LobeHub); each logo is a trademark of its owner. ChatGPT wears
 // the OpenAI mark, MiMo Xiaomi MiMo's, and Muse Spark Meta's; Claude Haiku
-// shares Claude's. Kimi's K is black instead of the colour file's white,
+// shares Claude's; GLM wears Zhipu's and Qwen Qwen's (17 October 2026). Kimi's K is black instead of the colour file's white,
 // which is made for a dark tile.
 // Drawn as <img> so the gradient ids inside the files cannot clash.
 const LOGOS: Record<ProviderKey, string> = {
@@ -26,6 +28,8 @@ const LOGOS: Record<ProviderKey, string> = {
   mimo,
   minimax,
   muse,
+  qwen,
+  glm,
 };
 
 export function ProviderLogo({

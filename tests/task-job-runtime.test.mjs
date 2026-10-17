@@ -17,7 +17,7 @@ test(`real Workers runtime: ${provider} alarm delivers SSE, survives disconnect,
       calls++;
       assert.equal(new URL(request.url).hostname, "mock.invalid");
       const sent = await request.json();
-      assert.equal(sent.model, provider === "muse" ? "muse-spark-1.3-contributor" : "gpt-5.6-luna");
+      assert.equal(sent.model, provider === "muse" ? "muse-spark-1.3-contributor" : "gpt-6-luna");
       await new Promise(resolve => setTimeout(resolve, 150));
       return Response.json({ output_text: JSON.stringify({ answer: "The support balances the load." }) });
     },
