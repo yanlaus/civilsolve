@@ -29,6 +29,13 @@ export type SavedJudge = {
   /** Solution A, B, ... in order, and the solvers left out - for the verdict card. */
   solvers?: ProviderKey[];
   skipped?: ProviderKey[];
+  /**
+   * Set on a judge that took over from one that failed (JUDGE_FALLBACKS, 17
+   * October 2026): the failed judge's pick ("mimo:pro") - so it is not handed
+   * on again - and what the verdict card says about it.
+   */
+  fallbackFrom?: string;
+  fallbackNote?: string;
 };
 
 /** One kind of study notes: who writes it, its job, and what it was written from. */

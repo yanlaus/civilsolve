@@ -43,6 +43,7 @@ import {
   PROVIDER_VARIANTS,
   providerDisplayName,
   SOLVER_KEYS,
+  isSolverKey,
   type ModelChoice,
   type ModelVariant,
   type ProviderKey,
@@ -141,6 +142,15 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
+
+/**
+ * The reader, reconciler and judge picks, with `current` added when the lists
+ * leave it out: a China preset's GLM-5.3-Flash, say, carried into Custom.
+ */
+function choicesWith(current: ModelChoice, available: (choice: ModelChoice) => boolean) {
+  const listed = MODEL_CHOICES.filter(available);
+  return listed.some((choice) => choiceKey(choice) === choiceKey(current)) ? listed : [current, ...listed];
+}
 
 /** The interpretation pass's three models: first reader, second reader, reconciler. */
 type PassRole = "a" | "b" | "v";
@@ -604,7 +614,7 @@ export function UploadForm({
     setSelectedProviders((current) =>
       current.includes(provider)
         ? current.filter((key) => key !== provider)
-        : SOLVER_KEYS.filter((key) => key === provider || current.includes(key)),
+        : PROVIDER_KEYS.filter((key) => key === provider || current.includes(key)),
     );
   }
 
@@ -1058,7 +1068,7 @@ export function UploadForm({
         </div>
         {mode !== "custom" ? (
           // Smart or Expert: which models the preset runs (16 October 2026).
-          <div className="mt-2 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Which models?">
+          <div className="mt-2 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Which models?">
             {TIERS.map((option) => (
               <button
                 key={option.key}
@@ -1130,7 +1140,16 @@ export function UploadForm({
             </p>
             {/* Three by three - nine solvers - on every screen, at the owner's request. */}
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              {SOLVER_OPTIONS.map((provider) => {
+              {[
+                ...SOLVER_OPTIONS,
+                // A China preset's own solver (Qwen), shown while it is picked.
+                ...PROVIDER_OPTIONS.filter(
+                  (option) =>
+                    !SOLVER_KEYS.includes(option.key) &&
+                    isSolverKey(option.key) &&
+                    selectedProviders.includes(option.key),
+                ),
+              ].map((provider) => {
                 const variant = variants[provider.key];
                 const status = modelStatus(providerStatus?.[provider.key], variant);
                 const available = isAvailable(provider.key);
@@ -1345,7 +1364,7 @@ export function UploadForm({
                           }}
                           className={PASS_SELECT_CLASS}
                         >
-                          {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
+                          {choicesWith(role.value, (choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
                             <option key={choiceKey(choice)} value={choiceKey(choice)}>
                               {providerDisplayName(choice.provider, choice.variant)}
                             </option>
@@ -1424,7 +1443,7 @@ export function UploadForm({
                     }}
                     className={PASS_SELECT_CLASS}
                   >
-                    {MODEL_CHOICES.filter((choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
+                    {choicesWith(autoJudge, (choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
                       <option key={choiceKey(choice)} value={choiceKey(choice)}>
                         {providerDisplayName(choice.provider, choice.variant)}
                       </option>

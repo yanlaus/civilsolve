@@ -27,7 +27,9 @@ export type ProviderKey =
   | "minimax"
   | "kimi"
   | "muse"
-  | "haiku";
+  | "haiku"
+  | "qwen"
+  | "glm";
 
 /**
  * Every provider, in picker order - the order of the solver cards, the
@@ -50,6 +52,10 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   "grok",
   "claude",
   "haiku",
+  // The China tier's own (17 October 2026): no solver card, not in the
+  // reader and judge lists (TIER_ONLY_PROVIDERS).
+  "qwen",
+  "glm",
 ];
 
 /**
@@ -65,15 +71,27 @@ export function isProviderKey(value: string): value is ProviderKey {
   return (PROVIDER_KEYS as string[]).includes(value);
 }
 
-/** Providers offered only for reading and judging. None currently. */
-export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>();
+/**
+ * Providers that never solve: the worker refuses a solve for them. GLM-5.3-
+ * Flash since 17 October 2026 - the China tier's first reader, which got the
+ * pipe bifurcation right once in three solves.
+ */
+export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["glm"]);
 
 /** Accepted for saved runs and retries, but no longer offered as a separate pick. */
 export const LEGACY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["haiku"]);
 
+/**
+ * Providers only the China tier runs (17 October 2026, the owner's call):
+ * Qwen3.7 Plus solves and GLM-5.3-Flash reads there, but neither has a
+ * solver card or a place in the reader and judge lists. Custom shows one
+ * only while a China preset left it picked.
+ */
+export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm"]);
+
 /** The solver cards, in picker order: every provider that is not review-only. */
 export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(
-  (key) => !REVIEW_ONLY_PROVIDERS.has(key) && !LEGACY_PROVIDERS.has(key),
+  (key) => !REVIEW_ONLY_PROVIDERS.has(key) && !LEGACY_PROVIDERS.has(key) && !TIER_ONLY_PROVIDERS.has(key),
 );
 
 export function isSolverKey(value: string): value is ProviderKey {
@@ -91,6 +109,8 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   kimi: "Kimi",
   muse: "Muse Spark",
   haiku: "Claude Haiku",
+  qwen: "Qwen",
+  glm: "GLM",
 };
 
 /**
@@ -120,6 +140,12 @@ export const PROVIDER_VARIANTS: Partial<
   kimi: [
     { key: "k2.7", label: "K2.7 Code", shortLabel: "K2.7 Code" },
     { key: "k3", label: "K3", shortLabel: "K3" },
+  ],
+  // V2.6 Pro since 17 October 2026: the China tier's judge. It is also a pick
+  // on the MiMo card - right on the pipe bifurcation, but in 453 s.
+  mimo: [
+    { key: "flash", label: "V2.6 Flash", shortLabel: "Flash" },
+    { key: "pro", label: "V2.6 Pro", shortLabel: "Pro" },
   ],
 };
 
@@ -160,7 +186,9 @@ export function parseChoice(value: string): ModelChoice | null {
 }
 
 /** Every reader and judge pick, in picker order: one per model. */
-export const MODEL_CHOICES: ModelChoice[] = PROVIDER_KEYS.filter((key) => !LEGACY_PROVIDERS.has(key)).flatMap((provider) =>
+export const MODEL_CHOICES: ModelChoice[] = PROVIDER_KEYS.filter(
+  (key) => !LEGACY_PROVIDERS.has(key) && !TIER_ONLY_PROVIDERS.has(key),
+).flatMap((provider) =>
   PROVIDER_VARIANTS[provider]
     ? PROVIDER_VARIANTS[provider]!.map((variant) => ({ provider, variant: variant.key }))
     : [{ provider }],
@@ -177,6 +205,8 @@ export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
   "kimi",
   "mimo",
   "minimax",
+  "qwen",
+  "glm",
 ]);
 
 /**
@@ -215,8 +245,24 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
   "muse",
 ]);
 
-/** Default solvers in both presets: Muse restored after alarm dispatch on 11 October 2026. */
-export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "deepseek", "gemini"];
+/**
+ * The Smart tier's solvers, in picker order: Muse Spark, Gemini (3.8 Flash)
+ * and Claude (Haiku, the card's first model) - Claude Haiku in DeepSeek's
+ * place since 17 October 2026 (the owner's call; DeepSeek solves in the China
+ * tier). Muse came back after alarm dispatch on 11 October 2026.
+ */
+export const DEFAULT_SOLVERS: ProviderKey[] = ["muse", "gemini", "claude"];
+
+/**
+ * A judge that, when it fails - an error, or the 20-minute safety timeout -
+ * hands the cross-check to another, once: MiMo V2.6 Pro, the China judge,
+ * judged the pipe bifurcation in 541 s; DeepSeek V4.1 Flash in 78-137 s.
+ * Cloudflare puts no time limit on it (it is not an alarm route), so it gets
+ * no tighter limit of its own (the owner, 17 October 2026).
+ */
+export const JUDGE_FALLBACKS: Partial<Record<string, ModelChoice>> = {
+  "mimo:pro": { provider: "deepseek" },
+};
 
 /**
  * Default readers and judge for the optional interpretation pass. Two

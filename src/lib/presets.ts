@@ -16,10 +16,11 @@ export type SolveMode = "careful" | "quick" | "custom";
 
 /**
  * Which models a preset runs (16 October 2026, the owner's request): Smart,
- * the default - the light, fast models it always ran - or Expert, each
- * brand's top model. Like the mode, not remembered: the page opens on Smart.
+ * the default - light, fast models - Expert, each brand's top model, or
+ * since 17 October 2026 China, cheap China models on the OpenCode Go plan.
+ * Like the mode, not remembered: the page opens on Smart.
  */
-export type Tier = "smart" | "expert";
+export type Tier = "smart" | "expert" | "china";
 
 export type Preset = {
   /** The solvers, in picker order. */
@@ -60,6 +61,27 @@ const EXPERT_SOLVERS: Pick<Preset, "providers" | "variants" | "effort" | "judge"
   judge: EXPERT_JUDGE,
 };
 
+/**
+ * China's judge: MiMo V2.6 Pro, the highest-scoring cheap China model (46 on
+ * the Artificial Analysis index) and the most thorough verdict measured - in
+ * 541 s. Failing - an error, or the 20-minute safety timeout - the verdict
+ * goes to DeepSeek V4.1 Flash instead (JUDGE_FALLBACKS in shared/providers.ts).
+ */
+export const CHINA_JUDGE: ModelChoice = { provider: "mimo", variant: "pro" };
+
+/**
+ * China's solvers, the owner's picks of 17 October 2026 from the cheap China
+ * models on OpenCode Go (Kimi K3 and the other dear ones left out): DeepSeek
+ * V4.1 Flash, MiniMax M3 and Qwen3.7 Plus - each right on the pipe
+ * bifurcation at high, in 126 s, 87 s and 133 s. GLM-5.3-Flash, right once in
+ * three, only reads. MiniMax runs on its own API first while that plan lasts.
+ */
+const CHINA_SOLVERS: Pick<Preset, "providers" | "effort" | "judge"> = {
+  providers: ["deepseek", "minimax", "qwen"],
+  effort: "high",
+  judge: CHINA_JUDGE,
+};
+
 export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>> = {
   careful: {
     // The owner's default solvers, the reading checked by the default readers
@@ -75,13 +97,24 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>>
       readers: [{ provider: "grok" }, { provider: "gemini", variant: "argon" }],
       reconciler: { provider: "kimi", variant: "k3" },
     },
+    // GLM-5.3-Flash and MiniMax M3 read (both right on the beam diagram, in
+    // 8 s and 7 s), DeepSeek reconciles (15 s), and MiMo V2.6 Pro
+    // cross-checks once the answers are in.
+    china: {
+      ...CHINA_SOLVERS,
+      verify: true,
+      autoCheck: true,
+      readers: [{ provider: "glm" }, { provider: "minimax" }],
+      reconciler: { provider: "deepseek" },
+    },
   },
   quick: {
-    // Three solvers and nothing else: Muse Spark and DeepSeek on the OpenCode
-    // Go subscription, and Gemini (3.8 Flash) since 4 October 2026 (the
-    // owner's call - a billed Flash call on the Vertex AI prepaid credit).
+    // Three solvers and nothing else: Muse Spark and Claude Haiku on the
+    // OpenCode Go subscription (Haiku in DeepSeek's place since 17 October
+    // 2026), and Gemini (3.8 Flash) on the Vertex AI prepaid credit.
     smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: false, autoCheck: false },
     expert: { ...EXPERT_SOLVERS, verify: false, autoCheck: false },
+    china: { ...CHINA_SOLVERS, verify: false, autoCheck: false },
   },
 };
 
@@ -97,6 +130,12 @@ export const TIERS: Array<{ key: Tier; title: string; chinese: string; blurb: st
     title: "Expert",
     chinese: "專家",
     blurb: "Each brand's top model: Kimi K3, Gemini 4 Argon and Grok 4.7, and Claude Opus to cross-check. Slower, and uses much more credit.",
+  },
+  {
+    key: "china",
+    title: "China",
+    chinese: "中國",
+    blurb: "Cheap China models: DeepSeek, MiniMax M3 and Qwen3.7 Plus solve, and MiMo V2.6 Pro cross-checks - thoroughly, but it can take about 10 minutes (DeepSeek takes over if it fails).",
   },
 ];
 

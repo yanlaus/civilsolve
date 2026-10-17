@@ -39,10 +39,13 @@ import {
 } from "../../shared/judgement";
 import {
   canonicalChoice,
+  choiceKey,
   DEFAULT_JUDGE,
   isProviderKey,
+  JUDGE_FALLBACKS,
   PROVIDER_KEYS,
   PROVIDER_LABELS,
+  providerDisplayName,
   type ModelChoice,
   type ModelVariant,
   type ProviderKey,
@@ -314,6 +317,10 @@ export function useSolve() {
   /** Each solver in flight, and the judge, for their own Stop buttons. */
   const tasksRef = useRef(new Map<ProviderKey, RunningTask>());
   const judgeTaskRef = useRef<RunningTask | null>(null);
+  /** Sends the cross-check on to a failed judge's fallback (set below, with crossCheck). */
+  const handOverJudgeRef = useRef<
+    (judge: ModelChoice, providers: ProviderKey[], effort: EffortKey, from: string, note: string) => void
+  >(() => {});
   const runRef = useRef<SavedRun | null>(null);
   /**
    * The wave of solvers a run started with (or re-attached to), while it is
@@ -677,8 +684,35 @@ export function useSolve() {
           };
         },
         persist,
-        setJudgeRun: (next) => {
+        setJudgeRun: (update) => {
           if (context.signal.aborted) return;
+          const saved = context.run.judge;
+          // A judge with a fallback that fails - an error, the safety timeout,
+          // not a Stop - hands the cross-check on, once (JUDGE_FALLBACKS: MiMo
+          // V2.6 Pro to DeepSeek V4.1 Flash, 17 October 2026).
+          const failure = update.status === "error" && !update.stopped ? update.message : "";
+          const fallback =
+            failure &&
+            !refinement &&
+            saved &&
+            !saved.fallbackFrom &&
+            saved.solvers?.length &&
+            bodyRef.current &&
+            !failure.startsWith("Cross-check skipped")
+              ? JUDGE_FALLBACKS[choiceKey({ provider: saved.provider, variant: saved.variant })]
+              : undefined;
+          if (fallback && saved?.solvers) {
+            const from = choiceKey({ provider: saved.provider, variant: saved.variant });
+            const note =
+              `${providerDisplayName(saved.provider, saved.variant)} could not finish the cross-check ` +
+              `(${withoutFullStop(failure)}), so ${providerDisplayName(fallback.provider, fallback.variant)} judged it instead.`;
+            const solvers = saved.solvers;
+            const effort = saved.effort ?? "high";
+            queueMicrotask(() => handOverJudgeRef.current(fallback, solvers, effort, from, note));
+            return;
+          }
+          const next =
+            update.status === "done" && saved?.fallbackNote ? { ...update, notice: saved.fallbackNote } : update;
           if (next.status === "done") judgeDoneRef.current = next;
           setJudgeRun(next);
         },
@@ -1046,6 +1080,20 @@ export function useSolve() {
     },
     [currentSignal, persist, judgeOne],
   );
+
+  // A failed judge's fallback takes the same solutions, at the same level;
+  // the verdict card says why (fallbackNote).
+  handOverJudgeRef.current = (judge, providers, effort, from, note) => {
+    const run = runRef.current;
+    const body = bodyRef.current;
+    if (!run || !body) return;
+    const signal = currentSignal();
+    run.judge = { provider: judge.provider, variant: judge.variant, effort, fallbackFrom: from, fallbackNote: note };
+    setVariants(variantsOf(run));
+    persist();
+    setJudgeRun({ status: "waiting", judge: judge.provider, message: note });
+    void judgeOne({ run, signal, solutions: solutionsRef.current }, body, providers);
+  };
 
   /**
    * Sends one kind of study notes, starting from `source` as the page shows

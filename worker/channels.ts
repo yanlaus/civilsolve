@@ -89,6 +89,8 @@ export type WorkerEnv = {
   KIMI_CHANNEL?: string;
   MUSE_CHANNEL?: string;
   HAIKU_CHANNEL?: string;
+  QWEN_CHANNEL?: string;
+  GLM_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   // A value may be a chain, primary first: "gemini-3.8-flash,gemini-3.5-flash".
@@ -106,8 +108,12 @@ export type WorkerEnv = {
   OPENCODE_KIMI_MODEL?: string;
   /** The model behind Kimi's "K3" pick (PROVIDER_VARIANTS). */
   OPENCODE_KIMI_K3_MODEL?: string;
+  /** The model behind MiMo's "V2.6 Pro" pick (PROVIDER_VARIANTS), the China judge. */
+  OPENCODE_MIMO_PRO_MODEL?: string;
   OPENCODE_MUSE_MODEL?: string;
   OPENCODE_HAIKU_MODEL?: string;
+  OPENCODE_QWEN_MODEL?: string;
+  OPENCODE_GLM_MODEL?: string;
   /** The model behind Gemini's "4 Argon" pick, on OpenCode Go. */
   OPENCODE_GEMINI_MODEL?: string;
   GOOGLE_GEMINI_MODEL?: string;
@@ -607,6 +613,42 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
   haiku: {
     opencode: HAIKU_SPEC,
   },
+  // The China tier's third solver (17 October 2026, the owner's call): Qwen3.7
+  // Plus on OpenCode Go, $0.40 / $1.60 per 1M tokens. The gateway serves Qwen
+  // on the Anthropic Messages API only, as it does Claude Haiku, and it took
+  // the Haiku route's request as it is - adaptive thinking, output_config
+  // effort and JSON schema - which is what it was measured with: the pipe
+  // bifurcation right at "high" (sent as "xhigh") in 133 s, and the verdict
+  // on it right in 230 s and 133 s. Read the beam diagram right in 11 s.
+  // Qwen3.8 Flash, the cheaper sibling, got the pipe wrong and took 604 s.
+  qwen: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "messages",
+      pathSuffix: "/messages",
+      modelVar: "OPENCODE_QWEN_MODEL",
+      defaultModel: "qwen3.7-plus",
+      effort: HAIKU_EFFORT,
+      minEffort: "high",
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+    },
+  },
+  // The China tier's first reader (17 October 2026): GLM-5.3-Flash, $0.15 /
+  // $0.50. It read the beam diagram right in 3.5 s, and as a reader through
+  // this worker in 8 s; solving the pipe bifurcation it was right once in
+  // three (twice the head loss on the outlet velocities), so it never solves
+  // (REVIEW_ONLY_PROVIDERS).
+  glm: {
+    opencode: {
+      ...OPENCODE_SPEC,
+      dialect: "chat-completions",
+      pathSuffix: "/chat/completions",
+      modelVar: "OPENCODE_GLM_MODEL",
+      defaultModel: "glm-5.3-flash",
+      effort: CLAMPED_EFFORT,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+    },
+  },
 };
 
 /**
@@ -634,6 +676,8 @@ const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
   kimi: ["opencode"],
   muse: ["opencode"],
   haiku: ["opencode"],
+  qwen: ["opencode"],
+  glm: ["opencode"],
 };
 
 /**
@@ -659,6 +703,8 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   kimi: "KIMI_CHANNEL",
   muse: "MUSE_CHANNEL",
   haiku: "HAIKU_CHANNEL",
+  qwen: "QWEN_CHANNEL",
+  glm: "GLM_CHANNEL",
 };
 
 export type Route = {
@@ -894,6 +940,13 @@ const VARIANT_ROUTES: Partial<
   // Kimi's "k2.7" pick is the route's own model, so it needs no entry.
   kimi: {
     k3: { channel: "opencode", modelVar: "OPENCODE_KIMI_K3_MODEL", defaultModel: "kimi-k3" },
+  },
+  // MiMo's "flash" pick is the route's own model. "pro", V2.6 Pro, is the
+  // China tier's judge (17 October 2026): the highest Artificial Analysis
+  // index of the cheap China models (46) and the most thorough verdict
+  // measured - and the slowest, 541 s on the pipe bifurcation.
+  mimo: {
+    pro: { channel: "opencode", modelVar: "OPENCODE_MIMO_PRO_MODEL", defaultModel: "mimo-v2.6-pro" },
   },
   claude: {
     haiku: { channel: "opencode" },

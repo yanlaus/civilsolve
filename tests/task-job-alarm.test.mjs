@@ -223,7 +223,7 @@ test("ChatGPT starts only in alarm and keeps its model and session through a 502
     calls++;
     assert.match(url, /\/responses$/);
     const request = JSON.parse(init.body);
-    assert.equal(request.model, "gpt-5.6-luna");
+    assert.equal(request.model, "gpt-6-luna");
     assert.equal(request.reasoning.effort, "high");
     sent.push(new Headers(init.headers).get("x-opencode-session"));
     return calls === 1
