@@ -228,7 +228,7 @@ export function UploadForm({
   // entry's title, or none for the question on the page.
   const [savedReference, setSavedReference] = useState<SavedReference | null>(null);
   const [again, setAgain] = useState<{ title?: string } | null>(null);
-  /** The folded line's pages, open full screen (17 October 2026). */
+  /** The folded line's pages, open to be enlarged (17 October 2026). */
   const [viewing, setViewing] = useState(false);
   const prefillId = prefill?.id;
   useEffect(() => {
@@ -661,12 +661,12 @@ export function UploadForm({
       <div id={STEP_IDS.upload} tabIndex={-1} className="scroll-mt-28 space-y-3 outline-none sm:scroll-mt-20 print:hidden">
         <div className="cs-panel flex flex-wrap items-center gap-3 rounded-cs-lg border border-cs-line-soft bg-cs-surface px-4 py-3 shadow-[0_1px_3px_var(--cs-shadow)]">
           {pageImages.length ? (
-            // The pages open full screen, to be enlarged (the owner, 17 October 2026).
+            // The pages open in a window, to be enlarged (the owner, 17 October 2026).
             <button
               type="button"
               onClick={() => setViewing(true)}
               className="group relative shrink-0 rounded"
-              title="Open the question full screen · 放大睇題目"
+              title="Enlarge the question · 放大睇題目"
               aria-label="Enlarge the question"
             >
               {/* The pages alone in the overlap, or the badge would count as one. */}

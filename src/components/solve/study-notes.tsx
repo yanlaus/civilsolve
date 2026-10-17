@@ -476,11 +476,13 @@ function LanguageFold({
 const APPROACH_PARTS = STUDY_PARTS.approach;
 
 /**
- * The approach notes in tabs - Problem type, Approach, Key formulas, Common
- * mistakes - drawn like a solution's Problem / Assumptions / Solution / Final
- * Answer tabs, each part's Chinese a fold below it that opens and closes on
- * its own. Notes whose parts cannot be told apart (fewer than two labels)
- * are shown whole.
+ * The approach notes in tabs - 題型 Problem type, 解題思路 Approach, 關鍵公式
+ * Key formulas, 常見錯誤 Common mistakes - drawn like a solution's Problem /
+ * Assumptions / Solution / Final Answer tabs. Since 17 October 2026 (the
+ * owner's request) each part comes in Chinese first, as the simple
+ * explanation does, its English a fold below that opens and closes on its
+ * own. Notes whose parts cannot be told apart (fewer than two labels), in
+ * either language, are shown whole, Chinese first.
  */
 function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
   const parts = useMemo(() => splitStudyParts(guide, "approach"), [guide]);
@@ -488,25 +490,13 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
   const [tab, setTab] = useState(0);
   const [open, setOpen] = useState<boolean[]>(() => APPROACH_PARTS.map(() => false));
 
-  if (!parts) {
-    return (
-      <>
-        <div className="mt-2">
-          <NotesArticle source={openStudyLabels(guide)} />
-        </div>
-        {chinese ? (
-          <div className="mt-3">
-            <LanguageFold label="繁體中文 · Traditional Chinese">
-              <NotesArticle source={openStudyLabels(chinese)} chinese />
-            </LanguageFold>
-          </div>
-        ) : null}
-      </>
-    );
+  if (!parts || (chinese && !chineseParts)) {
+    return <CantoneseFirst guide={guide} chinese={chinese} />;
   }
 
-  // Chinese that cannot be cut into parts goes whole under every tab.
-  const chineseText = chineseParts ? chineseParts[tab] : chinese;
+  // Without Chinese the English is the part itself, with nothing to fold.
+  const first = chineseParts ? chineseParts[tab] : parts[tab];
+  const englishFold = chineseParts ? parts[tab] : "";
   return (
     <div className="mt-3 overflow-hidden rounded-cs-lg border border-cs-line-soft">
       <div className="border-b-2 border-cs-line-soft px-2 pt-1">
@@ -522,7 +512,8 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
                 tab === index ? "text-cs-accent" : "text-cs-ink-3 hover:text-cs-ink"
               }`}
             >
-              {part.label}
+              <span lang="zh-Hant-HK">{part.chinese}</span>{" "}
+              <span className="text-xs font-normal">{part.label}</span>
               <span
                 className={`absolute bottom-0 left-0 right-0 h-[3px] rounded-t ${
                   tab === index ? "bg-cs-accent" : "bg-transparent"
@@ -532,17 +523,17 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
           ))}
         </div>
       </div>
-      {parts[tab] ? (
-        <SolutionArticle source={parts[tab]} measure />
+      {first ? (
+        <SolutionArticle source={first} measure chinese={Boolean(chineseParts)} />
       ) : (
         <p className="px-4 py-6 text-sm text-cs-ink-3 sm:px-7">This part was left out of the notes.</p>
       )}
-      {chineseText ? (
+      {englishFold ? (
         <div className="px-4 pb-4 sm:px-7">
           <LanguageFold
             // Its own fold per tab, so one tab's state never leaks into another's.
             key={tab}
-            label={chineseParts ? "繁體中文 · Traditional Chinese" : "繁體中文 · Traditional Chinese (all parts)"}
+            label="English"
             open={open[tab]}
             onToggle={(value) =>
               setOpen((current) =>
@@ -550,7 +541,7 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
               )
             }
           >
-            <NotesArticle source={chineseText} chinese />
+            <NotesArticle source={englishFold} />
           </LanguageFold>
         </div>
       ) : null}
@@ -559,9 +550,10 @@ function ApproachTabs({ guide, chinese }: { guide: string; chinese: string }) {
 }
 
 /**
- * The simple explanation: its Cantonese first, the English a fold below. The
- * labels are put on lines of their own again here, for notes stored before
- * the parser did it with a blank line around them ("Wrap-up" indented).
+ * The simple explanation - and approach notes that cannot be cut into parts -
+ * its Chinese first, the English a fold below. The labels are put on lines
+ * of their own again here, for notes stored before the parser did it with a
+ * blank line around them ("Wrap-up" indented).
  */
 function CantoneseFirst({ guide, chinese }: { guide: string; chinese: string }) {
   const english = useMemo(() => openStudyLabels(guide), [guide]);

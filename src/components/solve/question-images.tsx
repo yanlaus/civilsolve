@@ -2,9 +2,10 @@
 // the review step, where the student checks the reading against the diagram,
 // and above the solutions. The pages are the prepared JPEGs the run was sent
 // with - kept in memory and in this browser's IndexedDB, never on the
-// server. A page opens full screen, where it can be enlarged and panned -
-// from the folded form's "Your question" line too (PageViewer, since 17
-// October 2026, the owner's request).
+// server. A page opens in a window over the page (full screen until 17
+// October 2026, the owner's request), where it can be enlarged and panned -
+// from the folded form's "Your question" line too (PageViewer, since the
+// same day).
 
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Minus, Plus, X, ZoomIn } from "lucide-react";
@@ -46,7 +47,7 @@ export function QuestionImages({ images }: { images: string[] }) {
         type="button"
         onClick={() => setOpen(true)}
         className="group relative block w-full overflow-hidden rounded-cs border border-cs-line bg-white"
-        title="Open the page full screen"
+        title="Enlarge the page · 放大"
       >
         <img src={images[page]} alt={`Question, page ${page + 1}`} className="w-full" />
         <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[0.7rem] font-semibold text-white">
@@ -61,8 +62,9 @@ export function QuestionImages({ images }: { images: string[] }) {
 }
 
 /**
- * The question's pages full screen: enlarged step by step and panned by
- * scrolling (pinch-zoom too where the browser allows it), a page at a time.
+ * The question's pages in a window over the page: enlarged step by step and
+ * panned by scrolling (pinch-zoom too where the browser allows it), a page
+ * at a time.
  */
 export function PageViewer({
   images,
@@ -99,71 +101,79 @@ export function PageViewer({
 
   if (!images.length) return null;
 
+  // A window over the page, not the whole screen (the owner, 17 October
+  // 2026): the page shows round it, and a tap there closes it.
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black/85 print:hidden"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Question, page ${page + 1}`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 print:hidden sm:p-8"
+      onClick={onClose}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-white">
-        <span className="flex items-center gap-1 text-sm font-semibold">
-          {many ? (
+      <div
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-cs-lg bg-white shadow-[0_8px_40px_rgba(0,0,0,0.35)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Question, page ${page + 1}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 bg-[#1f1f1f] px-3 py-1.5 text-white">
+          <span className="flex items-center gap-1 text-sm font-semibold">
+            {many ? (
+              <button
+                type="button"
+                onClick={() => go(page - 1)}
+                className="rounded-full p-2 hover:bg-white/15"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            ) : null}
+            Page {page + 1}
+            {many ? ` of ${images.length}` : ""}
+            {many ? (
+              <button
+                type="button"
+                onClick={() => go(page + 1)}
+                className="rounded-full p-2 hover:bg-white/15"
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            ) : null}
+          </span>
+          <span className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => go(page - 1)}
-              className="rounded-full p-2 hover:bg-white/15"
-              aria-label="Previous page"
+              onClick={() => setZoom((current) => Math.max(0, current - 1))}
+              disabled={zoom === 0}
+              className="rounded-full p-2 hover:bg-white/15 disabled:opacity-40"
+              aria-label="Zoom out"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <Minus className="h-4 w-4" />
             </button>
-          ) : null}
-          Page {page + 1}
-          {many ? ` of ${images.length}` : ""}
-          {many ? (
+            <span className="w-10 text-center text-xs tabular-nums">{ZOOMS[zoom]}×</span>
             <button
               type="button"
-              onClick={() => go(page + 1)}
-              className="rounded-full p-2 hover:bg-white/15"
-              aria-label="Next page"
+              onClick={() => setZoom((current) => Math.min(ZOOMS.length - 1, current + 1))}
+              disabled={zoom === ZOOMS.length - 1}
+              className="rounded-full p-2 hover:bg-white/15 disabled:opacity-40"
+              aria-label="Zoom in"
             >
-              <ChevronRight className="h-4 w-4" />
+              <Plus className="h-4 w-4" />
             </button>
-          ) : null}
-        </span>
-        <span className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setZoom((current) => Math.max(0, current - 1))}
-            disabled={zoom === 0}
-            className="rounded-full p-2 hover:bg-white/15 disabled:opacity-40"
-            aria-label="Zoom out"
-          >
-            <Minus className="h-4 w-4" />
-          </button>
-          <span className="w-10 text-center text-xs tabular-nums">{ZOOMS[zoom]}×</span>
-          <button
-            type="button"
-            onClick={() => setZoom((current) => Math.min(ZOOMS.length - 1, current + 1))}
-            disabled={zoom === ZOOMS.length - 1}
-            className="rounded-full p-2 hover:bg-white/15 disabled:opacity-40"
-            aria-label="Zoom in"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-          <button type="button" onClick={onClose} className="ml-2 rounded-full p-2 hover:bg-white/15" aria-label="Close">
-            <X className="h-5 w-5" />
-          </button>
-        </span>
-      </div>
-      {/* Scroll to pan; pinch-zoom works too where the browser allows it. */}
-      <div className="min-h-0 flex-1 overflow-auto" style={{ touchAction: "pan-x pan-y pinch-zoom" }}>
-        <img
-          src={images[page]}
-          alt={`Question, page ${page + 1}`}
-          className="mx-auto block max-w-none bg-white"
-          style={{ width: `${ZOOMS[zoom] * 100}%` }}
-        />
+            <button type="button" onClick={onClose} className="ml-2 rounded-full p-2 hover:bg-white/15" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </span>
+        </div>
+        {/* Scroll to pan; pinch-zoom works too where the browser allows it. */}
+        <div className="min-h-0 flex-1 overflow-auto" style={{ touchAction: "pan-x pan-y pinch-zoom" }}>
+          <img
+            src={images[page]}
+            alt={`Question, page ${page + 1}`}
+            className="mx-auto block max-w-none bg-white"
+            style={{ width: `${ZOOMS[zoom] * 100}%` }}
+          />
+        </div>
       </div>
     </div>
   );
