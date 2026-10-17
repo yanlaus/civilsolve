@@ -136,9 +136,10 @@ export const STUDY_TITLES: Record<StudyKind, { title: string; chinese: string }>
 /**
  * The notes as HTML for a PDF (worker/pdf.ts) or the print dialog ("Print
  * instead", solution-panel.tsx), laid out as the page shows them with every
- * fold open: the approach notes part by part, each part's Chinese under it;
- * the simple explanation in Cantonese, then in English. `render` turns
- * Markdown into sanitized HTML, `chinese` set for the Chinese.
+ * fold open: the approach notes part by part, each part in Chinese, then in
+ * English (Chinese first since 17 October 2026, as on the page); the simple
+ * explanation in Cantonese, then in English. `render` turns Markdown into
+ * sanitized HTML, `chinese` set for the Chinese.
  */
 export function studyHtml(
   kind: StudyKind,
@@ -151,33 +152,27 @@ export function studyHtml(
   // searches (the glyphs showed; 30 September 2026).
   const zh = (markdown: string, ruled = true) =>
     `<div${ruled ? ' class="zh"' : ""} lang="zh-Hant">${render(markdown, true)}</div>`;
-  const allChinese = "<h2>繁體中文 · Traditional Chinese</h2>";
   const out = [`<h1><span lang="zh-Hant">${chineseTitle}</span> · ${title.replace(/&/g, "&amp;")}</h1>`];
   const english = openStudyLabels(study.guide);
   const chinese = openStudyLabels(study.traditional_chinese);
 
-  if (kind === "explain") {
-    if (chinese) out.push(zh(chinese, false), "<h2>English</h2>");
-    out.push(render(english, false));
-    return out.join("\n");
-  }
-
   const parts = splitStudyParts(study.guide, kind);
   const chineseParts = chinese ? splitStudyParts(study.traditional_chinese, kind) : null;
-  if (!parts) {
+  // The simple explanation, and approach notes that cannot be cut into parts
+  // in either language: the Chinese whole, then the English.
+  if (kind === "explain" || !parts || (chinese && !chineseParts)) {
+    if (chinese) out.push(zh(chinese, false), "<h2>English</h2>");
     out.push(render(english, false));
-    if (chinese) out.push(allChinese, zh(chinese));
     return out.join("\n");
   }
   STUDY_PARTS[kind].forEach((part, index) => {
     const zhPart = chineseParts?.[index] ?? "";
     if (!parts[index] && !zhPart) return;
-    out.push(`<h2>${part.label} <span class="zh-label" lang="zh-Hant">${part.chinese}</span></h2>`);
-    if (parts[index]) out.push(render(parts[index], false));
-    if (zhPart) out.push(zh(zhPart));
+    out.push(`<h2><span lang="zh-Hant">${part.chinese}</span> <span class="zh-label">${part.label}</span></h2>`);
+    if (zhPart) out.push(zh(zhPart, false));
+    // The English under the Chinese, ruled off as the Chinese was under it.
+    if (parts[index]) out.push(zhPart ? `<div class="zh">${render(parts[index], false)}</div>` : render(parts[index], false));
   });
-  // Chinese that cannot be cut into parts goes whole, after the English.
-  if (chinese && !chineseParts) out.push(allChinese, zh(chinese));
   return out.join("\n");
 }
 
