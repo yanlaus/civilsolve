@@ -39,8 +39,16 @@ test("all ChatGPT task kinds use alarm on OpenCode, while other channels keep HT
     assert.equal(resolved.channel, "opencode");
     assert.equal(resolved.model, "gpt-6-luna");
     assert.equal(resolved.startInAlarm, true);
+    // Called exactly the way Muse is (18 October 2026): same gateway,
+    // protocol, job placement and alarm start.
+    const muse = app.resolveRoute("muse", env);
+    for (const field of ["channel", "dialect", "endpoint", "region", "startInAlarm"]) {
+      assert.equal(resolved[field], muse[field], `${kind}: ${field}`);
+    }
+    assert.equal(resolved.region, "wnam");
   }
   assert.equal(app.resolveRoute("chatgpt", env, { channel: "poe" }).startInAlarm, undefined);
+  assert.equal(app.resolveRoute("chatgpt", env, { channel: "poe" }).region, undefined);
   assert.equal(app.resolveRoute("deepseek", env).startInAlarm, undefined);
 });
 
