@@ -18,6 +18,9 @@
 // UUID the browser keeps in localStorage - can read the result until then.
 // Muse and ChatGPT on OpenCode start from alarm(); pending input stays in memory.
 // Its timeout is capped below the alarm handler's 15-minute wall limit.
+//
+// Each job also writes its row of the usage log (worker/usage.ts) when it
+// starts, and completes it when the task ends - metadata only, in D1.
 
 import { DurableObject } from "cloudflare:workers";
 import { MAX_TIMEOUT_MS } from "../shared/stream-protocol";
@@ -29,10 +32,12 @@ import {
   SSE_HEADERS,
   taskTimeoutFor,
   type TaskEvent,
+  type TaskOutcome,
   type TaskSink,
   type RunTaskParams,
 } from "./run";
 import { buildTask, isTaskKind } from "./tasks";
+import { describeRequest, forwardedClient, logTaskEnd, logTaskStart } from "./usage";
 
 /** How long a finished job's result is kept. */
 export const JOB_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -62,11 +67,14 @@ export class TaskJob extends DurableObject<WorkerEnv> {
   private pending: RunTaskParams | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly cancelled = new AbortController();
+  /** This job's row in the usage log, and what to fill in if it ends before running. */
+  private usageRow: Promise<number | null> | null = null;
+  private usageBase: Omit<TaskOutcome, "outcome" | "modelCalls"> | null = null;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/run") {
-      return this.start(url, await request.text());
+      return this.start(request, url, await request.text());
     }
     if (request.method === "GET" && url.pathname === "/attach") {
       return this.attach();
@@ -97,7 +105,7 @@ export class TaskJob extends DurableObject<WorkerEnv> {
       this.pending = null;
       try {
         await this.ctx.storage.setAlarm(this.expiresAt);
-        await runTask(this.hub(), params);
+        await this.logEnd(await runTask(this.hub(), params));
       } catch {
         await this.failBeforeStart("The background task could not start. Please try again.");
       }
@@ -124,9 +132,25 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     const sink = this.hub();
     await sink.event({ type: "error", message });
     await sink.close();
+    if (this.usageBase) {
+      await this.logEnd({
+        ...this.usageBase,
+        outcome: message === "Cancelled." ? "cancelled" : "error",
+        modelCalls: 0,
+        error: message,
+      });
+    }
   }
 
-  private async start(url: URL, rawBody: string): Promise<Response> {
+  /** Completes this job's usage-log row, once. */
+  private async logEnd(outcome: TaskOutcome) {
+    const row = this.usageRow;
+    if (!row) return;
+    this.usageRow = null;
+    await logTaskEnd(this.env, await row, this.startedAt, outcome);
+  }
+
+  private async start(request: Request, url: URL, rawBody: string): Promise<Response> {
     const jobId = url.searchParams.get("jobId") ?? "";
     const kind = url.searchParams.get("kind") ?? "";
     const provider = url.searchParams.get("provider") ?? "";
@@ -154,6 +178,19 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     const params = { ...built.params, signal: this.cancelled.signal, deadlineAt: this.deadlineAt };
     const route = resolveRoute(params.provider, this.env, params.routeOverride);
     if (route.startInAlarm) this.pending = params;
+    // Not awaited: the log never holds up the task.
+    this.usageBase = { model: route.model, channel: route.channel, effort: params.effort };
+    const startedAt = this.startedAt;
+    this.usageRow = describeRequest(kind, provider, body).then((described) =>
+      logTaskStart(this.env, {
+        startedAt,
+        client: forwardedClient(request),
+        jobId,
+        request: described,
+        model: route.model,
+        channel: route.channel,
+      }),
+    ).catch(() => null);
     await this.ctx.storage.put({
       jobId,
       kind,
@@ -176,7 +213,7 @@ export class TaskJob extends DurableObject<WorkerEnv> {
       }
     } else {
       // Not awaited: the task outlives this request and whoever sent it.
-      void runTask(this.hub(), params);
+      void runTask(this.hub(), params).then((outcome) => this.logEnd(outcome));
     }
     return response;
   }

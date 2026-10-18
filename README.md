@@ -375,6 +375,7 @@ A provider whose key is blank is shown as unavailable in the UI rather than fail
 | `PDF_BUDGET` | `PdfBudget` (`worker/pdf.ts`), SQLite-backed, migration `v2` | The month's browser time for PDFs, one object for the account; refuses past `PDF_MONTHLY_MS` (9 of the 10 included hours). Also counts the bytes of PDF kept in R2 and stops storing past `PDF_STORE_BYTES` (9 GB) |
 | `PDFS` | R2 bucket `civilsolve-pdfs` (location hint Asia-Pacific) | Every PDF someone asked for, kept for good, at `pdf/<job id>.pdf`. R2 includes 10 GB-month, a million writes and ten million reads a month free, and egress is free; a PDF is 35-70 KB, so the 9 GB cap is over 100,000 of them. The app never deletes one - delete by hand in the dashboard (R2 → `civilsolve-pdfs`) if ever needed. `npm run dev` uses a local stand-in in `.wrangler/state`. Remove it and PDFs live only in the edge cache |
 | `PDF_LIMITER` | Workers Rate Limiting (`ratelimits`, namespace `2610`) | 10 PDFs made per client IP per minute; one served from the cache is not counted |
+| `USAGE` | D1 database `civilsolve-usage` (APAC), table `usage_log` from `migrations/` | The usage log (`worker/usage.ts`, since 18 October 2026): one row per task and per PDF - see "Usage log" below. Workers Paid includes 50 million rows written, 25 billion read and 5 GB a month; a whole run writes about a dozen rows, so it stays far inside that (usage past it is billed). Remove it and nothing is logged |
 
 ### Vars (optional overrides, non-secret)
 
@@ -463,7 +464,10 @@ Add an entry under that provider in `ROUTES` (`worker/channels.ts`) naming the d
 ```bash
 npm install
 npm run dev        # Vite dev server + Worker in workerd, with HMR (Generate PDF uses Cloudflare's browser: npx wrangler login first)
+npx wrangler d1 migrations apply civilsolve-usage --local   # once, and after a new migration: the local usage-log table
 npm run check      # tsc --noEmit for both the SPA and the worker
+npm run test:models  # routing, variants, presets and defaults
+npm run test:jobs    # TaskJob alarm dispatch, Stop, retention, the usage log
 npm run build      # production build (dist/client + worker bundle)
 npm run preview    # serve the production build locally
 ```
@@ -483,7 +487,7 @@ curl -N -X POST http://localhost:5173/api/solve/claude -H "content-type: applica
 ```bash
 npx wrangler login
 npx wrangler secret put POE_API_KEY
-npm run deploy     # vite build && wrangler deploy
+npm run deploy     # vite build, then the D1 migrations (the usage log), then wrangler deploy
 ```
 
 The app deploys to `https://civilsolve.<account>.workers.dev`.
@@ -503,6 +507,72 @@ Deduplicating the N uploads by storing them is ruled out by design (see `AGENTS.
 **Every ticked provider runs at once** (`SOLVE_CONCURRENCY` in `use-solve.ts`, 4 — the most the cross-check can grade). The picker was single-choice on the free plan: there each per-token stream (the OpenCode Go routes) draws roughly 300–1800 ms of CPU for its whole duration — versus ~20–50 ms for a Poe-buffered route — and the plan's CPU budget is a rolling, account-wide allowance, so running several heavy streams together, or back-to-back, drains it and the runtime kills a stream mid-flight (the client shows it ended unexpectedly). One at a time kept every solve inside the budget. A stream that is still killed retries once automatically.
 
 **Streaming a thinking model costs CPU the free plan meters.** The runtime charges per upstream chunk read, and per-token streams from OpenCode Go arrive as thousands of tiny chunks — roughly 330–500 ms of CPU per solve for those routes, against ~20–50 ms for Poe routes that buffer upstream. A single five-provider solve (~900 ms total) completes on the free plan when spaced out; back-to-back solves or the interpretation pass on top can exceed the plan's refilling budget, in which case the affected tab shows "ended unexpectedly, please try again". Nothing in the Worker's JavaScript can reduce this further (see `AGENTS.md` for the measurements); the fixes are Workers Paid, fewer providers per solve, or lower thinking on the OpenCode routes.
+
+### Usage log
+
+Since 18 October 2026 (the owner's request) the Worker logs who uses the app and how, in the D1 database `civilsolve-usage` (binding `USAGE`, `worker/usage.ts`, table from `migrations/0001_usage_log.sql`). One row per **task** - each solution, reading step, cross-check, set of study notes, question about a solution and answer comparison - written when it starts (`running`) and completed when it ends; one per **PDF** asked for; and one per request **turned away** (`rate-limited`, or `rejected` with the reason). A task's row records:
+
+- **when** (`started_at`, `ended_at`, `duration_ms` - ms since the epoch, UTC) and **who** (`ip`, `country` - the client IP and country Cloudflare saw);
+- **which question**: `question`, the first 16 hex digits of a SHA-256 over its pages - the readings, solutions, cross-check, notes and questions of one run share it, so `count(DISTINCT question)` counts questions - and `pages` / `notes_pages`;
+- **which part**: `kind` (`solve`, `interpret`, `judge`, `study`, `ask`, `align`, `pdf`) and `detail` (a reading step: `read`, `reconcile`, `revise`; study notes: `approach`, `explain`; a PDF: `cache`, `kept` or `made`), `revision` (1 for a re-generation), `solutions` (how many a cross-check or notes request was given);
+- **which model**: `provider`, `variant`, `effort`, and - once it ends - the `model`, `channel` and thinking level of the last attempt, and **`model_calls`**: every upstream request it made, retries and fallbacks included (`TaskOutcome` from `runTask`);
+- **how it ended**: `outcome` (`done`, `error`, `timeout`, `cancelled`) and the start of the `error`.
+
+Never the pages, notes, prompts, readings or answers. Rows are kept for good, IP addresses included (the owner's call); delete by hand if ever needed. A log write that fails is reported in the Worker's logs and never fails or delays a task. A job's row carries the client IP because the Worker hands it to the job in `x-usage-ip` / `x-usage-country` headers - set by the Worker only; a job cannot be reached from a browser. A task lost with its Durable Object (a reset mid-run) stays `running`.
+
+Read it in the Cloudflare dashboard: **Storage & databases → D1 → `civilsolve-usage` → Console**, or `npx wrangler d1 execute civilsolve-usage --remote --command "..."` (`npx.cmd` in PowerShell). Times below are Hong Kong time (`'+8 hours'`).
+
+Questions, users and model calls per day:
+
+```sql
+SELECT date(started_at / 1000, 'unixepoch', '+8 hours') AS day,
+       count(DISTINCT question) AS questions,
+       count(DISTINCT ip) AS users,
+       count(*) AS tasks,
+       sum(model_calls) AS model_calls
+FROM usage_log
+WHERE kind != 'pdf'
+GROUP BY day ORDER BY day DESC;
+```
+
+Each IP over the last 30 days:
+
+```sql
+SELECT ip, country,
+       count(DISTINCT question) AS questions,
+       count(*) AS tasks,
+       sum(model_calls) AS model_calls,
+       sum(outcome = 'rate-limited') AS rate_limited,
+       datetime(max(started_at) / 1000, 'unixepoch', '+8 hours') AS last_seen
+FROM usage_log
+WHERE started_at > (strftime('%s', 'now') - 30 * 86400) * 1000
+GROUP BY ip, country ORDER BY model_calls DESC;
+```
+
+Model calls by part of the page and model:
+
+```sql
+SELECT kind, detail, provider, variant, model,
+       count(*) AS tasks,
+       sum(model_calls) AS model_calls,
+       sum(outcome = 'done') AS done,
+       sum(outcome IN ('error', 'timeout')) AS failed,
+       round(avg(duration_ms) / 1000.0) AS avg_seconds
+FROM usage_log
+WHERE kind != 'pdf' AND outcome NOT IN ('rejected', 'rate-limited')
+GROUP BY kind, detail, provider, variant, model
+ORDER BY model_calls DESC;
+```
+
+Everything asked about one question (its fingerprint from the queries above):
+
+```sql
+SELECT datetime(started_at / 1000, 'unixepoch', '+8 hours') AS at,
+       ip, kind, detail, provider, variant, model, model_calls, outcome, duration_ms, error
+FROM usage_log
+WHERE question = '0123456789abcdef'
+ORDER BY started_at;
+```
 
 ## Upload support
 

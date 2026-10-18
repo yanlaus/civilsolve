@@ -5,6 +5,16 @@ import { resolveRoute, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
 import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
+import {
+  clientHeaders,
+  clientOf,
+  describeRequest,
+  logRequest,
+  logTaskEnd,
+  logTaskStart,
+  type UsageClient,
+  type UsageOutcome,
+} from "./usage";
 
 export { TaskJob } from "./jobs";
 export { PdfBudget } from "./pdf";
@@ -88,12 +98,42 @@ async function readRequest(c: AppContext): Promise<BodyResult> {
 }
 
 /** Runs a task inside this Worker invocation; it dies with the client. */
-function startInlineSse(c: AppContext, params: RunTaskParams) {
+function startInlineSse(
+  c: AppContext,
+  params: RunTaskParams,
+  usage: { kind: TaskKind; body: Record<string, unknown>; client: UsageClient; startedAt: number },
+) {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const route = resolveRoute(params.provider, c.env, params.routeOverride);
+  const row = describeRequest(usage.kind, params.provider, usage.body).then((request) =>
+    logTaskStart(c.env, { ...usage, jobId: null, request, model: route.model, channel: route.channel }),
+  );
   // Runs beyond this handler's return; the response stream stays open while
   // the provider call is in flight.
-  c.executionCtx.waitUntil(runTask(streamSink(writable.getWriter()), params));
+  c.executionCtx.waitUntil(
+    runTask(streamSink(writable.getWriter()), params).then(async (outcome) =>
+      logTaskEnd(c.env, await row, usage.startedAt, outcome),
+    ),
+  );
   return new Response(readable, { status: 200, headers: SSE_HEADERS });
+}
+
+/** One usage-log row for a request that ends here (worker/usage.ts); not awaited. */
+function logTurnedAway(
+  c: AppContext,
+  kind: TaskKind | "pdf",
+  provider: string | null,
+  body: Record<string, unknown> | null,
+  started: { startedAt: number; client: UsageClient },
+  outcome: UsageOutcome,
+  error: string | null,
+  jobId: string | null = null,
+) {
+  c.executionCtx.waitUntil(
+    describeRequest(kind, provider, body).then((request) =>
+      logRequest(c.env, { ...started, jobId, request, outcome, error }),
+    ),
+  );
 }
 
 /**
@@ -108,13 +148,23 @@ function startInlineSse(c: AppContext, params: RunTaskParams) {
  */
 async function handleTask(c: AppContext, kind: TaskKind) {
   const provider = c.req.param("provider") ?? "";
+  const started = { startedAt: Date.now(), client: clientOf(c.req.raw) };
   const limited = await rateLimited(c);
-  if (limited) return limited;
+  if (limited) {
+    logTurnedAway(c, kind, provider, null, started, "rate-limited", null);
+    return limited;
+  }
   const parsed = await readRequest(c);
-  if ("response" in parsed) return parsed.response;
+  if ("response" in parsed) {
+    logTurnedAway(c, kind, provider, null, started, "rejected", `HTTP ${parsed.response.status}`);
+    return parsed.response;
+  }
 
   const built = buildTask(kind, provider, parsed.body, c.env);
-  if ("error" in built) return c.json({ error: built.error }, built.status);
+  if ("error" in built) {
+    logTurnedAway(c, kind, provider, parsed.body, started, "rejected", built.error);
+    return c.json({ error: built.error }, built.status);
+  }
 
   const jobs = c.env.JOBS;
   const route = resolveRoute(built.params.provider, c.env, built.params.routeOverride);
@@ -122,7 +172,7 @@ async function handleTask(c: AppContext, kind: TaskKind) {
     if (route.startInAlarm) {
       return c.json({ error: `${route.label} requires the JOBS binding for background execution.` }, 503);
     }
-    return startInlineSse(c, built.params);
+    return startInlineSse(c, built.params, { kind, body: parsed.body, ...started });
   }
 
   const jobId = crypto.randomUUID();
@@ -131,7 +181,13 @@ async function handleTask(c: AppContext, kind: TaskKind) {
   const { region } = route;
   const job = jobs.get(jobs.idFromName(jobId), region ? { locationHint: region } : undefined);
   const query = new URLSearchParams({ jobId, kind, provider });
-  return job.fetch(`https://job/run?${query}`, { method: "POST", body: parsed.raw });
+  // Who asked, for the job's usage-log row. Set here only: the job is
+  // reachable through this Worker alone, never straight from a browser.
+  return job.fetch(`https://job/run?${query}`, {
+    method: "POST",
+    body: parsed.raw,
+    headers: clientHeaders(started.client),
+  });
 }
 
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -176,10 +232,20 @@ app.get("/api/pdf/:id", async (c) => {
   if (!jobs || !JOB_ID_PATTERN.test(id)) {
     return c.json({ error: "This result is no longer available." }, 404);
   }
+  const asked = { startedAt: Date.now(), client: clientOf(c.req.raw) };
+  const logPdf = (detail: "cache" | "kept" | "made" | null, outcome: UsageOutcome, error: string | null = null) =>
+    c.executionCtx.waitUntil(
+      describeRequest("pdf", null, null).then((request) =>
+        logRequest(c.env, { ...asked, jobId: id, request: { ...request, detail }, outcome, error }),
+      ),
+    );
   const cache = caches.default;
   const cacheKey = new Request(new URL(`/api/pdf/${id}`, c.req.url).toString());
   const cached = await cache.match(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    logPdf("cache", "done");
+    return cached;
+  }
 
   // Made before: kept in R2.
   const bucket = c.env.PDFS;
@@ -194,6 +260,7 @@ app.get("/api/pdf/:id", async (c) => {
       },
     });
     c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+    logPdf("kept", "done");
     return response;
   }
 
@@ -201,7 +268,10 @@ app.get("/api/pdf/:id", async (c) => {
   const budgets = c.env.PDF_BUDGET;
   if (!browser || !budgets) return c.json({ error: "PDFs are not set up on this server." }, 503);
   const limited = await rateLimited(c, c.env.PDF_LIMITER);
-  if (limited) return limited;
+  if (limited) {
+    logPdf(null, "rate-limited");
+    return limited;
+  }
 
   const stored = await jobs.get(jobs.idFromName(id)).fetch("https://job/result");
   if (!stored.ok) {
@@ -213,6 +283,7 @@ app.get("/api/pdf/:id", async (c) => {
 
   const budget = budgets.get(budgets.idFromName("account"));
   if (!(await budget.allowed())) {
+    logPdf(null, "rejected", "This month's PDF allowance is used up.");
     return c.json(
       { error: "This month's PDF allowance is used up; it starts again on the 1st. Print from the browser instead." },
       429,
@@ -225,6 +296,7 @@ app.get("/api/pdf/:id", async (c) => {
     pdf = await printPdf(browser, html);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    logPdf("made", "error", detail);
     return c.json({ error: `The PDF could not be made: ${detail}` }, 503);
   } finally {
     c.executionCtx.waitUntil(budget.add(Date.now() - started));
@@ -261,6 +333,7 @@ app.get("/api/pdf/:id", async (c) => {
     },
   });
   c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  logPdf("made", "done");
   return response;
 });
 

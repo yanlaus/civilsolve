@@ -54,6 +54,19 @@
   // storing at 9 GB. Location hint Asia-Pacific. `npm run dev` uses a local
   // stand-in for the bucket, in .wrangler/state.
   "r2_buckets": [{ "binding": "PDFS", "bucket_name": "civilsolve-pdfs" }],
+  // The usage log (worker/usage.ts; since 18 October 2026): one row per task
+  // and per PDF - who, when, which question, which model, how many calls -
+  // never the content. Created in APAC. The table comes from migrations/,
+  // which `npm run deploy` applies before deploying; for `npm run dev`, run
+  // `npx wrangler d1 migrations apply civilsolve-usage --local` once.
+  "d1_databases": [
+    {
+      "binding": "USAGE",
+      "database_name": "civilsolve-usage",
+      "database_id": "04a47607-91a4-434d-927b-81b9ab9747a9",
+      "migrations_dir": "migrations"
+    }
+  ],
   // Workers Rate Limiting: at most 20 model-calling requests (solve,
   // interpret, judge) per client IP per minute. One run with every option
   // on is about a dozen - eight solvers, two readers, a reconciler, a judge

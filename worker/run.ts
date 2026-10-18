@@ -368,6 +368,18 @@ export type RunTaskParams = {
 
 export type TaskEvent = { type: string } & Record<string, unknown>;
 
+/** What a task came to, for the usage log (worker/usage.ts). */
+export type TaskOutcome = {
+  outcome: "done" | "error" | "timeout" | "cancelled";
+  /** Upstream requests made: every attempt, retry and fallback. */
+  modelCalls: number;
+  /** The model, channel and thinking level of the last attempt - the one that answered. */
+  model: string;
+  channel: string;
+  effort: EffortKey;
+  error?: string;
+};
+
 /**
  * How long this task may run: the route's floor (SAFETY_TIMEOUT_MS unless the
  * route sets `timeoutMs`) scaled by the upload, since a whole exam paper is a
@@ -419,12 +431,13 @@ export function streamSink(writer: WritableStreamDefaultWriter<Uint8Array>): Tas
 
 /**
  * Runs one provider task, sending app-level events to `sink`, and closes
- * the sink when finished (success or error).
+ * the sink when finished (success or error). Resolves to what it came to,
+ * for the usage log; it never rejects.
  */
 export async function runTask(
   sink: TaskSink,
   params: RunTaskParams,
-) {
+): Promise<TaskOutcome> {
   const { provider, env, effort: requestedEffort, routeOverride, task, finalize, signal } = params;
   const write = (event: TaskEvent) => sink.event(event);
 
@@ -436,6 +449,17 @@ export async function runTask(
   // or set a floor under the user's choice. Not const: a model that spends its
   // whole budget thinking gets retried one level down (see MAX_EFFORT_STEPDOWNS).
   let effort = route.forceEffort ?? clampEffort(requestedEffort, route);
+  let modelCalls = 0;
+  let outcome: TaskOutcome["outcome"] = "error";
+  let failure: string | undefined;
+  const summary = (): TaskOutcome => ({
+    outcome,
+    modelCalls,
+    model: route.model,
+    channel: route.channel,
+    effort,
+    ...(failure ? { error: failure } : {}),
+  });
 
   const timeoutMs = taskTimeoutFor(params);
   const remainingMs = params.deadlineAt === undefined
@@ -460,8 +484,9 @@ export async function runTask(
     if (remainingMs === 0 && !abort.signal.aborted) onTimeout();
     abort.signal.throwIfAborted();
     if (route.problem) {
+      failure = route.problem;
       await write({ type: "error", message: route.problem });
-      return;
+      return summary();
     }
 
     await write({ type: "status", message: `Asking ${route.label}...` });
@@ -545,6 +570,7 @@ export async function runTask(
     for (let step = 0; step < maxSteps; step += 1) {
       abort.signal.throwIfAborted();
       const request = buildRequest(route, caps, task, effort, streamUpstream);
+      modelCalls += 1;
       // Set only when a flush actually reached the client: until then a
       // failed attempt can still be retried without the user seeing a restart.
       let deltaEmitted = false;
@@ -755,9 +781,16 @@ export async function runTask(
     // The model that actually answered: after a switch down a model chain
     // it is not the one the user picked (Gemini Flash is 3.8, then 3.5).
     abort.signal.throwIfAborted();
+    outcome = "done";
     await write({ type: "done", ...donePayload, model: route.model });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected provider error.";
+    // A done event that could not be written (the inline client went away)
+    // still had its answer made.
+    if (outcome !== "done") {
+      outcome = timedOut ? "timeout" : signal?.aborted ? "cancelled" : "error";
+      failure = message;
+    }
     try {
       await write({ type: "error", message, ...(timedOut ? { timedOut: true } : {}) });
     } catch {
@@ -769,6 +802,7 @@ export async function runTask(
     signal?.removeEventListener("abort", onCancel);
     await sink.close();
   }
+  return summary();
 }
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,11 @@ export type WorkerEnv = {
    * for as long as the job keeps its answer.
    */
   PDFS?: R2Bucket;
+  /**
+   * D1 database "civilsolve-usage": the usage log, one row per task and per
+   * PDF (worker/usage.ts). Optional - without it nothing is logged.
+   */
+  USAGE?: D1Database;
 
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;
