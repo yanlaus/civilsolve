@@ -313,6 +313,9 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       // Start outside the visitor's HTTP invocation, as Muse does. A student
       // abroad reported 502 while the same endpoint worked for the owner.
       // This changes invocation context; overseas recovery still needs testing.
+      // Since 18 October 2026 (the owner's call) the job is placed where
+      // Muse's is too, so ChatGPT is called exactly the way Muse is.
+      region: "wnam",
       startInAlarm: true,
       // Luna is offered at "high" or "max" only: the user's pick is honoured
       // at those two levels and anything lower is raised to "high". "max" maps
