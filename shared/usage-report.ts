@@ -43,8 +43,11 @@ export type UsageReport = {
   recent: Array<{
     id: number;
     startedAt: number;
+    endedAt: number | null;
     ip: string | null;
     country: string | null;
+    /** The task's job: its answer is kept 24 hours after it finished (GET /api/jobs/:id). */
+    jobId: string | null;
     kind: string;
     detail: string | null;
     revision: number;
@@ -60,6 +63,8 @@ export type UsageReport = {
     outcome: string;
     durationMs: number | null;
     error: string | null;
+    /** Its PDF is kept in R2 (GET /api/pdf/:id?existing serves it, never makes one). */
+    pdf: boolean;
   }>;
 };
 

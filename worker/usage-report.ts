@@ -44,7 +44,18 @@ export function usageFilter(query: URLSearchParams): UsageFilter {
   };
 }
 
-export async function usageReport(db: D1Database, filter: UsageFilter): Promise<UsageReport> {
+/**
+ * The latest rows' links (19 October 2026, the owner's request), to what is
+ * already kept and nothing new: a task's answer, in its TaskJob for 24 hours
+ * after it finished (GET /api/jobs/:id), and the PDF of it someone asked
+ * for, in R2 for good. `pdfKept` checks the bucket for a job's PDF - asked
+ * only of jobs whose PDF the log says was served.
+ */
+export async function usageReport(
+  db: D1Database,
+  filter: UsageFilter,
+  pdfKept: (jobId: string) => Promise<boolean> = async () => false,
+): Promise<UsageReport> {
   const now = Date.now();
   const since = filter.days ? now - filter.days * DAY_MS : 0;
   const clauses = ["started_at >= ?"];
@@ -60,7 +71,7 @@ export async function usageReport(db: D1Database, filter: UsageFilter): Promise<
   const where = `WHERE ${clauses.join(" AND ")}`;
   const query = (sql: string) => db.prepare(sql).bind(...binds);
 
-  const [totals, daily, byIp, byPart, recent] = await db.batch([
+  const [totals, daily, byIp, byPart, recent, pdfs] = await db.batch([
     query(`SELECT ${METRICS} FROM usage_log ${where}`),
     query(`SELECT ${LOCAL_DAY} AS day, ${METRICS} FROM usage_log ${where} GROUP BY day ORDER BY day DESC`),
     query(
@@ -80,12 +91,30 @@ export async function usageReport(db: D1Database, filter: UsageFilter): Promise<
        ORDER BY modelCalls DESC, tasks DESC`,
     ),
     query(
-      `SELECT id, started_at AS startedAt, ip, country, kind, detail, revision, provider, variant, effort,
-         question, pages, solutions, model, channel, model_calls AS modelCalls, outcome,
-         duration_ms AS durationMs, error
+      `SELECT id, started_at AS startedAt, ended_at AS endedAt, ip, country, job_id AS jobId, kind, detail,
+         revision, provider, variant, effort, question, pages, solutions, model, channel,
+         model_calls AS modelCalls, outcome, duration_ms AS durationMs, error
        FROM usage_log ${where} ORDER BY id DESC LIMIT ${MAX_RECENT_ROWS}`,
     ),
+    // The jobs whose PDF was served since the range began: asked after their
+    // task, from any IP (a shared link opens elsewhere), so by time alone.
+    db
+      .prepare("SELECT DISTINCT job_id AS jobId FROM usage_log WHERE kind = 'pdf' AND outcome = 'done' AND started_at >= ?")
+      .bind(since),
   ]);
+
+  type RecentRow = Omit<UsageReport["recent"][number], "pdf">;
+  const served = new Set((pdfs.results as Array<{ jobId: string | null }>).map((row) => row.jobId));
+  const rows = recent.results as RecentRow[];
+  const kept = new Set(
+    (
+      await Promise.all(
+        [...new Set(rows.filter((row) => row.kind !== "pdf" && row.jobId && served.has(row.jobId)).map((row) => row.jobId!))].map(
+          async (jobId) => ((await pdfKept(jobId).catch(() => false)) ? jobId : null),
+        ),
+      )
+    ).filter(Boolean),
+  );
 
   return {
     generatedAt: now,
@@ -94,6 +123,6 @@ export async function usageReport(db: D1Database, filter: UsageFilter): Promise<
     daily: daily.results as UsageReport["daily"],
     byIp: byIp.results as UsageReport["byIp"],
     byPart: byPart.results as UsageReport["byPart"],
-    recent: recent.results as UsageReport["recent"],
+    recent: rows.map((row) => ({ ...row, pdf: row.kind !== "pdf" && Boolean(row.jobId && kept.has(row.jobId)) })),
   };
 }
