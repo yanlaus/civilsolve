@@ -12,6 +12,7 @@ import { ArrowLeft, FileDown, RefreshCw, X } from "lucide-react";
 import { isProviderKey, providerDisplayName, type ModelVariant } from "../../shared/providers";
 import { usagePartLabel, type UsageMetrics, type UsageReport } from "../../shared/usage-report";
 import { AnswerViewer } from "@/components/usage/answer-viewer";
+import { QuestionViewer } from "@/components/usage/question-viewer";
 import { RETENTION_MS } from "@/lib/run-store";
 
 type RecentRow = UsageReport["recent"][number];
@@ -190,6 +191,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [viewing, setViewing] = useState<RecentRow | null>(null);
+  const [viewingPages, setViewingPages] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Usage log · CivilSolve";
@@ -373,7 +375,7 @@ export default function UsagePage() {
 
             <Section
               title="Latest · 最近"
-              note={`The latest ${report.recent.length} rows, newest first. Tap a question to see everything asked about it; hover an outcome for its error. View opens an answer while the server keeps it (24 hours after it finished); PDF is one the student had made. The question's pages are never kept on the server.`}
+              note={`The latest ${report.recent.length} rows, newest first. Tap a question to see everything asked about it; hover an outcome for its error. View opens an answer while the server keeps it (24 hours after it finished); PDF is one the student had made. Pages opens the question's pages and lecture notes while the server keeps them: 24 hours after its last task, or for good once a PDF was made.`}
             >
               <Table
                 head={["Time", "IP", "Part", "Model", "Calls", "Outcome", "Took", "Answer", "Question", "Pages"]}
@@ -405,11 +407,27 @@ export default function UsagePage() {
                     </td>
                     <td className={cell}>
                       {entry.question ? (
-                        <FilterButton
-                          label={entry.question.slice(0, 8)}
-                          title="Everything asked about this question"
-                          onClick={() => setQuestion(entry.question)}
-                        />
+                        <span className="inline-flex items-center gap-2.5">
+                          <FilterButton
+                            label={entry.question.slice(0, 8)}
+                            title="Everything asked about this question"
+                            onClick={() => setQuestion(entry.question)}
+                          />
+                          {report.questions[entry.question] ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewingPages(entry.question)}
+                              className="text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
+                              title="The pages the student uploaded, and any lecture notes"
+                            >
+                              Pages ({report.questions[entry.question].pages}
+                              {report.questions[entry.question].notes
+                                ? ` + ${report.questions[entry.question].notes} notes`
+                                : ""}
+                              )
+                            </button>
+                          ) : null}
+                        </span>
                       ) : (
                         "–"
                       )}
@@ -424,7 +442,21 @@ export default function UsagePage() {
           <p className="mt-6 text-sm text-cs-ink-3">Reading the usage log...</p>
         ) : null}
       </div>
-      {viewing ? <AnswerViewer row={viewing} onClose={() => setViewing(null)} /> : null}
+      {viewing ? (
+        <AnswerViewer
+          row={viewing}
+          onClose={() => setViewing(null)}
+          onShowPages={
+            viewing.question && report?.questions[viewing.question]
+              ? () => {
+                  setViewingPages(viewing.question);
+                  setViewing(null);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {viewingPages ? <QuestionViewer question={viewingPages} onClose={() => setViewingPages(null)} /> : null}
     </div>
   );
 }

@@ -7,7 +7,7 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler d1 migrations apply civilsolve-usage --remote && wrangler deploy",
     "check": "tsc --noEmit && tsc --noEmit -p worker",
-    "test:jobs": "node --test tests/task-job-alarm.test.mjs tests/task-job-runtime.test.mjs tests/usage-log.test.mjs",
+    "test:jobs": "node --test tests/task-job-alarm.test.mjs tests/task-job-runtime.test.mjs tests/usage-log.test.mjs tests/question-store.test.mjs",
     "test:models": "node --test tests/model-variants.test.mjs tests/file-names.test.mjs"
   },
   "dependencies": {

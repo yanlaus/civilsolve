@@ -6,6 +6,7 @@ import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
 import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
 import { usageFilter, usageReport } from "./usage-report";
+import { PAGE_NAME_PATTERN, QUESTION_PATTERN, questionPrefix, storedQuestion } from "./questions";
 import {
   clientHeaders,
   clientOf,
@@ -19,6 +20,7 @@ import {
 
 export { TaskJob } from "./jobs";
 export { PdfBudget } from "./pdf";
+export { QuestionStore } from "./questions";
 
 const app = new Hono<{ Bindings: WorkerEnv }>();
 
@@ -283,7 +285,11 @@ app.get("/api/pdf/:id", async (c) => {
   if (!stored.ok) {
     return c.json({ error: "This result is no longer available - results are kept for 24 hours." }, 404);
   }
-  const { terminal, expiresAt } = (await stored.json()) as { terminal: unknown; expiresAt: number };
+  const { terminal, expiresAt, question } = (await stored.json()) as {
+    terminal: unknown;
+    expiresAt: number;
+    question?: string | null;
+  };
   const content = pdfContentOf(terminal);
   if (!content) return c.json({ error: "There is no PDF for this result." }, 404);
 
@@ -327,6 +333,17 @@ app.get("/api/pdf/:id", async (c) => {
       });
       forever = true;
       c.executionCtx.waitUntil(budget.addStored(pdf.byteLength));
+      // Its question's pages are kept for good with it (worker/questions.ts).
+      const stores = c.env.QUESTIONS;
+      if (stores && question && QUESTION_PATTERN.test(question)) {
+        c.executionCtx.waitUntil(
+          stores
+            .get(stores.idFromName(question))
+            .keep()
+            .then((bytes) => (bytes ? budget.addStored(bytes) : 0))
+            .catch(() => 0),
+        );
+      }
     } catch {
       // Not stored: still served, and cached for as long as the answer lives.
     }
@@ -358,14 +375,59 @@ app.get("/api/admin/usage", async (c) => {
   if (!db) return c.json({ error: "The usage log is not set up on this server." }, 503);
   try {
     const bucket = c.env.PDFS;
-    const report = await usageReport(db, usageFilter(new URL(c.req.url).searchParams), async (jobId) =>
-      Boolean(bucket && (await bucket.head(pdfKey(jobId)))),
+    const report = await usageReport(
+      db,
+      usageFilter(new URL(c.req.url).searchParams),
+      async (jobId) => Boolean(bucket && (await bucket.head(pdfKey(jobId)))),
+      async (question) => (bucket ? storedQuestion(bucket, question) : null),
     );
     return c.json(report, 200, { "cache-control": "no-store" });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     return c.json({ error: `The usage log could not be read: ${detail}` }, 500);
   }
+});
+
+// A question's pages and lecture notes, for the usage page (no password, the
+// owner's call): the list, with whether they are kept for good or when they
+// go, then each page from R2. Never cached.
+app.get("/api/admin/question/:question", async (c) => {
+  const question = c.req.param("question");
+  const bucket = c.env.PDFS;
+  if (!bucket || !QUESTION_PATTERN.test(question)) return c.json({ error: "No such question." }, 404);
+  const listed = await bucket.list({ prefix: questionPrefix(question), limit: 200 });
+  const names = listed.objects
+    .map((object) => object.key.slice(questionPrefix(question).length))
+    .filter((name) => PAGE_NAME_PATTERN.test(name))
+    .sort();
+  const stores = c.env.QUESTIONS;
+  const info = stores ? await stores.get(stores.idFromName(question)).info() : { kept: false, deleteAt: null };
+  return c.json(
+    {
+      pages: names.filter((name) => name.startsWith("p")),
+      notes: names.filter((name) => name.startsWith("n")),
+      ...info,
+    },
+    200,
+    { "cache-control": "no-store" },
+  );
+});
+
+app.get("/api/admin/question/:question/:page", async (c) => {
+  const question = c.req.param("question");
+  const page = c.req.param("page");
+  const bucket = c.env.PDFS;
+  if (!bucket || !QUESTION_PATTERN.test(question) || !PAGE_NAME_PATTERN.test(page)) {
+    return c.json({ error: "No such page." }, 404);
+  }
+  const object = await bucket.get(`${questionPrefix(question)}${page}`);
+  if (!object) return c.json({ error: "This page is no longer kept." }, 404);
+  return new Response(object.body, {
+    headers: {
+      "content-type": object.httpMetadata?.contentType ?? "image/jpeg",
+      "cache-control": "no-store",
+    },
+  });
 });
 
 // Stop pressed: end the job's model call instead of leaving it running.

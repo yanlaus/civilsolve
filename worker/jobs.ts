@@ -11,8 +11,11 @@
 //
 // What is stored, and for how long: the task's final event only - the
 // solution, reading or verdict as text, or the error message - plus its
-// kind, provider and creation time. The uploaded images are held in memory
-// for the run and never written to storage. Everything is deleted by an
+// kind, provider, creation time and its question's fingerprint. The uploaded
+// images are held in memory for the run and never written to this object's
+// storage; since 19 October 2026 the job writes them to R2 instead, once per
+// question, for as long as the question's answers or PDFs are kept
+// (worker/questions.ts). Everything here is deleted by an
 // alarm JOB_RETENTION_MS after the job finishes (or, if it never does, after
 // the longest possible run plus that). Whoever holds the job id - a random
 // UUID the browser keeps in localStorage - can read the result until then.
@@ -37,6 +40,7 @@ import {
   type RunTaskParams,
 } from "./run";
 import { buildTask, isTaskKind } from "./tasks";
+import { storeQuestionPages } from "./questions";
 import { describeRequest, forwardedClient, logTaskEnd, logTaskStart } from "./usage";
 
 /** How long a finished job's result is kept. */
@@ -181,7 +185,19 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     // Not awaited: the log never holds up the task.
     this.usageBase = { model: route.model, channel: route.channel, effort: params.effort };
     const startedAt = this.startedAt;
-    this.usageRow = describeRequest(kind, provider, body).then((described) =>
+    const described = describeRequest(kind, provider, body);
+    // The question's pages and lecture notes, kept in R2 while its answers
+    // or PDFs are (worker/questions.ts) - not in this object's storage,
+    // which keeps only the question's fingerprint, for its PDF to keep them.
+    const task = params.task;
+    void described
+      .then(async ({ question }) => {
+        if (!question) return;
+        await this.ctx.storage.put("question", question);
+        await storeQuestionPages(this.env, question, task.images, task.referenceImages ?? []);
+      })
+      .catch(() => {});
+    this.usageRow = described.then((described) =>
       logTaskStart(this.env, {
         startedAt,
         client: forwardedClient(request),
@@ -232,7 +248,9 @@ export class TaskJob extends DurableObject<WorkerEnv> {
       );
     }
     const expiresAt = (await this.ctx.storage.getAlarm()) ?? Date.now() + JOB_RETENTION_MS;
-    return Response.json({ terminal, expiresAt });
+    // Its question's fingerprint: a PDF made of this answer keeps the pages.
+    const question = (await this.ctx.storage.get<string>("question")) ?? null;
+    return Response.json({ terminal, expiresAt, question });
   }
 
   /**

@@ -36,12 +36,15 @@
   "durable_objects": {
     "bindings": [
       { "name": "JOBS", "class_name": "TaskJob" },
-      { "name": "PDF_BUDGET", "class_name": "PdfBudget" }
+      { "name": "PDF_BUDGET", "class_name": "PdfBudget" },
+      // One per question: when its kept pages are deleted (worker/questions.ts).
+      { "name": "QUESTIONS", "class_name": "QuestionStore" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TaskJob"] },
-    { "tag": "v2", "new_sqlite_classes": ["PdfBudget"] }
+    { "tag": "v2", "new_sqlite_classes": ["PdfBudget"] },
+    { "tag": "v3", "new_sqlite_classes": ["QuestionStore"] }
   ],
   // Browser Rendering: the headless Chrome that prints solutions to PDF
   // (GET /api/pdf/:id, worker/pdf.ts). Workers Paid includes 10 browser
