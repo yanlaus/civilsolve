@@ -234,7 +234,11 @@ app.get("/api/pdf/:id", async (c) => {
     return c.json({ error: "This result is no longer available." }, 404);
   }
   const asked = { startedAt: Date.now(), client: clientOf(c.req.raw) };
+  // The usage page's link (?existing): a PDF already made, or nothing - it
+  // never makes one, and the owner opening it is not a student's use.
+  const existingOnly = c.req.query("existing") !== undefined;
   const logPdf = (detail: "cache" | "kept" | "made" | null, outcome: UsageOutcome, error: string | null = null) =>
+    !existingOnly &&
     c.executionCtx.waitUntil(
       describeRequest("pdf", null, null).then((request) =>
         logRequest(c.env, { ...asked, jobId: id, request: { ...request, detail }, outcome, error }),
@@ -264,6 +268,7 @@ app.get("/api/pdf/:id", async (c) => {
     logPdf("kept", "done");
     return response;
   }
+  if (existingOnly) return c.json({ error: "This PDF was not made, or is no longer kept." }, 404);
 
   const browser = c.env.BROWSER;
   const budgets = c.env.PDF_BUDGET;
@@ -345,7 +350,10 @@ app.get("/api/admin/usage", async (c) => {
   const db = c.env.USAGE;
   if (!db) return c.json({ error: "The usage log is not set up on this server." }, 503);
   try {
-    const report = await usageReport(db, usageFilter(new URL(c.req.url).searchParams));
+    const bucket = c.env.PDFS;
+    const report = await usageReport(db, usageFilter(new URL(c.req.url).searchParams), async (jobId) =>
+      Boolean(bucket && (await bucket.head(pdfKey(jobId)))),
+    );
     return c.json(report, 200, { "cache-control": "no-store" });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

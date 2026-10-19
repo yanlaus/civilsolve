@@ -1,14 +1,57 @@
 // The usage page (/admin/usage, 19 October 2026, the owner's request): the
 // server's usage log (worker/usage.ts) read in the app instead of the
 // Cloudflare dashboard - totals, each day, each IP, each part of the page and
-// model, and the latest tasks. No password (the owner's call): anyone with
-// the link can read it. Tap an IP or a question to see only its rows.
+// model, and the latest tasks, each with its answer while the server still
+// keeps it (24 hours) and its PDF if one was made. No password (the owner's
+// call): anyone with the link can read it. Tap an IP or a question to see
+// only its rows.
 // Lazy-loaded by App.tsx on this path only, so the main page never carries it.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, FileDown, RefreshCw, X } from "lucide-react";
 import { isProviderKey, providerDisplayName, type ModelVariant } from "../../shared/providers";
 import { usagePartLabel, type UsageMetrics, type UsageReport } from "../../shared/usage-report";
+import { AnswerViewer } from "@/components/usage/answer-viewer";
+import { RETENTION_MS } from "@/lib/run-store";
+
+type RecentRow = UsageReport["recent"][number];
+
+/** Whether the row's answer is still in its job: a finished task, under 24 hours old. */
+function answerKept(row: RecentRow, now: number) {
+  return row.kind !== "pdf" && row.outcome === "done" && Boolean(row.jobId) && row.endedAt !== null && now - row.endedAt < RETENTION_MS;
+}
+
+/** The row's links: its stored answer and its PDF, each only when it exists. */
+function AnswerLinks({ row, now, onView }: { row: RecentRow; now: number; onView: (row: RecentRow) => void }) {
+  const view = answerKept(row, now);
+  if (!view && !row.pdf) return <span className="text-cs-ink-3">–</span>;
+  return (
+    <span className="inline-flex items-center gap-2.5">
+      {view ? (
+        <button
+          type="button"
+          onClick={() => onView(row)}
+          className="text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
+          title="The answer, as the server keeps it for 24 hours after it finished"
+        >
+          View
+        </button>
+      ) : null}
+      {row.pdf ? (
+        <a
+          href={`/api/pdf/${row.jobId}?existing`}
+          target="_blank"
+          rel="noopener"
+          className="inline-flex items-center gap-0.5 text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
+          title="The PDF the student had made, kept for good"
+        >
+          <FileDown className="h-3.5 w-3.5" aria-hidden="true" />
+          PDF
+        </a>
+      ) : null}
+    </span>
+  );
+}
 
 const RANGES = [
   { days: 1, label: "Last 24 hours" },
@@ -146,6 +189,7 @@ export default function UsagePage() {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [viewing, setViewing] = useState<RecentRow | null>(null);
 
   useEffect(() => {
     document.title = "Usage log · CivilSolve";
@@ -329,10 +373,10 @@ export default function UsagePage() {
 
             <Section
               title="Latest · 最近"
-              note={`The latest ${report.recent.length} rows, newest first. Tap a question to see everything asked about it; hover an outcome for its error.`}
+              note={`The latest ${report.recent.length} rows, newest first. Tap a question to see everything asked about it; hover an outcome for its error. View opens an answer while the server keeps it (24 hours after it finished); PDF is one the student had made. The question's pages are never kept on the server.`}
             >
               <Table
-                head={["Time", "IP", "Part", "Model", "Calls", "Outcome", "Took", "Question", "Pages"]}
+                head={["Time", "IP", "Part", "Model", "Calls", "Outcome", "Took", "Answer", "Question", "Pages"]}
                 empty={!report.recent.length}
               >
                 {report.recent.map((entry) => (
@@ -357,6 +401,9 @@ export default function UsagePage() {
                     </td>
                     <td className={cell}>{formatDuration(entry.durationMs)}</td>
                     <td className={cell}>
+                      <AnswerLinks row={entry} now={report.generatedAt} onView={setViewing} />
+                    </td>
+                    <td className={cell}>
                       {entry.question ? (
                         <FilterButton
                           label={entry.question.slice(0, 8)}
@@ -377,6 +424,7 @@ export default function UsagePage() {
           <p className="mt-6 text-sm text-cs-ink-3">Reading the usage log...</p>
         ) : null}
       </div>
+      {viewing ? <AnswerViewer row={viewing} onClose={() => setViewing(null)} /> : null}
     </div>
   );
 }
