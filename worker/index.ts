@@ -5,6 +5,7 @@ import { resolveRoute, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
 import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
+import { usageFilter, usageReport } from "./usage-report";
 import {
   clientHeaders,
   clientOf,
@@ -335,6 +336,21 @@ app.get("/api/pdf/:id", async (c) => {
   c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
   logPdf("made", "done");
   return response;
+});
+
+// The usage page's data (/admin/usage): the usage log summed up. Open to
+// anyone with the link - no password, the owner's call (19 October 2026) -
+// so it is never cached and the page asks search engines not to index it.
+app.get("/api/admin/usage", async (c) => {
+  const db = c.env.USAGE;
+  if (!db) return c.json({ error: "The usage log is not set up on this server." }, 503);
+  try {
+    const report = await usageReport(db, usageFilter(new URL(c.req.url).searchParams));
+    return c.json(report, 200, { "cache-control": "no-store" });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `The usage log could not be read: ${detail}` }, 500);
+  }
 });
 
 // Stop pressed: end the job's model call instead of leaving it running.
