@@ -243,6 +243,37 @@ function writerOf(run: Exclude<StudyRun, { status: "idle" }>): StudyWriter {
   return { provider: run.provider, variant: run.variant, effort: run.effort };
 }
 
+/**
+ * What a source sends, as the page shows it now - for the study notes and
+ * for Visualize: one solver's finished solution alone, or the verdict with the
+ * solutions it graded, in its order so its letters still match. Null when
+ * the source has nothing finished to send.
+ */
+export function sourceSolutions(
+  source: StudySource,
+  runs: ProviderRuns,
+  judgeRun: JudgeRun,
+): { solvers: ProviderKey[]; solutions: string[]; verdict?: string } | null {
+  const solutionOf = (key: ProviderKey) => {
+    const entry = runs[key];
+    return entry.status === "done" ? entry.solution : null;
+  };
+  const judged = source === "verdict" && judgeRun.status === "done" ? judgeRun : null;
+  if (source === "verdict" ? !judged : !solutionOf(source)) return null;
+  const solvers = judged ? judged.solvers : [source as ProviderKey];
+  if (!solvers.some((key) => solutionOf(key))) return null;
+  return {
+    solvers,
+    solutions: solvers.map((key) => {
+      const solution = solutionOf(key);
+      // A graded solution that has gone since (retried, and failed): kept as
+      // a placeholder so the verdict's letters still line up.
+      return solution ? artifactToText(solution, MAX_SOLUTION_TEXT) : "(This solution is no longer available.)";
+    }),
+    ...(judged ? { verdict: judgementToText(judged.judgement, judged.solvers.length) } : {}),
+  };
+}
+
 /** A message to go mid-sentence: "... did not work: HTTP 500. This is ..." */
 function withoutFullStop(message: string) {
   return message.trim().replace(/[.。]+$/, "");
@@ -1114,31 +1145,17 @@ export function useSolve() {
       const body = bodyRef.current;
       // One request per kind at a time; the page disables the button meanwhile.
       if (!run || !body || studyTasksRef.current.has(kind)) return;
-      const current = runsRef.current;
-      const solutionOf = (key: ProviderKey) => {
-        const entry = current[key];
-        return entry.status === "done" ? entry.solution : null;
-      };
-      const judged =
-        source === "verdict" && judgeRunRef.current.status === "done" ? judgeRunRef.current : null;
-      if (source === "verdict" ? !judged : !solutionOf(source)) return;
-      const solvers = judged ? judged.solvers : [source as ProviderKey];
-      if (!solvers.some((key) => solutionOf(key))) return;
+      const picked = sourceSolutions(source, runsRef.current, judgeRunRef.current);
+      if (!picked) return;
+      const { solvers, solutions, verdict } = picked;
 
       const sent: StudyRequestBody = {
         kind,
         images: body.images,
         notes: body.notes,
         ...(body.interpretation ? { interpretation: body.interpretation } : {}),
-        solutions: solvers.map((key) => {
-          const solution = solutionOf(key);
-          // A graded solution that has gone since (retried, and failed):
-          // kept as a placeholder so the verdict's letters still line up.
-          return solution
-            ? artifactToText(solution, MAX_SOLUTION_TEXT)
-            : "(This solution is no longer available.)";
-        }),
-        ...(judged ? { verdict: judgementToText(judged.judgement, judged.solvers.length) } : {}),
+        solutions,
+        ...(verdict ? { verdict } : {}),
         ...(writer.variant ? { variant: writer.variant } : {}),
         ...(writer.effort ? { effort: writer.effort } : {}),
         ...(refinement ? { revision: refinement.revision } : {}),

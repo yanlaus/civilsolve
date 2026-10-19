@@ -1,6 +1,7 @@
 // "History · 紀錄" (3 October 2026): the questions solved in this browser,
 // for revision - each with its first page, every solver's solution, the
-// verdict and the study notes, kept as text after the server has deleted the
+// verdict, the study notes and the Visualize boards (in their sandboxed
+// frame, board-viewer.tsx), kept as text after the server has deleted the
 // answers (lib/history-store.ts). Read-only; a kept answer's PDF link works
 // for good once the PDF was made, and within 24 hours of solving it can
 // still be made. Since 16 October 2026 one of the latest questions - their
@@ -12,8 +13,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, FileDown, History, Languages, RotateCcw, Trash2, X } from "lucide-react";
 import { providerDisplayName, SOLUTION_ORDER, type ProviderKey } from "../../shared/providers";
 import { STUDY_KINDS, STUDY_TITLES } from "../../shared/study";
+import type { VisualBoard } from "../../shared/visual";
 import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib/history-store";
 import { MAX_SAVED_QUESTIONS, savedQuestionKeys } from "@/lib/question-store";
+import { BoardViewer } from "./solve/board-viewer";
 import MathProse from "./solve/math-prose";
 import { ProviderLogo } from "./solve/provider-logo";
 import { SolutionArticle } from "./solve/solution-article";
@@ -226,7 +229,33 @@ function EntryView({
           </details>
         );
       })}
+
+      {entry.visual?.boards.length ? <HistoryBoards boards={entry.visual.boards} /> : null}
     </div>
+  );
+}
+
+/**
+ * The Visualize deck, read-only. The boards run only while the fold is open:
+ * a closed fold's frame would otherwise load and run the board unseen.
+ */
+function HistoryBoards({ boards }: { boards: VisualBoard[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="group rounded-cs border border-cs-line-soft bg-cs-surface"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 text-sm font-semibold text-cs-ink">
+        圖解 · Visualize ({boards.length} {boards.length === 1 ? "board" : "boards"})
+        <ChevronDown className="ml-auto h-4 w-4 text-cs-ink-3 transition group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      {open ? (
+        <div className="border-t border-cs-line-soft px-4 py-3">
+          <BoardViewer boards={boards} />
+        </div>
+      ) : null}
+    </details>
   );
 }
 

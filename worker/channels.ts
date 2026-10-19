@@ -466,6 +466,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       startSchema: "loose",
     },
   },
+  // (The boards of Visualize 圖解 run on this route, pinned: VISUAL_ROUTE.)
   grok: {
     opencode: {
       ...OPENCODE_SPEC,
@@ -939,6 +940,15 @@ export function interpretOverride(
   return model ? { channel, model } : undefined;
 }
 
+/**
+ * Where Visualize 圖解 draws its boards (shared/visual.ts): DeepSeek V4.1
+ * Flash on the OpenCode Go subscription and nothing else (the owner's call,
+ * 19 October 2026), whatever DEEPSEEK_CHANNEL or OPENCODE_DEEPSEEK_MODEL say.
+ * The owner's own rebuild of Kimi's page drew a four-board deck with it, every
+ * board free of script errors.
+ */
+export const VISUAL_ROUTE: RouteOverride = { channel: "opencode", model: "deepseek-v4.1-flash" };
+
 /** Health payload for one provider. Never exposes key values. */
 /**
  * The models behind a provider's picks (PROVIDER_VARIANTS), other than the
@@ -1069,6 +1079,11 @@ export type Task = {
    * x-opencode-session and refuses requests without one.
    */
   session: string;
+  /**
+   * The schema rung to start on, over the route's (RouteSpec.startSchema).
+   * "none" for a task whose answer is not JSON - the boards (shared/visual.ts).
+   */
+  startSchema?: Capabilities["schema"];
 };
 
 /**

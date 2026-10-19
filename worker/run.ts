@@ -306,8 +306,10 @@ function paramRejection(error: UpstreamError): DropTarget | null {
 //   schema:    strict -> loose (plain JSON mode) -> none
 const MAX_DOWNGRADES = 3;
 
-function startingCapabilities(route: Route, effort: EffortKey): Capabilities {
-  return { reasoning: supportsEffort(route, effort), schema: route.startSchema };
+// A task that does not answer in JSON (the boards: Task.startSchema) starts
+// with no schema at all, whatever rung the route itself starts on.
+function startingCapabilities(route: Route, effort: EffortKey, task: Task): Capabilities {
+  return { reasoning: supportsEffort(route, effort), schema: task.startSchema ?? route.startSchema };
 }
 
 function canDrop(caps: Capabilities, drop: DropTarget) {
@@ -501,7 +503,7 @@ export async function runTask(
       // Each fallback channel is a fresh route with its own ladder.
       channelChain.length * stepsPerRoute;
 
-    let caps = startingCapabilities(route, effort);
+    let caps = startingCapabilities(route, effort, task);
     let transientRetries = 0;
     let effortStepDowns = 0;
     let blindDowngrades = 0;
@@ -554,7 +556,7 @@ export async function runTask(
       const previous = route.label;
       route = resolveRoute(provider, env, { channel: next, model: routeOverride?.model });
       effort = route.forceEffort ?? clampEffort(requestedEffort, route);
-      caps = startingCapabilities(route, effort);
+      caps = startingCapabilities(route, effort, task);
       streamUpstream = wantsUpstreamStream(route, env);
       transientRetries = 0;
       blindDowngrades = 0;

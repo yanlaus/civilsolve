@@ -1,6 +1,7 @@
 // The questions a student has solved, kept in this browser for revision
 // (3 October 2026): each run's question (a small picture of its first page),
-// every solver's solution as text, the verdict and the study notes - the
+// every solver's solution as text, the verdict, the study notes and the
+// Visualize boards - the
 // answers on the server are deleted after 24 hours, these are not. It never
 // leaves the device (AGENTS.md); "Delete" and "Clear all" in the history
 // remove it. At most MAX_ENTRIES, the oldest dropped first. The question's
@@ -10,6 +11,7 @@
 import type { StudyKind, StudyResult } from "../../shared/study";
 import type { ModelVariant, ProviderKey } from "../../shared/providers";
 import type { ProviderArtifact } from "../../shared/solution";
+import type { VisualBoard } from "../../shared/visual";
 import { inStore, updateRecord } from "./idb";
 import { clearQuestions, deleteQuestion } from "./question-store";
 
@@ -43,6 +45,11 @@ export type HistoryEntry = {
     jobId?: string;
   };
   study?: Partial<Record<StudyKind, { study: StudyResult; jobId?: string }>>;
+  /**
+   * The Visualize deck (since 19 October 2026): its boards as DeepSeek wrote
+   * them, shown again in the same sandboxed frame - never as page HTML.
+   */
+  visual?: { boards: VisualBoard[]; jobId?: string };
 };
 
 const MAX_ENTRIES = 100;

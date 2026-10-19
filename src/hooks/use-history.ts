@@ -1,5 +1,6 @@
 // Writes the run on the page into the history (lib/history-store.ts) as its
-// answers come in: every finished solution, the verdict and the study notes,
+// answers come in: every finished solution, the verdict, the study notes and
+// the Visualize deck,
 // with the question's first page as a thumbnail - and the question itself,
 // its pages, notes and lecture notes, so it can be solved again
 // (question-store.ts). A run picked back up after a reload only ever adds to
@@ -17,6 +18,7 @@ import type {
   RunVariants,
   StudyRuns,
 } from "@/hooks/use-solve";
+import type { VisualDeck } from "@/hooks/use-visual";
 import { makeThumbnail, saveEntry, type HistoryEntry } from "@/lib/history-store";
 import { saveQuestion } from "@/lib/question-store";
 import type { SolveRequestBody } from "../../shared/stream-protocol";
@@ -29,6 +31,8 @@ type HistorySource = {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
   studyRuns: StudyRuns;
+  /** The Visualize deck on the page, and the job that holds it. */
+  visual: { deck: VisualDeck; jobId: string | null } | null;
   variants: RunVariants;
   interpretation: ConfirmedInterpretation | null;
   questionImages: string[];
@@ -43,7 +47,7 @@ type HistorySource = {
  * on every chunk a running solver streams, which would keep putting the
  * write off.
  */
-function finishedSignature({ runs, judgeRun, studyRuns, interpretation }: HistorySource) {
+function finishedSignature({ runs, judgeRun, studyRuns, visual, interpretation }: HistorySource) {
   return [
     ...PROVIDER_KEYS.map((key) => {
       const run = runs[key];
@@ -58,13 +62,14 @@ function finishedSignature({ runs, judgeRun, studyRuns, interpretation }: Histor
       const run = studyRuns[kind];
       return run.status === "done" ? `${kind}:${run.study.guide.length}` : "";
     }),
+    visual ? `visual:${visual.jobId}:${visual.deck.boards.map((board) => board.html.length).join(",")}` : "",
     `reading:${interpretation?.text.length ?? 0}`,
   ].join("|");
 }
 
 /** The run as a history entry, merged over what was kept before. */
 function entryOf(source: HistorySource, runId: number, thumbnail: string | undefined) {
-  const { runs, judgeRun, studyRuns, variants, interpretation, notes, pdfJobOf } = source;
+  const { runs, judgeRun, studyRuns, visual, variants, interpretation, notes, pdfJobOf } = source;
   const solutions: HistoryEntry["solutions"] = {};
   for (const key of PROVIDER_KEYS) {
     const run = runs[key];
@@ -113,6 +118,9 @@ function entryOf(source: HistorySource, runId: number, thumbnail: string | undef
     solutions: { ...current?.solutions, ...solutions },
     verdict: verdict ?? current?.verdict,
     study: { ...current?.study, ...study },
+    visual: visual
+      ? { boards: visual.deck.boards, ...(visual.jobId ? { jobId: visual.jobId } : {}) }
+      : current?.visual,
   });
 }
 

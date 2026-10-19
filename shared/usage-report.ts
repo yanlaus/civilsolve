@@ -82,6 +82,7 @@ export function usagePartLabel(kind: string, detail: string | null, revision = 0
     study: "Study notes 筆記",
     ask: "Question 提問",
     align: "Answer comparison 比對",
+    visualize: "Visualize 圖解",
     pdf: "PDF",
   };
   const steps: Record<string, string> = {
@@ -90,6 +91,8 @@ export function usagePartLabel(kind: string, detail: string | null, revision = 0
     revise: "revise",
     approach: "approach",
     explain: "explain",
+    draw: "draw",
+    fix: "fix a board",
     cache: "from cache",
     kept: "from storage",
     made: "made",

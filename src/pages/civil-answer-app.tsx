@@ -8,6 +8,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { SOLVE_MODE_ID, UploadForm, type FormPrefill, type SolveSubmission } from "@/components/solve/upload-form";
 import { useAlign } from "@/hooks/use-align";
 import { useAsk } from "@/hooks/use-ask";
+import { useVisual } from "@/hooks/use-visual";
 import { useCompletionAlert } from "@/hooks/use-completion-alert";
 import { useHealth } from "@/hooks/use-health";
 import { useHistory } from "@/hooks/use-history";
@@ -99,6 +100,8 @@ export default function CivilAnswerAppPage() {
   const { providerStatus } = useHealth();
   // Questions about a solution (問呢一步), answered in jobs of their own.
   const asks = useAsk({ runId, getBody });
+  // Visualize 圖解: a solution drawn as interactive boards, in a job of its own.
+  const visual = useVisual({ runId, getBody, runs, judgeRun });
   // The answers compared with each other once every solver has answered.
   const { alignment, compareAgain } = useAlign({
     runId,
@@ -114,6 +117,7 @@ export default function CivilAnswerAppPage() {
     runs,
     judgeRun,
     studyRuns,
+    visual: visual.deck ? { deck: visual.deck, jobId: visual.deckJobId } : null,
     variants: runVariants,
     interpretation: confirmedInterpretation,
     questionImages,
@@ -188,7 +192,8 @@ export default function CivilAnswerAppPage() {
   const isSolving =
     Object.values(runs).some(isRunActive) ||
     isJudgeActive(judgeRun) ||
-    Object.values(studyRuns).some(isStudyActive);
+    Object.values(studyRuns).some(isStudyActive) ||
+    visual.active;
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
   const hasRun = Object.values(runs).some((run) => run.status !== "idle");
@@ -604,6 +609,7 @@ export default function CivilAnswerAppPage() {
             onStopStudy={stopStudy}
             onRefineStudy={refineStudy}
             pdfJobOf={pdfJobOf}
+            visual={visual}
           />
         </Suspense>
       </div>

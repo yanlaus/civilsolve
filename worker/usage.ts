@@ -17,7 +17,7 @@
 import type { WorkerEnv } from "./channels";
 import type { TaskOutcome } from "./run";
 
-export type UsageKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "pdf";
+export type UsageKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "visualize" | "pdf";
 
 export type UsageOutcome = TaskOutcome["outcome"] | "running" | "rejected" | "rate-limited";
 
@@ -97,6 +97,8 @@ export async function describeRequest(
   let detail: string | null = null;
   if (kind === "interpret") detail = READING_STEPS[String(body?.mode ?? "interpret")] ?? "read";
   if (kind === "study") detail = text(body?.kind);
+  // A deck drawn, or one board of it drawn again.
+  if (kind === "visualize") detail = body?.fix ? "fix" : "draw";
   return {
     kind,
     detail,

@@ -26,11 +26,13 @@ import {
   buildStudyPrompt,
   buildTutorPrompt,
   buildVerifyPrompt,
+  buildVisualPrompt,
   INTERPRET_INSTRUCTIONS,
   isEffortKey,
   JUDGE_INSTRUCTIONS,
   SOLVE_INSTRUCTIONS,
   STUDY_INSTRUCTIONS,
+  VISUAL_INSTRUCTIONS,
   type EffortKey,
 } from "../shared/prompt";
 import {
@@ -44,6 +46,7 @@ import {
 } from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
+import { mergeFixedBoard, parseVisual, readBoards, VISUAL_PROVIDER, type VisualFix } from "../shared/visual";
 import {
   DATA_URL_PATTERN,
   MAX_ALIGN_ANSWER_TEXT,
@@ -61,12 +64,12 @@ import {
   MAX_SOLUTION_TEXT,
   MAX_STEP_TEXT,
 } from "../shared/stream-protocol";
-import { interpretOverride, variantOverride, type WorkerEnv } from "./channels";
+import { interpretOverride, variantOverride, VISUAL_ROUTE, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
-export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align";
+export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "visualize";
 
-export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align"];
+export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align", "visualize"];
 
 export function isTaskKind(value: string): value is TaskKind {
   return (TASK_KINDS as string[]).includes(value);
@@ -152,6 +155,7 @@ export function buildTask(
   if (kind === "study") return buildStudy(providerName, body, env, variant);
   if (kind === "ask") return buildAsk(providerName, body, env, variant);
   if (kind === "align") return buildAlign(providerName, body, env, variant);
+  if (kind === "visualize") return buildVisual(providerName, body, env);
   return buildJudge(providerName, body, env, variant);
 }
 
@@ -517,6 +521,101 @@ function buildAlign(
       finalize: (rawText, { lastAttempt }) => ({
         comparison: parseAlign(rawText, provider, count, { allowIncomplete: lastAttempt }),
       }),
+    },
+  };
+}
+
+/** A fix's request (`fix`): the board, the instructions and the deck. Undefined when absent. */
+function readFix(value: unknown): { fix?: VisualFix } | { error: string } {
+  if (value === undefined || value === null) return {};
+  const record = value as Record<string, unknown>;
+  const boards = readBoards(record?.boards);
+  const instructions = readText(record?.instructions, MAX_INSTRUCTIONS_LENGTH);
+  const board = record?.board;
+  if (!boards || !instructions || typeof board !== "number" || !Number.isInteger(board) || board < 0 || board >= boards.length) {
+    return { error: "Drawing a board again needs the deck, which board, and what to change." };
+  }
+  return { fix: { board, instructions, boards } };
+}
+
+/**
+ * Visualize 圖解 (shared/visual.ts): the full solution drawn as a deck of
+ * interactive boards, from one solver's solution or from the verdict with the
+ * solutions it graded - or one board of a deck drawn again (`fix`), stored as
+ * the whole deck with that board in, so whatever reads the job back (a
+ * re-attach, the History, the usage page) gets the deck whole.
+ *
+ * Always DeepSeek V4.1 Flash on OpenCode Go (VISUAL_ROUTE), at "medium" unless
+ * the user picks a level. Its answer is not JSON: the task starts with no
+ * schema, so the request carries no response_format at all.
+ */
+function buildVisual(provider: ProviderKey, body: Record<string, unknown>, env: WorkerEnv): BuiltTask {
+  if (provider !== VISUAL_PROVIDER) {
+    return { error: `Visualize draws with ${PROVIDER_LABELS[VISUAL_PROVIDER]} only.`, status: 400 };
+  }
+  const assignment = readAssignment(body);
+  if ("error" in assignment) return { error: assignment.error, status: 400 };
+
+  const verdict = readText(body.verdict, MAX_SOLUTION_TEXT);
+  const candidates = Array.isArray(body.solutions) ? body.solutions : [];
+  const most = verdict ? MAX_JUDGED_SOLUTIONS : 1;
+  if (
+    candidates.length < 1 ||
+    candidates.length > most ||
+    candidates.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    return {
+      error: verdict
+        ? `Drawing a verdict needs between 1 and ${MAX_JUDGED_SOLUTIONS} solutions.`
+        : "Visualize draws one solution, or a verdict.",
+      status: 400,
+    };
+  }
+  const solutions = (candidates as string[]).map((entry) => entry.slice(0, MAX_SOLUTION_TEXT));
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const interpretation = readText(body.interpretation, MAX_INTERPRETATION_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "medium";
+  const fixed = readFix(body.fix);
+  if ("error" in fixed) return { error: fixed.error, status: 400 };
+  const fix = fixed.fix;
+
+  return {
+    params: {
+      provider,
+      env,
+      effort,
+      routeOverride: VISUAL_ROUTE,
+      task: {
+        session: crypto.randomUUID(),
+        startSchema: "none",
+        prompt: () =>
+          buildVisualPrompt(notes, solutions, {
+            interpretation: interpretation || undefined,
+            verdict: verdict || undefined,
+            fix: fix
+              ? {
+                  index: fix.board,
+                  count: fix.boards.length,
+                  board: fix.boards[fix.board],
+                  instructions: fix.instructions,
+                }
+              : undefined,
+          }),
+        instructions: VISUAL_INSTRUCTIONS,
+        // Never sent (startSchema "none"); a Task carries one all the same.
+        schemaName: "civil_visual_boards",
+        schema: { type: "object" },
+        images: assignment.images,
+      },
+      finalize: (rawText, { lastAttempt }) => {
+        const drawn = parseVisual(rawText, provider, { allowIncomplete: lastAttempt });
+        if (!fix) return { visual: drawn };
+        return {
+          visual: { boards: mergeFixedBoard(fix.boards, fix.board, drawn.boards[0]) },
+          fixed: fix.board,
+        };
+      },
     },
   };
 }

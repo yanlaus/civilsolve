@@ -133,6 +133,11 @@ test("each request is described by its part, never its content", async () => {
   assert.deepEqual([notes.detail, notes.solutions, notes.revision], ["approach", 2, true]);
   assert.equal((await describeRequest("judge", "mimo", { images: pages, solutions: ["A", "B", "C"], variant: "pro" })).solutions, 3);
   assert.equal((await describeRequest("align", "deepseek", { answers: ["1", "2"] })).solutions, 2);
+  const drawn = await describeRequest("visualize", "deepseek", { images: pages, solutions: ["A"] });
+  assert.deepEqual([drawn.detail, drawn.solutions, drawn.revision], ["draw", 1, false]);
+  const fixed = await describeRequest("visualize", "deepseek", { images: pages, solutions: ["A"], fix: { board: 0, instructions: "x", boards: [] } });
+  assert.equal(fixed.detail, "fix");
+  assert.equal(fixed.question, reading.question);
   const same = await describeRequest("solve", "muse", { images: pages });
   assert.equal(same.question, reading.question);
   assert.notEqual((await describeRequest("solve", "muse", { images: pages.slice(0, 1) })).question, reading.question);
