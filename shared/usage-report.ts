@@ -66,6 +66,11 @@ export type UsageReport = {
     /** Its PDF is kept in R2 (GET /api/pdf/:id?existing serves it, never makes one). */
     pdf: boolean;
   }>;
+  /**
+   * The latest rows' questions whose pages the server keeps (worker/questions.ts):
+   * how many question pages and lecture-notes pages, by fingerprint.
+   */
+  questions: Record<string, { pages: number; notes: number }>;
 };
 
 /** The part of the page a row came from, in words: "Reading · reconcile". */

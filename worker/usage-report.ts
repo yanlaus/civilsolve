@@ -55,6 +55,8 @@ export async function usageReport(
   db: D1Database,
   filter: UsageFilter,
   pdfKept: (jobId: string) => Promise<boolean> = async () => false,
+  /** A question's stored pages (worker/questions.ts), or null when none are. */
+  questionPages: (question: string) => Promise<{ pages: number; notes: number } | null> = async () => null,
 ): Promise<UsageReport> {
   const now = Date.now();
   const since = filter.days ? now - filter.days * DAY_MS : 0;
@@ -124,5 +126,14 @@ export async function usageReport(
     byIp: byIp.results as UsageReport["byIp"],
     byPart: byPart.results as UsageReport["byPart"],
     recent: rows.map((row) => ({ ...row, pdf: row.kind !== "pdf" && Boolean(row.jobId && kept.has(row.jobId)) })),
+    questions: Object.fromEntries(
+      (
+        await Promise.all(
+          [...new Set(rows.map((row) => row.question).filter((question): question is string => Boolean(question)))].map(
+            async (question) => [question, await questionPages(question).catch(() => null)] as const,
+          ),
+        )
+      ).filter((entry): entry is readonly [string, { pages: number; notes: number }] => entry[1] !== null),
+    ),
   };
 }

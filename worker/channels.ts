@@ -13,6 +13,7 @@
 // worker/run.ts stays dialect-agnostic and only orchestrates.
 
 import type { PdfBudget } from "./pdf";
+import type { QuestionStore } from "./questions";
 import type { EffortKey } from "../shared/prompt";
 import {
   CHANNEL_LABELS,
@@ -63,6 +64,13 @@ export type WorkerEnv = {
    * PDF (worker/usage.ts). Optional - without it nothing is logged.
    */
   USAGE?: D1Database;
+  /**
+   * One QuestionStore per question (worker/questions.ts): when its pages,
+   * kept in PDFS under question/, are deleted - 24 hours after its last
+   * task - or that a PDF made them kept for good. Optional - without it (or
+   * PDFS) the pages are not kept.
+   */
+  QUESTIONS?: DurableObjectNamespace<QuestionStore>;
 
   // --- Secrets: one per upstream account ---------------------------------
   POE_API_KEY?: string;

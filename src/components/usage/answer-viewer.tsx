@@ -1,9 +1,9 @@
 // The usage page's answer window (19 October 2026, the owner's request): a
 // task's answer as its job still keeps it - for 24 hours after it finished -
 // read from GET /api/jobs/:id, which only reads. Nothing is copied or kept:
-// once the job has deleted it, the window says so. The question's pages are
-// never kept on the server, so the problem shown is the model's reading of
-// them. Math is typeset by MathProse, loaded with the window.
+// once the job has deleted it, the window says so. The question's pages,
+// when the server still keeps them (worker/questions.ts), open from here
+// too. Math is typeset by MathProse, loaded with the window.
 
 import { lazy, Suspense, useEffect, useState } from "react";
 import { X } from "lucide-react";
@@ -98,7 +98,16 @@ function sectionsOf(row: Row, data: Record<string, unknown>): Section[] {
   return sections;
 }
 
-export function AnswerViewer({ row, onClose }: { row: Row; onClose: () => void }) {
+export function AnswerViewer({
+  row,
+  onClose,
+  onShowPages,
+}: {
+  row: Row;
+  onClose: () => void;
+  /** Opens the question's pages, when the server keeps them. */
+  onShowPages?: () => void;
+}) {
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
@@ -143,7 +152,6 @@ export function AnswerViewer({ row, onClose }: { row: Row; onClose: () => void }
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const asksAboutQuestion = row.kind === "solve" || row.kind === "interpret";
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-3 sm:p-6"
@@ -175,10 +183,18 @@ export function AnswerViewer({ row, onClose }: { row: Row; onClose: () => void }
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        {asksAboutQuestion ? (
+        {onShowPages ? (
+          <button
+            type="button"
+            onClick={onShowPages}
+            className="mt-3 text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
+          >
+            See the question's pages · 睇題目
+          </button>
+        ) : row.question ? (
           <p className="mt-3 rounded-cs bg-cs-muted px-3 py-2 text-xs text-cs-ink-3">
-            The question's pages are never kept on the server - only in the student's own browser - so the problem below
-            is the model's reading of them. 題目原圖唔會存喺伺服器。
+            The question's pages are not kept for this one: asked before the server kept them (19 October 2026), or
+            deleted 24 hours after its last task. 題目原圖冇保留。
           </p>
         ) : null}
         <div className="mt-4">
