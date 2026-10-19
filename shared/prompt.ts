@@ -8,6 +8,7 @@
 
 import { ASK_FIELDS } from "./ask";
 import { STUDY_FIELDS, STUDY_PARTS, type StudyKind } from "./study";
+import { BOARD_MARK, END_MARK, HTML_MARK, MAX_BOARDS, type VisualBoard } from "./visual";
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
 
@@ -37,6 +38,10 @@ export const ASK_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fe
 export const ALIGN_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a careful civil engineering examiner comparing several answers to the same question with each other. Use English.`;
 
 export const STUDY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor writing study notes on an assignment that has already been solved. Use English, except in the \`traditional_chinese\` field.`;
+
+// Not JSON: a board is HTML and JavaScript, kept exactly as written
+// (shared/visual.ts says why).
+export const VISUAL_INSTRUCTIONS = `You are a civil engineering tutor who draws interactive explanatory graphics in HTML. Return only boards in the exact text format the user message gives - no JSON, no Markdown fences, nothing before the first ${BOARD_MARK} or after the last ${END_MARK}. Write everything on a board in English; only \`title_zh\` and \`note_zh\` are in Traditional Chinese.`;
 
 /**
  * Spelled-out shape contract, appended only when the channel cannot enforce a
@@ -756,6 +761,140 @@ export function buildAlignPrompt(
       `{"alignment": [${letters.map(() => '"aligned"').join(", ")}], "alignment_notes": [${letters.map(() => '""').join(", ")}]}`,
       `Each has exactly ${count} entries, in order; each \`alignment\` is one of "aligned", "partial", "not_aligned".`,
       "Do not add other fields. Do not nest this object inside another object or array.",
+    );
+  }
+  return sections.join("\n");
+}
+
+export type VisualPromptExtras = {
+  /** Human-confirmed problem statement from the interpretation pass. */
+  interpretation?: string;
+  /** The cross-check verdict as text, when the boards start from it. */
+  verdict?: string;
+  /** Redraw one board of a deck, with what to change. */
+  fix?: { index: number; count: number; board: VisualBoard; instructions: string };
+};
+
+/**
+ * What a board is and how good it has to be - from Kimi's brief for 可视题解
+ * (the page's own tools.js) and the owner's API rebuild of it
+ * (visual-solution-api, src/lib/brief.ts), turned to civil engineering and to
+ * this page: light themes only, a column 320 to 760 px wide, and a sandbox
+ * whose CSP lets scripts, styles and fonts come from cdn.jsdelivr.net alone.
+ * The library lines are the ones that loaded there; three.js has to come from
+ * its build path - its "+esm" bundle did not load (the owner's rebuild,
+ * 19 October 2026).
+ */
+const BOARD_RULES = [
+  "What a board is:",
+  "- A chunk of HTML that the page runs exactly as written inside a sandboxed frame: `<svg>`, `<canvas>`, `<style>` and `<script type=\"module\">` all work. There is no template and no preset style - what you write is all there is. Write only what goes inside `<body>`: no `<!doctype>`, `<html>`, `<head>` or `<body>` tags.",
+  "- The sandbox: scripts, stylesheets and fonts load only from https://cdn.jsdelivr.net (and Google Fonts). Nothing else is reachable - no fetch, XHR or WebSocket, no images from any URL (draw them; a `data:` URI is fine), no forms, no alert or prompt, no new windows, no navigation, and no localStorage or cookies (they throw here).",
+  "- Libraries, imported exactly like this in a `<script type=\"module\">`:",
+  "  - KaTeX for every formula: `<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\">` and `import katex from 'https://cdn.jsdelivr.net/npm/katex@0.16.11/+esm';` then `katex.render(tex, element, { throwOnError: false })`. No Chinese inside KaTeX.",
+  "  - GSAP for animation timelines: `import gsap from 'https://cdn.jsdelivr.net/npm/gsap@3.12.5/+esm';`",
+  "  - three.js, only when the problem is three-dimensional: `import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';` (not its +esm bundle). For OrbitControls, first add `<script type=\"importmap\">{\"imports\":{\"three\":\"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js\"}}</script>`, then `import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';`",
+  "  - D3 for axes and plots: `import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm';` - hand-written SVG is often better.",
+  "  - Matter.js when a mechanism should really move under physics: `import Matter from 'https://cdn.jsdelivr.net/npm/matter-js@0.20.0/+esm';`",
+  "- The page's colours, set on `:root` for you - use them for text and lines rather than fixed colours: `var(--ink)` text and main lines, `var(--ink-2)` secondary text, `var(--line)` guides and grid, `var(--surface)` panels, `var(--accent)` the one thing to look at. The frame's background is the page's, light; leave it transparent.",
+  "- Size: the board is as wide as the page's column - 320 px on a phone, up to 760 px on a computer - so make everything fluid: `width:100%`, SVG with a `viewBox` and `width=\"100%\"`, a canvas sized from its container's `clientWidth` (times `devicePixelRatio`). Keep a board within about 560 px of height; the page grows the frame to fit, and past that it scrolls. SVG text shrinks with its `viewBox`: drawn 720 units wide, a 13-unit label is about 5 px on a phone. So keep a `viewBox` no wider than about 560 units, every SVG label at least 16 units, and readouts and longer text in HTML, which keeps its size. Use pointer events, so dragging works with a finger as well as a mouse, and touch targets of at least 32 px.",
+  "",
+  "How good it has to be - explanatory graphics of the 3Blue1Brown or Bartosz Ciechanowski kind, not a sketch on a whiteboard:",
+  "- One board, one point, made completely. Usually three boards: the situation (the structure or system with its supports, loads and given values, to scale), the key analysis (the one idea the solution hangs on - the free-body diagram, the control volume, the critical section), and the result (the answer's values shown where they act, and the diagram that carries them).",
+  "- If it can move, let it move. A slider that slides a load along the beam while the reactions, the shear force and the bending moment diagrams follow it says more than three stills; an animation with a play button can build a diagram step by step. Show the current value of whatever changes.",
+  "- Where the solution has a trap (a sign, a direction, a pressure term, a jet speed from continuity), show the wrong idea beside the right one, so the difference is something you can see.",
+  "- Draw like an engineer: lengths to scale, standard symbols (a pin as a triangle, a roller as a triangle on circles, a fixed end as a hatched wall, a UDL as a row of arrows with its intensity, a point load as an arrow with its value), every value labelled with its unit, the sign convention stated, a shear force or bending moment diagram aligned under its beam on the same scale with its peak values marked.",
+  "- Colour carries meaning: each quantity has one colour, the same on every board and in its formulas (for example loads red, reactions blue, shear green, moment purple), dark enough to read on white.",
+  "- Set formulas with KaTeX - never hand-write x² in an SVG text. Keep readouts, legends, sliders and buttons as plain HTML in thin strips along the top or bottom edge, and give the drawing the room.",
+  "- Whitespace, alignment, a hierarchy of type sizes and of line weights.",
+  "",
+  "Write correct code: plain modern JavaScript in `<script type=\"module\">` (it runs after the HTML above it is parsed); define everything you use; no external images. The page reports any script error back with its line number, so do not hide errors in try/catch. Aim at 4,000 to 10,000 characters of HTML per board.",
+];
+
+function boardFormat(count: string) {
+  return [
+    `Return ${count} in exactly this format, one block per board, and nothing else:`,
+    "",
+    BOARD_MARK,
+    "title: a few words, in English",
+    "title_zh: the title in Traditional Chinese",
+    "note: one line, at most about 15 words, on what to look at or do (\"Drag the 20 kN load along the beam\")",
+    "note_zh: the note in Traditional Chinese",
+    HTML_MARK,
+    "<the board's HTML>",
+    END_MARK,
+  ];
+}
+
+/**
+ * The full solution drawn as boards (shared/visual.ts), from what the user
+ * picked: one solver's solution, or the cross-check's verified answer - the
+ * verdict, with the solutions it graded. Or, with `fix`, one board of a deck
+ * drawn again.
+ */
+export function buildVisualPrompt(userNotes: string, solutions: string[], extras: VisualPromptExtras = {}) {
+  const count = solutions.length;
+  const letters = solutions.map((_, index) => String.fromCharCode(65 + index));
+  const sections = extras.verdict
+    ? [
+        `The attached civil engineering assignment images have been solved by ${count === 1 ? "a solver" : `${count} solvers`}, and a cross-check graded ${count === 1 ? "the solution" : "their solutions"}: the solutions and the verdict are below. Your job is to draw the full solution for a student as a short deck of interactive boards that make it visible.`,
+        "Build the boards on the verdict's verified final answer - it is authoritative - and on the method of the solutions it found correct.",
+      ]
+    : [
+        "The attached civil engineering assignment images have been solved; the worked solution is below. Your job is to draw that solution for a student as a short deck of interactive boards that make it visible.",
+        // As for the study notes: checking is the cross-check's job, and a
+        // "correction" of a right value misleads (28 September 2026).
+        "Build the boards on this solution as it stands. Do not re-derive its numbers or correct its values - checking it is the cross-check's job, and one that looks off may well be right.",
+      ];
+  sections.push(
+    "Every number on a board must be one the solution or the images give, with the same value and unit. Do not invent values to fill a drawing.",
+    "",
+    ...BOARD_RULES,
+    "",
+  );
+
+  const fix = extras.fix;
+  if (fix) {
+    sections.push(
+      `This is board ${fix.index + 1} of ${fix.count} of a deck you drew for this solution, given below with what the student wants changed - it may list errors the page caught, with line numbers counted from the first line of the board's HTML. Draw this one board again: the complete corrected board, keeping what works and the same title unless the instructions change it.`,
+      "",
+      ...boardFormat("exactly one board"),
+    );
+  } else {
+    sections.push(...boardFormat(`2 to ${MAX_BOARDS} boards (usually 3)`));
+  }
+
+  sections.push("", userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]");
+  if (extras.interpretation) {
+    sections.push(
+      "",
+      "Confirmed problem interpretation (cross-checked by two readers and reviewed by the user):",
+      extras.interpretation,
+      "Treat this interpretation as the authoritative reading of the problem.",
+    );
+  }
+  if (extras.verdict) {
+    solutions.forEach((solution, index) => {
+      sections.push("", `Solution ${letters[index]}:`, solution);
+    });
+    sections.push("", "Cross-check verdict (the letters are the solutions above):", extras.verdict);
+  } else {
+    sections.push("", "Solution:", solutions[0]);
+  }
+  if (fix) {
+    sections.push(
+      "",
+      `The board to draw again (board ${fix.index + 1}, "${fix.board.title}"):`,
+      BOARD_MARK,
+      `title: ${fix.board.title}`,
+      `title_zh: ${fix.board.title_zh}`,
+      `note: ${fix.board.note}`,
+      `note_zh: ${fix.board.note_zh}`,
+      HTML_MARK,
+      fix.board.html,
+      END_MARK,
+      "",
+      "What the student wants changed:",
+      fix.instructions,
     );
   }
   return sections.join("\n");

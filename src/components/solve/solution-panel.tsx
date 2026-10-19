@@ -54,6 +54,7 @@ import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AlignState } from "@/hooks/use-align";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
+import type { VisualControls } from "@/hooks/use-visual";
 import { AnswerSummary } from "./answer-summary";
 import { AskPanel } from "./ask-panel";
 import { DiagramList } from "./diagram-prompts";
@@ -69,6 +70,7 @@ import { StickyHeading } from "./section-heading";
 import { SolutionArticle } from "./solution-article";
 import { StepsArticle, type StepAction } from "./solution-views";
 import { StudyNotes } from "./study-notes";
+import { VisualSection } from "./visual-section";
 import {
   ERROR_BOX,
   EventLog,
@@ -287,6 +289,7 @@ export default function SolutionPanel({
   onStopStudy,
   onRefineStudy,
   pdfJobOf,
+  visual,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -338,6 +341,8 @@ export default function SolutionPanel({
   onRefineStudy: (kind: StudyKind, instructions: string) => void;
   /** The job of an answer on the page, for its PDF (use-solve's pdfJobOf). */
   pdfJobOf: (target: PdfTarget) => string | null;
+  /** Visualize: the deck of boards and what draws it (hooks/use-visual.ts). */
+  visual: VisualControls;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -495,7 +500,10 @@ export default function SolutionPanel({
   // Ticks every second while anything is still running, for the clocks.
   const solving = visibleProviders.some((provider) => isRunActive(runs[provider.key]));
   const now = useNow(
-    solving || isJudgeActive(judgeRun) || STUDY_KINDS.some((kind) => isStudyActive(studyRuns[kind])),
+    solving ||
+      isJudgeActive(judgeRun) ||
+      STUDY_KINDS.some((kind) => isStudyActive(studyRuns[kind])) ||
+      visual.active,
   );
 
   // PDFs are made by the server now ("Generate PDF", pdf-button.tsx). The
@@ -1047,6 +1055,37 @@ export default function SolutionPanel({
           onRefine={onRefineStudy}
           pdfJobOf={pdfJobOf}
           onPrint={(kind) => printAs(kind, slugify(STUDY_TITLES[kind].title))}
+        />
+      ) : null}
+
+      {/* Visualize after the notes: a solution or the verdict above drawn as
+          interactive boards, in a sandbox (visual-section.tsx). */}
+      {visibleProviders.some((provider) => runs[provider.key].status === "done") ||
+      visual.deck ||
+      visual.task.status !== "idle" ? (
+        <VisualSection
+          deck={visual.deck}
+          task={visual.task}
+          progress={visual.progress}
+          focus={visual.focus}
+          runs={runs}
+          judgeRun={judgeRun}
+          now={now}
+          providerStatus={providerStatus}
+          nameOf={nameOf}
+          judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
+          markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
+          interpretation={Boolean(interpretation)}
+          blocked={
+            !canRerun
+              ? "Needs this run's images, which this browser no longer has. Upload the question again to draw it."
+              : locked
+                ? "Waits until the new upload is ready."
+                : undefined
+          }
+          onDraw={visual.draw}
+          onFix={visual.fix}
+          onStop={visual.stop}
         />
       ) : null}
 

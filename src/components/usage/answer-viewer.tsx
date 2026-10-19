@@ -11,10 +11,13 @@ import { interpretationToText, type InterpretationResult } from "../../../shared
 import { judgementToText, type JudgementResult } from "../../../shared/judgement";
 import type { ProviderArtifact } from "../../../shared/solution";
 import type { StudyResult } from "../../../shared/study";
+import { readBoards, type VisualBoard } from "../../../shared/visual";
 import { usagePartLabel, type UsageReport } from "../../../shared/usage-report";
 import { RETENTION_MS } from "@/lib/run-store";
 
 const MathProse = lazy(() => import("@/components/solve/math-prose"));
+// A Visualize deck runs in its sandboxed frame here too (board-viewer.tsx).
+const BoardViewer = lazy(() => import("@/components/solve/board-viewer").then((module) => ({ default: module.BoardViewer })));
 
 type Row = UsageReport["recent"][number];
 type Section = { heading: string; text: string; chinese?: boolean };
@@ -22,7 +25,7 @@ type State =
   | { status: "loading" }
   | { status: "gone" }
   | { status: "failed"; message: string }
-  | { status: "done"; sections: Section[] };
+  | { status: "done"; sections: Section[]; boards?: VisualBoard[] };
 
 /** How long a stored answer is read for before the window gives up. */
 const READ_TIMEOUT_MS = 20_000;
@@ -128,6 +131,8 @@ export function AnswerViewer({
         if (event.name === "error") {
           return setState({ status: "failed", message: text(event.data.message) || "The task failed." });
         }
+        const boards = readBoards((event.data.visual as { boards?: unknown } | undefined)?.boards);
+        if (boards) return setState({ status: "done", sections: [], boards });
         const sections = sectionsOf(row, event.data);
         setState(sections.length ? { status: "done", sections } : { status: "failed", message: "Nothing to show." });
       } catch {
@@ -207,6 +212,7 @@ export function AnswerViewer({
           {state.status === "failed" ? <p className="text-sm text-[#a8321f]">{state.message}</p> : null}
           {state.status === "done" ? (
             <Suspense fallback={<p className="text-sm text-cs-ink-3">Loading...</p>}>
+              {state.boards ? <BoardViewer boards={state.boards} /> : null}
               {state.sections.map((section) => (
                 <section key={section.heading} className="mt-5 first:mt-0">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-cs-ink-3">{section.heading}</h3>

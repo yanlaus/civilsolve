@@ -1,5 +1,5 @@
 // App-level SSE protocol for POST /api/solve, /api/interpret, /api/judge,
-// /api/study and /api/ask.
+// /api/study, /api/ask, /api/align and /api/visualize.
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
@@ -11,6 +11,7 @@ import type { EffortKey } from "./prompt";
 import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
 import type { StudyKind, StudyResult } from "./study";
+import type { VisualFix, VisualResult } from "./visual";
 
 /**
  * A re-generation: the version the model wrote last time, as text, and what
@@ -98,6 +99,27 @@ export type StudyRequestBody = {
   variant?: ModelVariant;
   /** Set when the user asked for the notes again, with instructions. */
   revision?: RevisionRequest;
+};
+
+/**
+ * The full solution drawn as boards (shared/visual.ts), from what the user
+ * picked - one solver's solution, or the verdict with the solutions it
+ * graded, as for the study notes - or, with `fix`, one board of a deck drawn
+ * again. Always DeepSeek V4.1 Flash on OpenCode Go.
+ */
+export type VisualRequestBody = {
+  images: string[];
+  notes: string;
+  /** Human-confirmed problem statement from the optional interpretation pass. */
+  interpretation?: string;
+  /** As text: the one solution to draw, or - with `verdict` - the one to MAX_JUDGED_SOLUTIONS it graded. */
+  solutions: string[];
+  /** The cross-check verdict as text (`judgementToText`), when the boards start from it. */
+  verdict?: string;
+  /** Reasoning level. Defaults to "medium". */
+  effort?: EffortKey;
+  /** Set to redraw one board; the job stores the whole deck with it in. */
+  fix?: VisualFix;
 };
 
 /** One earlier question about the same solution, and its answer. */
@@ -203,6 +225,13 @@ export type AlignEvent =
   | { type: "done"; comparison: AlignResult; at?: number; model?: string }
   | { type: "error"; message: string; at?: number; timedOut?: boolean };
 
+export type VisualEvent =
+  | { type: "status"; message: string; at?: number }
+  | { type: "delta"; text: string }
+  /** `fixed`: the board that was drawn again, when this was a fix. */
+  | { type: "done"; visual: VisualResult; fixed?: number; at?: number; model?: string }
+  | { type: "error"; message: string; at?: number; timedOut?: boolean };
+
 /** "45 s", "4 min 40 s", "20 min" - a length of time as a person reads it. */
 export function formatDuration(ms: number) {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -256,6 +285,7 @@ export function estimateBodyBytes(body: {
   solutions?: string[];
   verdict?: string;
   revision?: RevisionRequest;
+  fix?: VisualFix;
 }) {
   let total = 128; // envelope and field names
   for (const image of [...body.images, ...(body.referenceImages || [])]) {
@@ -267,7 +297,11 @@ export function estimateBodyBytes(body: {
     (body.referenceText || "") +
     (body.solutions ? body.solutions.join("") : "") +
     (body.verdict || "") +
-    (body.revision ? body.revision.previous + body.revision.instructions : "");
+    (body.revision ? body.revision.previous + body.revision.instructions : "") +
+    (body.fix
+      ? body.fix.instructions +
+        body.fix.boards.map((board) => board.title + board.title_zh + board.note + board.note_zh + board.html).join("")
+      : "");
   return total + text.length * 3;
 }
 

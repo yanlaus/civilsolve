@@ -88,9 +88,32 @@ const BUTTON_CLASS =
   "cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 /** "DeepSeek", "DeepSeek and Muse Spark", "A, B and C". */
-function listNames(names: string[]) {
+export function listNames(names: string[]) {
   if (names.length < 2) return names.join("");
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * What study notes - or a Visualize deck - can start from now, the default
+ * first: Muse's solution, matching the tabs, then the verified answer and the
+ * other finished solutions.
+ */
+export function answerSources(runs: ProviderRuns, judgeRun: JudgeRun): StudySource[] {
+  const finished = SOLUTION_ORDER.filter((key) => runs[key].status === "done");
+  return [
+    ...finished.filter((key) => key === "muse"),
+    ...(judgeRun.status === "done" ? (["verdict"] as const) : []),
+    ...finished.filter((key) => key !== "muse"),
+  ];
+}
+
+/** What goes to the model with a source, for the hints under the pickers. */
+export function sourceSentWith(source: StudySource, judgeRun: JudgeRun, nameOf: (key: ProviderKey) => string) {
+  if (source !== "verdict") return `${nameOf(source)}'s solution`;
+  if (judgeRun.status !== "done") return "the cross-check's verdict";
+  return `the cross-check's verdict with the ${
+    judgeRun.solvers.length === 1 ? "solution" : "solutions"
+  } it graded (${listNames(judgeRun.solvers.map(nameOf))})`;
 }
 
 export function StudyNotes({
@@ -139,26 +162,11 @@ export function StudyNotes({
   /** The browser's print dialog for a kind's notes, when the server cannot make the PDF. */
   onPrint: (kind: StudyKind) => void;
 }) {
-  // Muse's solution first, matching the tabs, then the verified answer and
-  // other finished solutions.
-  const judged = judgeRun.status === "done" ? judgeRun : null;
-  const finished = SOLUTION_ORDER.filter((key) => runs[key].status === "done");
-  const sources: StudySource[] = [
-    ...finished.filter((key) => key === "muse"),
-    ...(judged ? (["verdict"] as const) : []),
-    ...finished.filter((key) => key !== "muse"),
-  ];
+  const sources = answerSources(runs, judgeRun);
   const sourceLabel = (source: StudySource) =>
     source === "verdict" ? `Verified answer (${judgeLabel}'s verdict)` : `${nameOf(source)}'s solution`;
   // What goes to the model with each source, for the hints.
-  const sentWith = (source: StudySource) =>
-    source === "verdict" && judged
-      ? `the cross-check's verdict with the ${
-          judged.solvers.length === 1 ? "solution" : "solutions"
-        } it graded (${listNames(judged.solvers.map(nameOf))})`
-      : source === "verdict"
-        ? "the cross-check's verdict"
-        : `${nameOf(source)}'s solution`;
+  const sentWith = (source: StudySource) => sourceSentWith(source, judgeRun, nameOf);
 
   return (
     <section

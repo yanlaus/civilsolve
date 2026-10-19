@@ -159,7 +159,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 ```
 ├── worker/
 │   ├── index.ts            # Hono app: rate limit, validation, task endpoints, /api/jobs/:id
-│   ├── tasks.ts            # Request body -> task, for solve / interpret / judge / study
+│   ├── tasks.ts            # Request body -> task, for solve / interpret / judge / study / ask / align / visualize
 │   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
 │   ├── pdf.ts              # GET /api/pdf/:id: an answer rendered and printed by Browser Rendering; PdfBudget
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
@@ -170,6 +170,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── interpretation.ts   # Interpret/verify schema and parsing
 │   ├── judgement.ts        # Answer cross-check (judge) schema and parsing
 │   ├── study.ts            # Study notes (approach, simple explanation): schema, part labels, parsing
+│   ├── visual.ts           # Visualize boards: the marker format, parsing, a fixed board merged into its deck
 │   ├── prompt.ts           # Solve, interpret/verify, judge and study-notes prompts, shape contract
 │   ├── markdown.ts         # Markdown + KaTeX rendering pipeline (page and PDF), sanitizer supplied by the caller
 │   └── stream-protocol.ts  # SSE event types + request limits
@@ -186,6 +187,8 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   │   ├── solution-panel.tsx          # Kept reading, tabs, streaming states, Stop, verdict card, exports (lazy)
 │   │   ├── pdf-button.tsx              # Generate PDF -> Open PDF / Copy link, or Print instead
 │   │   ├── study-notes.tsx             # The two optional study-notes cards under the verdict (lazy)
+│   │   ├── visual-section.tsx          # Visualize 圖解: pick a source, draw, progress, the deck (lazy)
+│   │   ├── board-viewer.tsx            # A deck of boards, one at a time, in a sandboxed iframe (lazy)
 │   │   ├── task-status.tsx             # Progress box, status log and failure colours, shared
 │   │   ├── math-prose.tsx              # Markdown + KaTeX for the reading and the verdict (lazy)
 │   │   ├── run-actions.tsx             # Add a solver; the cross-check's controls (lazy)
@@ -193,6 +196,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── hooks/
 │   │   ├── use-solve.ts                # Per-provider state machine, solvers -> judge, study notes, restore, retry
 │   │   ├── use-interpret.ts            # interpret -> verify -> review
+│   │   ├── use-visual.ts               # Visualize: draw, fix a board, Stop, re-attach after a reload
 │   │   ├── use-health.ts               # GET /api/health once for the page
 │   │   └── use-wake-lock.ts            # Keep the screen on while a run is in flight
 │   └── lib/
@@ -202,6 +206,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │       ├── progress.ts                 # Per-task timeline: start, deadline, statuses, end
 │       ├── effort-band.ts              # The thinking levels a model's route offers, for a picker
 │       ├── math-markdown.ts            # The shared renderer + DOMPurify + KaTeX's stylesheet
+│       ├── board-document.ts           # A board's iframe document: CSP, theme colours, the error/size bridge
 │       ├── attachments.ts              # File -> JPEG data URL conversion
 │       ├── page-range.ts               # "1-3, 5" -> the PDF pages to send
 │       ├── lecture-notes.ts            # Reference payload from notes files
@@ -215,7 +220,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ## API
 
-`POST /api/solve`, `/api/interpret`, `/api/judge` and `/api/study` are rate limited per client IP: past the limit they answer `429` with `retry-after: 60`, and the page shows that message as the tab's error. There is no sign-in yet - see "Rate limiting" below.
+`POST /api/solve`, `/api/interpret`, `/api/judge`, `/api/study`, `/api/ask`, `/api/align` and `/api/visualize` are rate limited per client IP: past the limit they answer `429` with `retry-after: 60`, and the page shows that message as the tab's error. There is no sign-in yet - see "Rate limiting" below.
 
 ### `GET /api/health`
 
@@ -288,6 +293,12 @@ Optional, the **study notes** (`shared/study.ts`). Body: `{ kind: "approach" | "
 ### `POST /api/align/:provider`
 
 The answers compared with each other (`shared/align.ts`, since 9 October 2026), sent by the page itself once every solver has answered. Body: `{ answers: [text, ...], question?, notes, effort?, variant? }` - two to nine final answers as text, labelled Answer A, B, C... in that order, and the question in words (the confirmed reading, or the first solver's restatement); no images, so it takes seconds. `effort` defaults to `low`. The model does not solve or grade: the `done` event carries `comparison: { alignment: ["aligned" | "partial" | "not_aligned" | null, ...], notes: [text, ...] }`, one per answer, in order. 400 for fewer than two answers or more than nine.
+
+### `POST /api/visualize/:provider`
+
+Optional, **Visualize 圖解** (`shared/visual.ts`, since 19 October 2026, the owner's request): the solution the student picks drawn as a deck of two to four interactive boards, the way Kimi's 可视题解 (visual-solution.app.kimi.com) draws a problem. Only `deepseek` is accepted (any other provider is a 400), and the route is pinned to **DeepSeek V4.1 Flash on OpenCode Go** (`VISUAL_ROUTE` in `worker/channels.ts`), whatever `DEEPSEEK_CHANNEL` or `OPENCODE_DEEPSEEK_MODEL` say. Body: `{ images, notes, interpretation?, solutions: [text, ...], verdict?, effort?, fix? }` - the sources are those of the study notes: one solver's solution, or the verdict with the one to four solutions it graded. `effort` defaults to `medium`. `fix: { board, instructions, boards }` draws one board of a deck again: the prompt carries only that board's HTML and the instructions (the student's, or the errors the page caught), and the job stores the whole deck with the new board in, so whatever reads the job back gets the deck whole. Returns the same SSE shape with `done → { visual: { boards: [{ title, title_zh, note, note_zh, html }] }, fixed? }`.
+
+A board is HTML the model wrote - SVG, canvas, KaTeX, GSAP, three.js from jsDelivr - that the page runs as it is, so the answer is **not JSON**: the boards come back as plain text between `<<<BOARD>>>`, `<<<HTML>>>` and `<<<END>>>` markers, and the task starts with no schema (`Task.startSchema: "none"`), so the request carries no `response_format`. JSON would need the HTML escaped a second time, and the repairs every other parser runs would break a script (`fixEscapedNewlines` turns a `"\n"` into a real line break, `restoreSwallowedCommands` a tab before "t" into `\t`). A board without its end marker - cut off with the response - is dropped. Measured on 19 October 2026 on the beam fixture at `medium`: three boards, 17,765 characters of HTML, in 122 s, every board running; asked to redraw board 1 with "a slider that moves the 10 kN load", it came back with a working slider (R_A 0.92 kN and R_B 9.08 kN at a = 5.45 m) and the job stored the deck with boards 2 and 3 untouched; the owner's own rebuild of Kimi's page (`visual-solution-api`) had DeepSeek draw a four-board deck for a sluice-gate question with no script errors. There is no PDF of a deck.
 
 ### `GET /api/admin/question/:question` and `GET /api/admin/question/:question/:page`
 
@@ -603,6 +614,8 @@ Provider responses can be messy despite `strict: true`. The pipeline in `shared/
 
 Model output is also **untrusted input** — the uploaded images are user-supplied, so anything in them can steer what a model writes. Rendered markdown is sanitized with DOMPurify before it reaches the DOM (`src/lib/math-markdown.ts`), and with `HTMLRewriter` before the PDF browser gets it (`worker/pdf.ts`, which also runs that browser with JavaScript off and fetching nothing but KaTeX); KaTeX output is spliced in afterwards from placeholders (`shared/markdown.ts`) so the sanitizer never mangles generated math.
 
+A **Visualize board** is model-written HTML and JavaScript that has to run, so it is not sanitized but contained (`src/lib/board-document.ts`, `components/solve/board-viewer.tsx`): it runs only as the `srcdoc` of an iframe sandboxed with `allow-scripts` and nothing else - no same origin, so it cannot read the page's localStorage (the job ids), IndexedDB (the history, the uploads) or cookies, and no popups, forms, dialogs or top navigation. The document wrapped round it opens with a Content-Security-Policy (`BOARD_CSP`): scripts, styles and fonts from `cdn.jsdelivr.net` (and Google Fonts) only, `connect-src 'none'`, images only from `data:`/`blob:`, no nested frames - a policy set first can be tightened by the board but never loosened. A second load of the frame (the board navigating itself) takes it down. Then a bridge script, ahead of the board's code, reports script errors with their line in the board's own HTML, resources that failed, what the policy blocked, an empty board and content wider than the frame, which the page lists under the board and "Fix this board" sends back to DeepSeek. Verified in the browser on 19 October 2026 with a hostile test board: localStorage, `parent.document` and `document.cookie` threw `SecurityError`, `window.open` returned null, top navigation threw, a `fetch` and an image from another host were blocked and reported, and the error came back as "line 11 of the board's HTML". Board HTML is never put in the page's own DOM, the PDF or "Print instead".
+
 ## Maintenance rules
 
 - Keep provider keys server-side only. No key ever reaches the client, and no key ever goes in a URL or query string.
@@ -610,5 +623,6 @@ Model output is also **untrusted input** — the uploaded images are user-suppli
 - Do not turn one provider's failure into a whole-solve failure.
 - Keep `delta` events limited to visible output; never forward reasoning/thinking fragments.
 - Keep rendered model output sanitized before it hits `dangerouslySetInnerHTML`.
+- Keep Visualize boards in their sandboxed iframe (`allow-scripts` only, the CSP first in the document); never render board HTML anywhere else.
 - Map thinking effort per route. Never send one enum to every model.
 - Update this README whenever architecture, provider behavior, deployment, or error handling changes.
