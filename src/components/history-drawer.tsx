@@ -42,11 +42,12 @@ function summaryOf(entry: HistoryEntry) {
   return `${keys.length} solution${keys.length === 1 ? "" : "s"}`;
 }
 
-function PdfLink({ jobId }: { jobId?: string }) {
+/** `problem`: for a verdict's PDF, which has no title of its own to name the file by. */
+function PdfLink({ jobId, problem }: { jobId?: string; problem?: string }) {
   if (!jobId) return null;
   return (
     <a
-      href={`/api/pdf/${jobId}`}
+      href={`/api/pdf/${jobId}${problem ? `?problem=${encodeURIComponent(problem.slice(0, 200))}` : ""}`}
       target="_blank"
       rel="noopener"
       className="inline-flex items-center gap-1 text-xs font-semibold text-cs-accent underline-offset-2 hover:underline"
@@ -146,7 +147,7 @@ function EntryView({
                 ({providerDisplayName(entry.verdict.judge, entry.verdict.variant)})
               </span>
             </span>
-            <PdfLink jobId={entry.verdict.jobId} />
+            <PdfLink jobId={entry.verdict.jobId} problem={entry.title} />
           </div>
           <MathProse source={entry.verdict.finalAnswer} className="text-sm" />
           {entry.verdict.solution ? (

@@ -3,7 +3,7 @@
 // was the only way to a PDF before). The .tex download and "Open in
 // Overleaf" were removed on 25 September 2026 - users only save PDFs.
 
-function slugify(value: string) {
+export function slugify(value: string) {
   return (
     value
       .toLowerCase()
@@ -17,9 +17,10 @@ function slugify(value: string) {
  * Prints the currently mounted `.print-area` (see solution-panel) via the
  * browser's print dialog — "Save as PDF" produces the export.
  */
-export function exportPdf(title: string) {
+export function exportPdf(fileName: string) {
   const previousTitle = document.title;
-  document.title = slugify(title);
+  // The browser's "Save as PDF" names the file after the page's title.
+  document.title = fileName || "solution";
   try {
     window.print();
   } finally {
