@@ -10,14 +10,14 @@ import { build } from "esbuild";
 const out = resolve(".wrangler/tests/usage-log.mjs");
 await mkdir(resolve(".wrangler/tests"), { recursive: true });
 await build({
-  stdin: { contents: 'export * from "./worker/jobs"; export * from "./worker/usage";', resolveDir: process.cwd() },
+  stdin: { contents: 'export * from "./worker/jobs"; export * from "./worker/usage"; export * from "./worker/usage-report";', resolveDir: process.cwd() },
   outfile: out, bundle: true, platform: "node", format: "esm",
   plugins: [{ name: "do-host", setup(build) {
     build.onResolve({ filter: /^cloudflare:workers$/ }, () => ({ path: "host", namespace: "test" }));
     build.onLoad({ filter: /.*/, namespace: "test" }, () => ({ contents: "export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }" }));
   } }],
 });
-const { TaskJob, describeRequest, questionFingerprint } = await import(pathToFileURL(out));
+const { TaskJob, describeRequest, questionFingerprint, usageFilter } = await import(pathToFileURL(out));
 
 class Recorder {
   statements = [];
@@ -137,4 +137,15 @@ test("each request is described by its part, never its content", async () => {
   assert.equal(same.question, reading.question);
   assert.notEqual((await describeRequest("solve", "muse", { images: pages.slice(0, 1) })).question, reading.question);
   assert.match(same.question, /^[0-9a-f]{16}$/);
+});
+
+test("the usage page's filter is read safely from the query string", () => {
+  assert.deepEqual(usageFilter(new URLSearchParams("")), { days: 30, ip: null, question: null });
+  assert.deepEqual(usageFilter(new URLSearchParams("days=0")), { days: 0, ip: null, question: null });
+  assert.deepEqual(usageFilter(new URLSearchParams("days=-5&ip=%20&question=")), { days: 0, ip: null, question: null });
+  assert.equal(usageFilter(new URLSearchParams("days=999999")).days, 3650);
+  assert.equal(usageFilter(new URLSearchParams("days=abc")).days, 0);
+  const filtered = usageFilter(new URLSearchParams(`ip=203.0.113.7&question=${"a".repeat(100)}`));
+  assert.equal(filtered.ip, "203.0.113.7");
+  assert.equal(filtered.question.length, 64);
 });
