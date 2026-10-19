@@ -180,6 +180,8 @@ export type JudgeRun =
       judgement: JudgementResult;
       /** The solutions' versions when they were sent: one re-generated since is not in this verdict. */
       versions?: SolutionVersions;
+      /** The model that wrote the verdict (for its PDF's file name). */
+      model?: string;
       revisedWith?: string;
       notice?: string;
     }
@@ -1555,6 +1557,7 @@ async function runJudge({
           solvers,
           skipped,
           judgement: payload.judgement as JudgementResult,
+          ...(typeof payload.model === "string" ? { model: payload.model } : {}),
         });
       } else if (event.name === "error" && typeof payload.message === "string") {
         terminal = true;

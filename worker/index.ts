@@ -310,7 +310,14 @@ app.get("/api/pdf/:id", async (c) => {
 
   // Kept for good in R2, while the bucket has room. Awaited: the link has to
   // work once the page says so, even if it is closed at once.
-  const fileName = pdfFileName(content);
+  // Named by when the answer was made, its model and its problem - the
+  // verdict's problem from the page (?problem), as it has no title of its own.
+  const made = (terminal ?? {}) as { at?: unknown; model?: unknown };
+  const fileName = pdfFileName(content, {
+    at: typeof made.at === "number" ? made.at : Date.now(),
+    model: typeof made.model === "string" ? made.model : undefined,
+    problem: c.req.query("problem") || undefined,
+  });
   let forever = false;
   if (bucket && (await budget.canStore(pdf.byteLength))) {
     try {

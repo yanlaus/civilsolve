@@ -28,6 +28,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 import { DurableObject } from "cloudflare:workers";
 import katex from "katex";
+import { solutionFileName } from "../shared/file-names";
 import type { JudgementResult } from "../shared/judgement";
 import { renderInlineMath, renderMarkdownWith } from "../shared/markdown";
 import type { ProviderArtifact } from "../shared/solution";
@@ -141,7 +142,19 @@ export function pdfTitle(content: PdfContent) {
   return content.kind === "solution" ? content.solution.title || "Solution" : "Verified final answer";
 }
 
-export function pdfFileName(content: PdfContent) {
+/**
+ * The PDF's file name. A solution - a solver's, or the cross-check's
+ * verified one - is named by its date, model, problem and "Solution"
+ * (shared/file-names.ts; 19 October 2026, the owner's request): `made` is
+ * when the answer was made and by which model, and, for the verdict, which
+ * has no title of its own, the problem the page says it is about. Study
+ * notes keep their kind's name.
+ */
+export function pdfFileName(content: PdfContent, made: { at: number; model?: string; problem?: string }) {
+  if (content.kind !== "study") {
+    const problem = content.kind === "solution" ? content.solution.title : made.problem;
+    return `${solutionFileName({ at: made.at, model: made.model, problem })}.pdf`;
+  }
   const slug = pdfTitle(content)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -192,9 +205,6 @@ ul, ol { margin: 5pt 0; padding-left: 18pt; }
 li { margin: 2pt 0; break-inside: avoid; }
 code, pre { font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 0.92em; }
 pre { white-space: pre-wrap; break-inside: avoid; }
-/* A diagram's prompt for an AI that draws, set apart from the solution. */
-.prompt-label { margin: 6pt 0 2pt; font-size: 9.5pt; color: #444; }
-pre.prompt { border: 0.5pt solid #bbb; padding: 6pt 8pt; font-size: 8.5pt; line-height: 1.45; }
 table { border-collapse: collapse; margin: 6pt 0; break-inside: avoid; }
 th, td { border: 0.5pt solid #999; padding: 3pt 6pt; text-align: left; }
 hr { border: 0; border-top: 0.5pt solid #999; margin: 10pt 0; }
@@ -226,17 +236,15 @@ export async function pdfDocument(content: PdfContent) {
             render(content.solution.stepByStep),
             "<h2>Final Answer</h2>",
             render(content.solution.finalAnswer),
-            // The charts the question asks for: their key points, and the
-            // prompt to paste into an AI that draws (since 12 October 2026).
+            // The charts the question asks for: their key points (since 12
+            // October 2026). Not the prompt for an AI that draws, such as
+            // Gemini - that stays on the page (19 October 2026, the owner).
             ...(content.solution.diagrams?.length
               ? [
                   "<h2>Diagrams to draw</h2>",
                   ...content.solution.diagrams.flatMap((diagram) => [
                     `<h3>${renderInlineMath(diagram.title)}</h3>`,
                     render(diagram.description),
-                    diagram.prompt
-                      ? `<p class="prompt-label">To have it drawn, paste this into an AI that draws pictures, such as Gemini:</p><pre class="prompt">${escapeHtml(diagram.prompt)}</pre>`
-                      : "",
                   ]),
                 ]
               : []),

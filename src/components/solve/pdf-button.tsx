@@ -178,11 +178,17 @@ function desktopNudge(fileName: string, opened: boolean): Nudge {
 
 export function PdfButton({
   jobId,
+  problem,
   onPrint,
   small = false,
 }: {
   /** The job that holds this answer on the server; null when it has none. */
   jobId: string | null;
+  /**
+   * The problem, for the file name of a PDF whose answer has no title of its
+   * own - the verdict's (shared/file-names.ts). A solution names its own.
+   */
+  problem?: string;
   /** The browser's print dialog, for when the server cannot make the PDF. */
   onPrint: () => void;
   small?: boolean;
@@ -200,7 +206,7 @@ export function PdfButton({
       return;
     }
     setState({ status: "working", startedAt: Date.now(), forWhatsApp });
-    const url = `/api/pdf/${jobId}`;
+    const url = `/api/pdf/${jobId}${problem ? `?problem=${encodeURIComponent(problem.slice(0, 200))}` : ""}`;
     try {
       const response = await fetch(url);
       if (response.ok) {

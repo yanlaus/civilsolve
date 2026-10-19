@@ -47,9 +47,10 @@ import {
   type StudyRuns,
   type StudySource,
 } from "@/hooks/use-solve";
-import { exportPdf } from "@/lib/exports";
+import { exportPdf, slugify } from "@/lib/exports";
+import { solutionFileName } from "../../../shared/file-names";
 import { journeyBarHeight, STEP_IDS } from "@/lib/journey";
-import { escapeHtml, renderMarkdown, renderTitle } from "@/lib/math-markdown";
+import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AlignState } from "@/hooks/use-align";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
@@ -503,9 +504,10 @@ export default function SolutionPanel({
   // before printing (flushSync, so the print area has it when the dialog
   // opens) and left as it is afterwards - each button sets its own.
   const [printTarget, setPrintTarget] = useState<"solution" | "verdict" | StudyKind>("solution");
-  const printAs = (target: "solution" | "verdict" | StudyKind, title: string) => {
+  /** Prints one answer; `fileName` is what "Save as PDF" calls it. */
+  const printAs = (target: "solution" | "verdict" | StudyKind, fileName: string) => {
     flushSync(() => setPrintTarget(target));
-    exportPdf(title);
+    exportPdf(fileName);
   };
 
   // The verdict's PDF is its verified final answer and, since 14 October
@@ -543,17 +545,14 @@ export default function SolutionPanel({
       renderMarkdown(activeArtifact.stepByStep),
       "<h2>Final Answer</h2>",
       renderMarkdown(activeArtifact.finalAnswer),
-      // As in the server's PDF (worker/pdf.ts): each diagram's key points
-      // and its prompt, escaped - it is the model's text.
+      // As in the server's PDF (worker/pdf.ts): each diagram's key points,
+      // without the prompt for an AI that draws (19 October 2026, the owner).
       ...(activeArtifact.diagrams?.length
         ? [
             "<h2>Diagrams to draw</h2>",
             ...activeArtifact.diagrams.flatMap((diagram) => [
               `<h3>${renderTitle(diagram.title)}</h3>`,
               renderMarkdown(diagram.description),
-              diagram.prompt
-                ? `<p>To have it drawn, paste this into an AI that draws pictures, such as Gemini:</p><pre>${escapeHtml(diagram.prompt)}</pre>`
-                : "",
             ]),
           ]
         : []),
@@ -728,7 +727,16 @@ export default function SolutionPanel({
                   // A new version, or another tab: a fresh button.
                   key={pdfJobOf(activeProvider) ?? activeProvider}
                   jobId={pdfJobOf(activeProvider)}
-                  onPrint={() => printAs("solution", activeArtifact.title)}
+                  onPrint={() =>
+                    printAs(
+                      "solution",
+                      solutionFileName({
+                        at: activeProgress?.endedAt ?? Date.now(),
+                        model: activeRun.status === "done" ? activeRun.model : undefined,
+                        problem: activeArtifact.title,
+                      }),
+                    )
+                  }
                 />
               </div>
             </div>
@@ -990,7 +998,16 @@ export default function SolutionPanel({
               interpretation={Boolean(interpretation)}
               onRefine={onRefineVerdict}
               pdfJobId={pdfJobOf("verdict")}
-              onPrint={() => printAs("verdict", "verified final answer")}
+              onPrint={() =>
+                printAs(
+                  "verdict",
+                  solutionFileName({
+                    at: judgeProgress?.endedAt ?? Date.now(),
+                    model: judgeRun.status === "done" ? judgeRun.model : undefined,
+                    problem: verdictProblem(judgeRun, runs),
+                  }),
+                )
+              }
             />
           </div>
         ) : null}
@@ -1029,7 +1046,7 @@ export default function SolutionPanel({
           onStop={onStopStudy}
           onRefine={onRefineStudy}
           pdfJobOf={pdfJobOf}
-          onPrint={(kind) => printAs(kind, STUDY_TITLES[kind].title)}
+          onPrint={(kind) => printAs(kind, slugify(STUDY_TITLES[kind].title))}
         />
       ) : null}
 
@@ -1119,6 +1136,19 @@ function splitFirstPoint(text: string): [string, string] {
   const points = lines.flatMap((line, index) => (/^\s*[-*]\s+/.test(line) ? [index] : []));
   if (points.length < 2) return [text.trim(), ""];
   return [lines.slice(0, points[1]).join("\n").trim(), lines.slice(points[1]).join("\n").trim()];
+}
+
+/**
+ * The problem a verdict is about, for its PDF's file name - the verdict has
+ * no title of its own: the title of the first solution it graded.
+ */
+function verdictProblem(judgeRun: JudgeRun, runs: ProviderRuns) {
+  if (judgeRun.status !== "done") return undefined;
+  for (const key of judgeRun.solvers) {
+    const run = runs[key];
+    if (run.status === "done" && run.solution.title) return run.solution.title;
+  }
+  return undefined;
 }
 
 /**
@@ -1322,7 +1352,13 @@ function JudgementCard({
             <span className="text-xs font-semibold uppercase tracking-[0.15em] text-cs-ink-3">
               Verified final answer
             </span>
-            <PdfButton small key={pdfJobId ?? "verdict"} jobId={pdfJobId} onPrint={onPrint} />
+            <PdfButton
+              small
+              key={pdfJobId ?? "verdict"}
+              jobId={pdfJobId}
+              problem={verdictProblem(judgeRun, runs)}
+              onPrint={onPrint}
+            />
           </div>
           <MathProse source={judgement.final_answer} />
           {/* The judge's own working behind the answer (since 14 October
