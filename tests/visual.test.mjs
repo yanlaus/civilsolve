@@ -56,20 +56,35 @@ test("no board throws while an attempt is left; bare HTML is kept on the last", 
   assert.equal(app.parseVisual(bare, "deepseek", { allowIncomplete: true }).boards[0].html, bare);
 });
 
-test("visualize runs on DeepSeek V4.1 Flash on OpenCode Go only, whatever the env says", () => {
+test("visualize runs on Muse Spark (the default) or DeepSeek V4.1 Flash on OpenCode Go only, whatever the env says", () => {
+  assert.deepEqual([...app.VISUAL_PROVIDERS], ["muse", "deepseek"]);
+  assert.equal(app.DEFAULT_VISUAL_PROVIDER, "muse");
   const body = { images: [image], notes: "", solutions: ["The solution."] };
-  const overridden = { ...env, DEEPSEEK_CHANNEL: "poe", OPENCODE_DEEPSEEK_MODEL: "deepseek-other" };
-  for (const config of [env, overridden]) {
-    const built = app.buildTask("visualize", "deepseek", body, config);
-    assert.ok(built.params, JSON.stringify(built));
-    const route = app.resolveRoute("deepseek", config, built.params.routeOverride);
-    assert.equal(route.channel, "opencode");
-    assert.equal(route.model, "deepseek-v4.1-flash");
-    assert.equal(route.dialect, "chat-completions");
-    assert.equal(built.params.task.startSchema, "none");
-    assert.equal(built.params.effort, "medium");
+  const overridden = {
+    ...env,
+    DEEPSEEK_CHANNEL: "poe",
+    OPENCODE_DEEPSEEK_MODEL: "deepseek-other",
+    MUSE_CHANNEL: "poe",
+    OPENCODE_MUSE_MODEL: "muse-other",
+  };
+  const expected = {
+    muse: { model: "muse-spark-1.3-contributor", dialect: "responses", startInAlarm: true, region: "wnam" },
+    deepseek: { model: "deepseek-v4.1-flash", dialect: "chat-completions", startInAlarm: undefined, region: undefined },
+  };
+  for (const [provider, want] of Object.entries(expected)) {
+    for (const config of [env, overridden]) {
+      const built = app.buildTask("visualize", provider, body, config);
+      assert.ok(built.params, JSON.stringify(built));
+      const route = app.resolveRoute(provider, config, built.params.routeOverride);
+      assert.equal(route.channel, "opencode", provider);
+      for (const field of ["model", "dialect", "startInAlarm", "region"]) {
+        assert.equal(route[field], want[field], `${provider}: ${field}`);
+      }
+      assert.equal(built.params.task.startSchema, "none");
+      assert.equal(built.params.effort, "medium");
+    }
   }
-  for (const provider of ["chatgpt", "claude", "gemini", "kimi"]) {
+  for (const provider of ["chatgpt", "claude", "gemini", "kimi", "mimo"]) {
     assert.equal(app.buildTask("visualize", provider, body, env).status, 400, provider);
   }
   assert.equal(app.buildTask("visualize", "deepseek", { ...body, solutions: [] }, env).status, 400);
@@ -92,6 +107,20 @@ test("the request carries no response_format, and the prompt the board format", 
   assert.match(prompt, /three@0\.160\.0\/build\/three\.module\.js/);
   assert.match(prompt, /R_A = 5 kN/);
   assert.doesNotMatch(sent.messages[0].content, /Return JSON/);
+});
+
+test("Muse Spark's request carries no text format either, and a deck gets the long timeout", () => {
+  const body = { images: [image], notes: "", solutions: ["R_A = 5 kN"] };
+  const built = app.buildTask("visualize", "muse", body, env);
+  const { task } = built.params;
+  const route = app.resolveRoute("muse", env, built.params.routeOverride);
+  const sent = JSON.parse(app.buildRequest(route, { reasoning: true, schema: task.startSchema }, task, "medium", true).body);
+  assert.equal(sent.model, "muse-spark-1.3-contributor");
+  assert.equal(sent.text?.format, undefined);
+  // Muse's route has the 280 s default; a deck gets 20 minutes, capped by the alarm ceiling.
+  assert.equal(app.taskTimeoutFor(built.params), app.ALARM_TASK_TIMEOUT_MS);
+  assert.equal(app.taskTimeoutFor(app.buildTask("visualize", "deepseek", body, env).params), 20 * 60_000);
+  assert.equal(app.taskTimeoutFor(app.buildTask("ask", "muse", { ...body, solution: "S", question: "Why?" }, env).params), 280_000);
 });
 
 test("a fix draws one board and stores the whole deck with it in", () => {

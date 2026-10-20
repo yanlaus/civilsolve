@@ -119,7 +119,11 @@ function entryOf(source: HistorySource, runId: number, thumbnail: string | undef
     verdict: verdict ?? current?.verdict,
     study: { ...current?.study, ...study },
     visual: visual
-      ? { boards: visual.deck.boards, ...(visual.jobId ? { jobId: visual.jobId } : {}) }
+      ? {
+          boards: visual.deck.boards,
+          provider: visual.deck.provider,
+          ...(visual.jobId ? { jobId: visual.jobId } : {}),
+        }
       : current?.visual,
   });
 }

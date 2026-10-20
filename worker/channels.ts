@@ -466,7 +466,7 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       startSchema: "loose",
     },
   },
-  // (The boards of Visualize 圖解 run on this route, pinned: VISUAL_ROUTE.)
+  // (The boards of Visualize 圖解 run on this route, pinned: VISUAL_ROUTES.)
   grok: {
     opencode: {
       ...OPENCODE_SPEC,
@@ -941,13 +941,25 @@ export function interpretOverride(
 }
 
 /**
- * Where Visualize 圖解 draws its boards (shared/visual.ts): DeepSeek V4.1
- * Flash on the OpenCode Go subscription and nothing else (the owner's call,
- * 19 October 2026), whatever DEEPSEEK_CHANNEL or OPENCODE_DEEPSEEK_MODEL say.
- * The owner's own rebuild of Kimi's page drew a four-board deck with it, every
- * board free of script errors.
+ * Where Visualize 圖解 draws its boards (shared/visual.ts), both on the
+ * OpenCode Go subscription and nothing else, whatever the providers' channel
+ * or model vars say: Muse Spark, the default since 21 October 2026 (the
+ * owner's call) - its route keeps its alarm dispatch and North American
+ * placement - and DeepSeek V4.1 Flash, the only one from 19 October, with
+ * which the owner's own rebuild of Kimi's page drew a four-board deck free
+ * of script errors.
  */
-export const VISUAL_ROUTE: RouteOverride = { channel: "opencode", model: "deepseek-v4.1-flash" };
+export const VISUAL_ROUTES: Partial<Record<ProviderKey, RouteOverride>> = {
+  muse: { channel: "opencode", model: "muse-spark-1.3-contributor" },
+  deepseek: { channel: "opencode", model: "deepseek-v4.1-flash" },
+};
+
+/**
+ * A deck's floor of a timeout, over its route's: a deck is longer to write
+ * than a solution (DeepSeek: 122 s for three boards on the beam), and Muse's
+ * route has the 280 s default. The alarm ceiling still caps Muse at 14 min.
+ */
+export const VISUAL_TIMEOUT_MS = LONG_THINKING_TIMEOUT_MS;
 
 /** Health payload for one provider. Never exposes key values. */
 /**
@@ -1084,6 +1096,8 @@ export type Task = {
    * "none" for a task whose answer is not JSON - the boards (shared/visual.ts).
    */
   startSchema?: Capabilities["schema"];
+  /** A floor of a timeout over the route's own (taskTimeoutFor in run.ts) - the boards'. */
+  timeoutMs?: number;
 };
 
 /**

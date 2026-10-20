@@ -1,16 +1,23 @@
 // Visualize 圖解 under the study notes (19 October 2026, the owner's request):
 // the solution the student picks drawn as a deck of interactive boards, the
-// way Kimi's 可视题解 draws a problem - by DeepSeek V4.1 Flash on OpenCode Go,
-// always (shared/visual.ts). Optional and made on request, like the notes,
-// from the same sources; the boards run in a sandbox (lib/board-document.ts).
+// way Kimi's 可视题解 draws a problem - by Muse Spark (the default since
+// 21 October 2026) or DeepSeek V4.1 Flash, both on OpenCode Go
+// (shared/visual.ts). Optional and made on request, like the notes, from the
+// same sources; the boards run in a sandbox (lib/board-document.ts).
 
 import { useState } from "react";
 import { Shapes, Sparkles } from "lucide-react";
 import type { EffortKey } from "../../../shared/prompt";
-import { VISUAL_MODEL_LABEL, VISUAL_PROVIDER } from "../../../shared/visual";
-import type { ProviderKey, ProviderStatus } from "../../../shared/providers";
+import {
+  DEFAULT_VISUAL_PROVIDER,
+  VISUAL_MODELS,
+  VISUAL_PROVIDERS,
+  type VisualProvider,
+} from "../../../shared/visual";
+import { modelStatus, type ProviderKey, type ProviderStatus } from "../../../shared/providers";
 import type { JudgeRun, ProviderRuns, StudySource } from "@/hooks/use-solve";
 import type { VisualDeck, VisualTask } from "@/hooks/use-visual";
+import { effortBand } from "@/lib/effort-band";
 import type { Progress } from "@/lib/progress";
 import { BoardViewer } from "./board-viewer";
 import { RevisionNotice } from "./revise-panel";
@@ -18,7 +25,7 @@ import { StickyHeading } from "./section-heading";
 import { answerSources, listNames, sourceSentWith } from "./study-notes";
 import { ERROR_BOX, EventLog, ProgressBox, STOPPED_BOX, TIMEOUT_BOX, tookLabel } from "./task-status";
 
-/** The levels offered: DeepSeek's route maps "max" to "high" and "none" to no thinking at all. */
+/** The levels offered: both routes map "max" to "high" and "none" to no thinking at all. */
 const LEVELS: EffortKey[] = ["low", "medium", "high"];
 
 const SELECT_CLASS =
@@ -62,7 +69,7 @@ export function VisualSection({
   blocked?: string;
   /** Whether the run had a confirmed reading, which the model also gets. */
   interpretation: boolean;
-  onDraw: (source: StudySource, effort: EffortKey) => void;
+  onDraw: (provider: VisualProvider, source: StudySource, effort: EffortKey) => void;
   onFix: (board: number, instructions: string) => void;
   onStop: () => void;
 }) {
@@ -70,19 +77,31 @@ export function VisualSection({
   const [sourcePick, setSourcePick] = useState<StudySource | null>(null);
   const source: StudySource | undefined =
     sourcePick && sources.includes(sourcePick) ? sourcePick : sources[0];
-  const [effort, setEffort] = useState<EffortKey>("medium");
+  // Muse Spark unless the student picks DeepSeek - or the server has no
+  // key for it, when the first model it can run takes its place.
+  const configured = (key: VisualProvider) => modelStatus(providerStatus?.[key])?.configured !== false;
+  const [modelPick, setModelPick] = useState<VisualProvider | null>(null);
+  const model =
+    modelPick && configured(modelPick)
+      ? modelPick
+      : configured(DEFAULT_VISUAL_PROVIDER)
+        ? DEFAULT_VISUAL_PROVIDER
+        : (VISUAL_PROVIDERS.find(configured) ?? DEFAULT_VISUAL_PROVIDER);
+  const [effortPick, setEffortPick] = useState<EffortKey>("medium");
+  const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[model]));
+  const effort = clamp(effortPick);
 
   const active = task.status === "waiting" || task.status === "streaming";
   const sourceLabel = (entry: StudySource) =>
     entry === "verdict" ? `Verified answer (${judgeLabel}'s verdict)` : `${nameOf(entry)}'s solution`;
-  const unconfigured = providerStatus?.[VISUAL_PROVIDER]?.configured === false
-    ? "DeepSeek is not configured on the server."
-    : undefined;
+  const unconfigured = configured(model) ? undefined : `${VISUAL_MODELS[model].name} is not configured on the server.`;
   const stopReason = blocked || unconfigured || (sources.length ? undefined : "Needs a finished solution.");
   const hint = source
-    ? `One extra model call, with the question${interpretation ? ", the confirmed reading" : ""} and ${sourceSentWith(source, judgeRun, nameOf)}. The boards run in a sandbox on this page: they cannot reach your account, your history or anything else here.`
+    ? `One extra call to ${VISUAL_MODELS[model].label}, with the question${interpretation ? ", the confirmed reading" : ""} and ${sourceSentWith(source, judgeRun, nameOf)}. The boards run in a sandbox on this page: they cannot reach your account, your history or anything else here.`
     : "";
   const fixing = task.status !== "idle" && task.status !== "error" ? task.board : undefined;
+  // While a drawing runs, the progress names the model it went to.
+  const drawing = VISUAL_MODELS[task.status === "waiting" || task.status === "streaming" ? task.provider : model].name;
 
   return (
     <section
@@ -98,7 +117,7 @@ export function VisualSection({
       </p>
 
       <div className="cs-panel min-w-0 rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)]">
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] sm:items-end">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <label className="block text-xs text-cs-ink-3">
             Start from
             <select
@@ -117,17 +136,35 @@ export function VisualSection({
             </select>
           </label>
           <label className="block text-xs text-cs-ink-3">
+            Model
+            <select
+              value={model}
+              disabled={active}
+              onChange={(event) => setModelPick(event.target.value as VisualProvider)}
+              className={SELECT_CLASS}
+            >
+              {VISUAL_PROVIDERS.map((key) => (
+                <option key={key} value={key} disabled={!configured(key)}>
+                  {VISUAL_MODELS[key].label}
+                  {key === DEFAULT_VISUAL_PROVIDER ? " (default)" : ""}
+                  {configured(key) ? "" : " - not configured"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs text-cs-ink-3">
             Thinking
             <select
               value={effort}
               disabled={active}
-              onChange={(event) => setEffort(event.target.value as EffortKey)}
+              onChange={(event) => setEffortPick(event.target.value as EffortKey)}
               className={SELECT_CLASS}
             >
               {LEVELS.map((key) => (
-                <option key={key} value={key}>
+                <option key={key} value={key} disabled={!inBand(key)}>
                   {key.charAt(0).toUpperCase() + key.slice(1)}
                   {key === "medium" ? " (default)" : ""}
+                  {inBand(key) ? "" : " - not offered by this model"}
                 </option>
               ))}
             </select>
@@ -136,15 +173,13 @@ export function VisualSection({
             type="button"
             className={BUTTON_CLASS}
             disabled={active || Boolean(stopReason) || !source}
-            onClick={() => source && onDraw(source, effort)}
+            onClick={() => source && onDraw(model, source, effort)}
           >
             <Sparkles className="h-4 w-4" aria-hidden="true" />
             {active ? "Drawing..." : deck ? "Draw again" : "Draw it"}
           </button>
         </div>
-        <p className="mt-2 text-[0.7rem] text-cs-ink-3">
-          Drawn by {VISUAL_MODEL_LABEL}. {stopReason || hint}
-        </p>
+        <p className="mt-2 text-[0.7rem] text-cs-ink-3">{stopReason || hint}</p>
         {source && source !== "verdict" && markOf(source) === "wrong" && !active ? (
           <p className="mt-1 text-xs font-medium text-[#a85a12]">
             The cross-check judged this solution wrong: boards drawn from it follow it, mistakes included. Start
@@ -159,7 +194,7 @@ export function VisualSection({
               progress={progress}
               line={
                 task.status === "streaming"
-                  ? `DeepSeek is drawing ${fixing === undefined ? "the boards" : `board ${fixing + 1} again`}... ${task.charsReceived.toLocaleString()} characters received.`
+                  ? `${drawing} is drawing ${fixing === undefined ? "the boards" : `board ${fixing + 1} again`}... ${task.charsReceived.toLocaleString()} characters received.`
                   : task.message
               }
               onStop={onStop}
@@ -187,7 +222,7 @@ export function VisualSection({
         {deck ? (
           <div className="mt-4 border-t border-cs-line-soft pt-3">
             <p className="text-xs text-cs-ink-3">
-              Drawn by DeepSeek at {deck.effort} thinking
+              Drawn by {VISUAL_MODELS[deck.provider].name} at {deck.effort} thinking
               {deck.model ? ` with ${deck.model}` : ""}, from{" "}
               {deck.basis.source === "verdict"
                 ? `the cross-check's verified answer (with the solutions by ${listNames(deck.basis.solvers.map(nameOf))})`
@@ -210,7 +245,15 @@ export function VisualSection({
                 boards={deck.boards}
                 focus={focus}
                 onFix={onFix}
-                fixBlocked={active ? "A drawing is in progress." : stopReason}
+                drawer={VISUAL_MODELS[deck.provider].name}
+                fixBlocked={
+                  active
+                    ? "A drawing is in progress."
+                    : blocked ||
+                      (configured(deck.provider)
+                        ? undefined
+                        : `${VISUAL_MODELS[deck.provider].name}, which drew these boards, is not configured on the server.`)
+                }
               />
             </div>
           </div>

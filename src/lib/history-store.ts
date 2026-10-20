@@ -11,7 +11,7 @@
 import type { StudyKind, StudyResult } from "../../shared/study";
 import type { ModelVariant, ProviderKey } from "../../shared/providers";
 import type { ProviderArtifact } from "../../shared/solution";
-import type { VisualBoard } from "../../shared/visual";
+import type { VisualBoard, VisualProvider } from "../../shared/visual";
 import { inStore, updateRecord } from "./idb";
 import { clearQuestions, deleteQuestion } from "./question-store";
 
@@ -49,7 +49,7 @@ export type HistoryEntry = {
    * The Visualize deck (since 19 October 2026): its boards as DeepSeek wrote
    * them, shown again in the same sandboxed frame - never as page HTML.
    */
-  visual?: { boards: VisualBoard[]; jobId?: string };
+  visual?: { boards: VisualBoard[]; provider?: VisualProvider; jobId?: string };
 };
 
 const MAX_ENTRIES = 100;

@@ -4,8 +4,10 @@
 // model wrote - SVG, canvas, KaTeX, an animation, a slider - which the page
 // runs inside a sandboxed iframe (src/lib/board-document.ts) and nowhere else.
 //
-// Always DeepSeek V4.1 Flash on OpenCode Go (the owner's call): the route is
-// pinned in worker/tasks.ts, whatever the provider's own channel or model.
+// Two models draw, both on the OpenCode Go subscription (the owner's calls):
+// Muse Spark, the default since 21 October 2026, and DeepSeek V4.1 Flash,
+// the only one from 19 October. Each route is pinned (VISUAL_ROUTES in
+// worker/channels.ts), whatever the provider's own channel or model var says.
 //
 // The boards come back as plain text between markers, not as JSON. HTML and
 // JavaScript inside a JSON string need a second layer of escaping that models
@@ -34,11 +36,22 @@ export type VisualBoard = {
 
 export type VisualResult = { boards: VisualBoard[] };
 
-/** The one model that draws: DeepSeek, pinned to Flash on OpenCode Go. */
-export const VISUAL_PROVIDER: ProviderKey = "deepseek";
+/** The models that draw, the default first. */
+export const VISUAL_PROVIDERS = ["muse", "deepseek"] as const satisfies readonly ProviderKey[];
 
-/** What the page says draws the boards. */
-export const VISUAL_MODEL_LABEL = "DeepSeek V4.1 Flash · OpenCode Go";
+export type VisualProvider = (typeof VISUAL_PROVIDERS)[number];
+
+export const DEFAULT_VISUAL_PROVIDER: VisualProvider = "muse";
+
+export function isVisualProvider(value: unknown): value is VisualProvider {
+  return (VISUAL_PROVIDERS as readonly unknown[]).includes(value);
+}
+
+/** Each model as its picker and the deck's byline name it. */
+export const VISUAL_MODELS: Record<VisualProvider, { name: string; label: string }> = {
+  muse: { name: "Muse Spark", label: "Muse Spark · OpenCode Go" },
+  deepseek: { name: "DeepSeek", label: "DeepSeek V4.1 Flash · OpenCode Go" },
+};
 
 export const MAX_BOARDS = 4;
 /** A board's HTML, in characters: the prompt asks for 4,000 to 10,000. */

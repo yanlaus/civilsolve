@@ -209,7 +209,7 @@ app.post("/api/judge/:provider", (c) => handleTask(c, "judge"));
 app.post("/api/study/:provider", (c) => handleTask(c, "study"));
 app.post("/api/ask/:provider", (c) => handleTask(c, "ask"));
 app.post("/api/align/:provider", (c) => handleTask(c, "align"));
-// Visualize 圖解: DeepSeek V4.1 Flash on OpenCode Go only (buildVisual).
+// Visualize 圖解: Muse Spark or DeepSeek V4.1 Flash on OpenCode Go only (buildVisual).
 app.post("/api/visualize/:provider", (c) => handleTask(c, "visualize"));
 
 // Re-attach to a job after the connection dropped: the stored result, or

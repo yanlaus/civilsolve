@@ -105,7 +105,8 @@ export type StudyRequestBody = {
  * The full solution drawn as boards (shared/visual.ts), from what the user
  * picked - one solver's solution, or the verdict with the solutions it
  * graded, as for the study notes - or, with `fix`, one board of a deck drawn
- * again. Always DeepSeek V4.1 Flash on OpenCode Go.
+ * again. Muse Spark or DeepSeek V4.1 Flash, by the URL's provider, both on
+ * OpenCode Go.
  */
 export type VisualRequestBody = {
   images: string[];

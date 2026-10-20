@@ -46,7 +46,14 @@ import {
 } from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
-import { mergeFixedBoard, parseVisual, readBoards, VISUAL_PROVIDER, type VisualFix } from "../shared/visual";
+import {
+  isVisualProvider,
+  mergeFixedBoard,
+  parseVisual,
+  readBoards,
+  VISUAL_PROVIDERS,
+  type VisualFix,
+} from "../shared/visual";
 import {
   DATA_URL_PATTERN,
   MAX_ALIGN_ANSWER_TEXT,
@@ -64,7 +71,7 @@ import {
   MAX_SOLUTION_TEXT,
   MAX_STEP_TEXT,
 } from "../shared/stream-protocol";
-import { interpretOverride, variantOverride, VISUAL_ROUTE, type WorkerEnv } from "./channels";
+import { interpretOverride, variantOverride, VISUAL_ROUTES, VISUAL_TIMEOUT_MS, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
 export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "visualize";
@@ -545,13 +552,16 @@ function readFix(value: unknown): { fix?: VisualFix } | { error: string } {
  * the whole deck with that board in, so whatever reads the job back (a
  * re-attach, the History, the usage page) gets the deck whole.
  *
- * Always DeepSeek V4.1 Flash on OpenCode Go (VISUAL_ROUTE), at "medium" unless
- * the user picks a level. Its answer is not JSON: the task starts with no
- * schema, so the request carries no response_format at all.
+ * Muse Spark or DeepSeek V4.1 Flash, each pinned to its OpenCode Go route
+ * (VISUAL_ROUTES), at "medium" unless the user picks a level, with the long
+ * timeout (VISUAL_TIMEOUT_MS). Its answer is not JSON: the task starts with no
+ * schema, so the request carries no response_format or text format at all.
  */
 function buildVisual(provider: ProviderKey, body: Record<string, unknown>, env: WorkerEnv): BuiltTask {
-  if (provider !== VISUAL_PROVIDER) {
-    return { error: `Visualize draws with ${PROVIDER_LABELS[VISUAL_PROVIDER]} only.`, status: 400 };
+  const routeOverride = isVisualProvider(provider) ? VISUAL_ROUTES[provider] : undefined;
+  if (!routeOverride) {
+    const offered = VISUAL_PROVIDERS.map((key) => PROVIDER_LABELS[key]).join(" or ");
+    return { error: `Visualize draws with ${offered} only.`, status: 400 };
   }
   const assignment = readAssignment(body);
   if ("error" in assignment) return { error: assignment.error, status: 400 };
@@ -585,10 +595,11 @@ function buildVisual(provider: ProviderKey, body: Record<string, unknown>, env: 
       provider,
       env,
       effort,
-      routeOverride: VISUAL_ROUTE,
+      routeOverride,
       task: {
         session: crypto.randomUUID(),
         startSchema: "none",
+        timeoutMs: VISUAL_TIMEOUT_MS,
         prompt: () =>
           buildVisualPrompt(notes, solutions, {
             interpretation: interpretation || undefined,

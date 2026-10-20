@@ -1,12 +1,13 @@
 // Visualize 圖解 (19 October 2026): the full solution drawn as a deck of
-// interactive boards (shared/visual.ts), by DeepSeek V4.1 Flash on OpenCode
-// Go, from the source the student picks - one solver's solution or the
-// verdict with the solutions it graded, as for the study notes - and one board
-// of it drawn again on request ("Fix this board").
+// interactive boards (shared/visual.ts), by the model the student picks -
+// Muse Spark by default, or DeepSeek V4.1 Flash, both on OpenCode Go - from
+// the source they pick - one solver's solution or the verdict with the
+// solutions it graded, as for the study notes - and one board of it drawn
+// again on request ("Fix this board"), by the model that drew the deck.
 //
 // Kept apart from use-solve.ts, as the questions are (use-ask.ts): this hook
 // only reads the run's request body and its answers. A drawing is a job of its
-// own (POST /api/visualize/deepseek); its id and the deck's are saved for the
+// own (POST /api/visualize/:provider); its id and the deck's are saved for the
 // run in localStorage, so a reload re-attaches - nothing is sent on page load.
 //
 // A fix's job stores the whole deck with the new board in (worker/tasks.ts),
@@ -23,7 +24,7 @@ import {
   type SolveRequestBody,
   type VisualRequestBody,
 } from "../../shared/stream-protocol";
-import { readBoards, VISUAL_PROVIDER, type VisualBoard } from "../../shared/visual";
+import { isVisualProvider, readBoards, type VisualBoard, type VisualProvider } from "../../shared/visual";
 import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
 import {
   isConnectionLost,
@@ -43,9 +44,11 @@ export type VisualBasis = { source: StudySource; solvers: ProviderKey[] };
 
 export type VisualDeck = {
   boards: VisualBoard[];
+  /** Who drew it - and draws a board of it again. */
+  provider: VisualProvider;
   basis: VisualBasis;
   effort: EffortKey;
-  /** The model that drew it. */
+  /** The model id that drew it. */
   model?: string;
   /** The board drawn again last, and the instructions it was drawn with. */
   fixed?: { board: number; instructions: string };
@@ -56,12 +59,13 @@ export type VisualDeck = {
 /** The request in flight, or how the last one ended when it left no deck. */
 export type VisualTask =
   | { status: "idle" }
-  | { status: "waiting"; message: string; board?: number }
-  | { status: "streaming"; charsReceived: number; board?: number }
+  | { status: "waiting"; message: string; provider: VisualProvider; board?: number }
+  | { status: "streaming"; charsReceived: number; provider: VisualProvider; board?: number }
   | { status: "error"; message: string; timedOut?: boolean; stopped?: boolean };
 
 type Pending = {
   jobId?: string;
+  provider: VisualProvider;
   basis: VisualBasis;
   effort: EffortKey;
   /** Set on a fix: the board drawn again, and why. */
@@ -71,11 +75,16 @@ type Pending = {
 
 type SavedVisual = {
   runId: number;
-  /** The deck on the page: its job, and what it was drawn from. */
-  deck?: { jobId: string; basis: VisualBasis; effort: EffortKey };
+  /** The deck on the page: its job, who drew it, and what from. */
+  deck?: { jobId: string; provider: VisualProvider; basis: VisualBasis; effort: EffortKey };
   /** The drawing in flight. */
   pending?: Pending;
 };
+
+/** A saved entry's model: one saved before Muse Spark drew was DeepSeek's. */
+function providerOf(value: unknown): VisualProvider {
+  return isVisualProvider(value) ? value : "deepseek";
+}
 
 const STORE_KEY = "civilsolve:last-visual";
 const STOPPED = "You stopped the drawing.";
@@ -98,8 +107,12 @@ function loadVisual(runId: number): SavedVisual {
     if (!saved || saved.runId !== runId) return { runId };
     return {
       runId,
-      ...(saved.deck?.jobId && isBasis(saved.deck.basis) ? { deck: saved.deck } : {}),
-      ...(saved.pending?.jobId && isBasis(saved.pending.basis) ? { pending: saved.pending } : {}),
+      ...(saved.deck?.jobId && isBasis(saved.deck.basis)
+        ? { deck: { ...saved.deck, provider: providerOf(saved.deck.provider) } }
+        : {}),
+      ...(saved.pending?.jobId && isBasis(saved.pending.basis)
+        ? { pending: { ...saved.pending, provider: providerOf(saved.pending.provider) } }
+        : {}),
     };
   } catch {
     return { runId };
@@ -189,7 +202,7 @@ export function useVisual({
       };
       const attempt = async () => {
         let charsReceived = 0;
-        const stream = await openTaskStream(handle, `/api/visualize/${VISUAL_PROVIDER}`, body, abort.signal);
+        const stream = await openTaskStream(handle, `/api/visualize/${pending.provider}`, body, abort.signal);
         let terminal = false;
         for await (const event of readSseEvents(stream)) {
           if (takeJobEvent(handle, event, onJob)) {
@@ -205,10 +218,10 @@ export function useVisual({
           if (event.name === "status" && typeof payload.message === "string") {
             charsReceived = 0;
             tracker.status(payload.message, payload.at);
-            showTask({ status: "waiting", message: payload.message, board });
+            showTask({ status: "waiting", message: payload.message, provider: pending.provider, board });
           } else if (event.name === "delta" && typeof payload.text === "string") {
             charsReceived += payload.text.length;
-            showTask({ status: "streaming", charsReceived, board });
+            showTask({ status: "streaming", charsReceived, provider: pending.provider, board });
           } else if (event.name === "done") {
             terminal = true;
             tracker.end(payload.at);
@@ -223,6 +236,7 @@ export function useVisual({
             if (!quiet) freshRef.current = true;
             setDeck({
               boards,
+              provider: pending.provider,
               basis: pending.basis,
               effort: pending.effort,
               ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}),
@@ -231,7 +245,12 @@ export function useVisual({
             if (handle.id) {
               setDeckJobId(handle.id);
               if (savedRef.current) {
-                savedRef.current.deck = { jobId: handle.id, basis: pending.basis, effort: pending.effort };
+                savedRef.current.deck = {
+                  jobId: handle.id,
+                  provider: pending.provider,
+                  basis: pending.basis,
+                  effort: pending.effort,
+                };
                 if (savedRef.current.pending === pending) savedRef.current.pending = undefined;
                 persist();
               }
@@ -261,7 +280,7 @@ export function useVisual({
       try {
         await withResume(attempt, handle, abort.signal, (message) => {
           tracker.note(message);
-          showTask({ status: "waiting", message, board });
+          showTask({ status: "waiting", message, provider: pending.provider, board });
         });
       } catch (error) {
         if (!live()) return;
@@ -297,16 +316,21 @@ export function useVisual({
     }
     const saved = loadVisual(runId);
     savedRef.current = saved;
-    if (saved.deck) void attach(null, { jobId: saved.deck.jobId, basis: saved.deck.basis, effort: saved.deck.effort }, true);
+    if (saved.deck) void attach(null, { ...saved.deck }, true);
     if (saved.pending) {
-      setTask({ status: "waiting", message: "Picking the drawing back up...", board: saved.pending.board });
+      setTask({ status: "waiting", message: "Picking the drawing back up...", provider: saved.pending.provider, board: saved.pending.board });
       void attach(null, saved.pending);
     }
   }, [runId, attach]);
 
   /** Sends a drawing; refuses while one is in flight. */
   const send = useCallback(
-    (source: StudySource, effort: EffortKey, extra: Pick<VisualRequestBody, "fix"> = {}) => {
+    (
+      provider: VisualProvider,
+      source: StudySource,
+      effort: EffortKey,
+      extra: Pick<VisualRequestBody, "fix"> = {},
+    ) => {
       const body = getBody();
       const saved = savedRef.current;
       if (!body || !saved || runningRef.current) return;
@@ -329,6 +353,7 @@ export function useVisual({
         return;
       }
       const pending: Pending = {
+        provider,
         basis: { source, solvers: picked.solvers },
         effort,
         ...(extra.fix ? { board: extra.fix.board, instructions: extra.fix.instructions } : {}),
@@ -340,6 +365,7 @@ export function useVisual({
       setTask({
         status: "waiting",
         message: extra.fix ? `Drawing board ${extra.fix.board + 1} again...` : "Submitting...",
+        provider,
         board: extra.fix?.board,
       });
       void attach(sent, pending);
@@ -347,16 +373,21 @@ export function useVisual({
     [attach, getBody, persist],
   );
 
-  /** A new deck, from the solution the student picked, at the level they picked. */
-  const draw = useCallback((source: StudySource, effort: EffortKey) => send(source, effort), [send]);
+  /** A new deck, by the model the student picked, from the solution and at the level they picked. */
+  const draw = useCallback(
+    (provider: VisualProvider, source: StudySource, effort: EffortKey) => send(provider, source, effort),
+    [send],
+  );
 
-  /** One board of the deck on the page drawn again, with the student's instructions. */
+  /** One board of the deck on the page drawn again, by the model that drew it, with the student's instructions. */
   const fix = useCallback(
     (board: number, instructions: string) => {
       const current = deckRef.current;
       const wanted = instructions.trim();
       if (!current || !wanted || !current.boards[board]) return;
-      send(current.basis.source, current.effort, { fix: { board, instructions: wanted, boards: current.boards } });
+      send(current.provider, current.basis.source, current.effort, {
+        fix: { board, instructions: wanted, boards: current.boards },
+      });
     },
     [send],
   );

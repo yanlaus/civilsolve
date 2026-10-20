@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, FileDown, History, Languages, RotateCcw, Trash2, X } from "lucide-react";
 import { providerDisplayName, SOLUTION_ORDER, type ProviderKey } from "../../shared/providers";
 import { STUDY_KINDS, STUDY_TITLES } from "../../shared/study";
-import type { VisualBoard } from "../../shared/visual";
+import { VISUAL_MODELS, type VisualBoard, type VisualProvider } from "../../shared/visual";
 import { clearHistory, deleteEntry, listEntries, type HistoryEntry } from "@/lib/history-store";
 import { MAX_SAVED_QUESTIONS, savedQuestionKeys } from "@/lib/question-store";
 import { BoardViewer } from "./solve/board-viewer";
@@ -230,7 +230,9 @@ function EntryView({
         );
       })}
 
-      {entry.visual?.boards.length ? <HistoryBoards boards={entry.visual.boards} /> : null}
+      {entry.visual?.boards.length ? (
+        <HistoryBoards boards={entry.visual.boards} provider={entry.visual.provider} />
+      ) : null}
     </div>
   );
 }
@@ -239,7 +241,7 @@ function EntryView({
  * The Visualize deck, read-only. The boards run only while the fold is open:
  * a closed fold's frame would otherwise load and run the board unseen.
  */
-function HistoryBoards({ boards }: { boards: VisualBoard[] }) {
+function HistoryBoards({ boards, provider }: { boards: VisualBoard[]; provider?: VisualProvider }) {
   const [open, setOpen] = useState(false);
   return (
     <details
@@ -247,7 +249,8 @@ function HistoryBoards({ boards }: { boards: VisualBoard[] }) {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 text-sm font-semibold text-cs-ink">
-        圖解 · Visualize ({boards.length} {boards.length === 1 ? "board" : "boards"})
+        圖解 · Visualize ({boards.length} {boards.length === 1 ? "board" : "boards"}
+        {provider ? `, by ${VISUAL_MODELS[provider].name}` : ""})
         <ChevronDown className="ml-auto h-4 w-4 text-cs-ink-3 transition group-open:rotate-180" aria-hidden="true" />
       </summary>
       {open ? (

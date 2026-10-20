@@ -37,6 +37,7 @@ export function BoardViewer({
   boards,
   onFix,
   fixBlocked,
+  drawer = "The model",
   focus,
 }: {
   boards: VisualBoard[];
@@ -44,6 +45,8 @@ export function BoardViewer({
   onFix?: (index: number, instructions: string) => void;
   /** Set while a board cannot be drawn again, saying why. */
   fixBlocked?: string;
+  /** The model that drew the deck, which draws a board of it again. */
+  drawer?: string;
   /** A board to turn to, such as the one just drawn again. */
   focus?: number;
 }) {
@@ -277,7 +280,7 @@ export function BoardViewer({
         <RevisePanel
           key={index}
           title="Change this board · 改呢張"
-          hint="DeepSeek draws this board again with your instructions; the other boards stay as they are."
+          hint={`${drawer} draws this board again with your instructions; the other boards stay as they are.`}
           placeholder="e.g. Make the 10 kN load draggable and show the reactions change"
           buttonLabel="Draw it again"
           disabledReason={fixBlocked}

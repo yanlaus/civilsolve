@@ -391,7 +391,7 @@ export type TaskOutcome = {
 export function taskTimeoutFor({ provider, env, routeOverride, task }: RunTaskParams) {
   const route = resolveRoute(provider, env, routeOverride);
   const timeout = taskTimeoutMs(
-    route.timeoutMs ?? SAFETY_TIMEOUT_MS,
+    Math.max(route.timeoutMs ?? SAFETY_TIMEOUT_MS, task.timeoutMs ?? 0),
     task.images.length,
     task.referenceImages?.length ?? 0,
   );
