@@ -109,6 +109,45 @@ test("the request carries no response_format, and the prompt the board format", 
   assert.doesNotMatch(sent.messages[0].content, /Return JSON/);
 });
 
+// Diagrams 畫圖 (22 October 2026): the same task, drawing only the diagrams
+// the question asks for, as an exam answer would.
+const promptOf = (body) => {
+  const built = app.buildTask("visualize", "muse", { images: [image], notes: "", solutions: ["R_A = 5 kN\n\nDiagrams to draw:\n- SFD: jumps at A"], ...body }, env);
+  assert.ok(built.params, built.error);
+  return built.params.task.prompt({ enforceShape: false, effort: "medium" });
+};
+
+test("the diagrams purpose asks for the listed diagrams only, drawn as an exam answer", () => {
+  const prompt = promptOf({ purpose: "diagrams" });
+  assert.match(prompt, /listed under "Diagrams to draw"/);
+  assert.match(prompt, /full-mark exam answer/);
+  assert.match(prompt, /one board per diagram listed under "Diagrams to draw", in that order/);
+  assert.match(prompt, /Static: SVG, no animation/);
+  assert.match(prompt, /cdn\.jsdelivr\.net/);
+  assert.match(prompt, /2,000 to 8,000 characters/);
+  assert.doesNotMatch(prompt, /If it can move/);
+  assert.doesNotMatch(prompt, /2 to 4 boards/);
+  const fix = promptOf({
+    purpose: "diagrams",
+    fix: { board: 0, instructions: "Label the peak", boards: [{ title: "SFD", title_zh: "剪力圖", note: "", note_zh: "", html: "<svg></svg>" }] },
+  });
+  assert.match(fix, /of the diagrams you drew for this solution/);
+});
+
+test("the explain purpose - or none - keeps Visualize's prompt as it was", () => {
+  const prompt = promptOf({});
+  assert.equal(promptOf({ purpose: "explain" }), prompt);
+  assert.match(prompt, /If it can move, let it move/);
+  assert.match(prompt, /2 to 4 boards \(usually 3\)/);
+  assert.match(prompt, /4,000 to 10,000 characters/);
+  assert.doesNotMatch(prompt, /full-mark exam answer/);
+});
+
+test("an unknown purpose is refused", () => {
+  const built = app.buildTask("visualize", "muse", { images: [image], notes: "", solutions: ["R_A = 5 kN"], purpose: "poster" }, env);
+  assert.equal(built.status, 400);
+});
+
 test("Muse Spark's request carries no text format either, and a deck gets the long timeout", () => {
   const body = { images: [image], notes: "", solutions: ["R_A = 5 kN"] };
   const built = app.buildTask("visualize", "muse", body, env);

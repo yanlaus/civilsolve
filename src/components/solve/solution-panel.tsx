@@ -49,7 +49,7 @@ import {
 } from "@/hooks/use-solve";
 import { exportPdf, slugify } from "@/lib/exports";
 import { solutionFileName } from "../../../shared/file-names";
-import { journeyBarHeight, STEP_IDS } from "@/lib/journey";
+import { journeyBarHeight, scrollToStep, STEP_IDS } from "@/lib/journey";
 import { renderMarkdown, renderTitle } from "@/lib/math-markdown";
 import { useNow, type Progress } from "@/lib/progress";
 import type { AlignState } from "@/hooks/use-align";
@@ -70,7 +70,7 @@ import { StickyHeading } from "./section-heading";
 import { SolutionArticle } from "./solution-article";
 import { StepsArticle, type StepAction } from "./solution-views";
 import { StudyNotes } from "./study-notes";
-import { VisualSection } from "./visual-section";
+import { DIAGRAMS_SECTION_ID, diagramSources, VisualSection } from "./visual-section";
 import {
   ERROR_BOX,
   EventLog,
@@ -290,6 +290,7 @@ export default function SolutionPanel({
   onRefineStudy,
   pdfJobOf,
   visual,
+  diagrams,
 }: {
   runs: ProviderRuns;
   judgeRun: JudgeRun;
@@ -343,6 +344,8 @@ export default function SolutionPanel({
   pdfJobOf: (target: PdfTarget) => string | null;
   /** Visualize: the deck of boards and what draws it (hooks/use-visual.ts). */
   visual: VisualControls;
+  /** Diagrams 畫圖: the diagrams the question asks for, drawn (use-visual.ts, purpose "diagrams"). */
+  diagrams: VisualControls;
 }) {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>(PROVIDER_KEYS[0]);
   const [activeView, setActiveView] = useState<ViewKey>("steps");
@@ -837,7 +840,18 @@ export default function SolutionPanel({
               />
             ) : shownView === "diagrams" ? (
               <div className="px-4 py-6 sm:px-7">
-                <DiagramList diagrams={activeDiagrams} />
+                <>
+                  {diagrams.deck || diagrams.task.status !== "idle" ? (
+                    <button
+                      type="button"
+                      onClick={() => scrollToStep(DIAGRAMS_SECTION_ID)}
+                      className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-cs-accent underline-offset-2 hover:underline"
+                    >
+                      ↓ Drawn for you below, in Diagrams · 喺下面「畫圖」已經畫好
+                    </button>
+                  ) : null}
+                  <DiagramList diagrams={activeDiagrams} />
+                </>
               </div>
             ) : shownView === "steps" ? (
               <StepsArticle source={activeArtifact.stepByStep} stepAction={askAction} />
@@ -957,6 +971,38 @@ export default function SolutionPanel({
         onSolveProvider={solveWith}
       />
       </div>
+
+      {/* Diagrams 畫圖 under the answers (22 October 2026, the owner's
+          request): the diagrams the question asks for, drawn by themselves
+          as an exam answer would draw them; nothing shows when no solution
+          lists one (visual-section.tsx). */}
+      {diagramSources(runs, judgeRun).length || diagrams.deck || diagrams.task.status !== "idle" ? (
+        <VisualSection
+          purpose="diagrams"
+          deck={diagrams.deck}
+          task={diagrams.task}
+          progress={diagrams.progress}
+          focus={diagrams.focus}
+          runs={runs}
+          judgeRun={judgeRun}
+          now={now}
+          providerStatus={providerStatus}
+          nameOf={nameOf}
+          judgeLabel={judgeRun.status !== "idle" ? providerDisplayName(judgeRun.judge, variants.judge) : ""}
+          markOf={(key) => solverMark(judgeRun, key, solutionVersions)}
+          interpretation={Boolean(interpretation)}
+          blocked={
+            !canRerun
+              ? "Needs this run's images, which this browser no longer has. Upload the question again to draw it."
+              : locked
+                ? "Waits until the new upload is ready."
+                : undefined
+          }
+          onDraw={diagrams.draw}
+          onFix={diagrams.fix}
+          onStop={diagrams.stop}
+        />
+      ) : null}
 
       {/* The cross-check, a section of its own since 3 October 2026 (the
           owner's call; it shared a panel with Add a solver): its controls,

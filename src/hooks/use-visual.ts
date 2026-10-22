@@ -10,6 +10,12 @@
 // own (POST /api/visualize/:provider); its id and the deck's are saved for the
 // run in localStorage, so a reload re-attaches - nothing is sent on page load.
 //
+// The same hook draws the Diagrams 畫圖 section (22 October 2026, the owner's
+// request): `purpose: "diagrams"` asks for only the diagrams the question
+// asks the student to draw, as an exam answer draws them, and `auto` draws
+// them by itself once a solution lists some - only on the page that sent the
+// run, once per run (`auto` in its saved entry), never after a reload.
+//
 // A fix's job stores the whole deck with the new board in (worker/tasks.ts),
 // so whichever job is read back - after a reload, from the History or the
 // usage page - gives the deck whole. While a new deck or a fix is drawn the
@@ -24,7 +30,13 @@ import {
   type SolveRequestBody,
   type VisualRequestBody,
 } from "../../shared/stream-protocol";
-import { isVisualProvider, readBoards, type VisualBoard, type VisualProvider } from "../../shared/visual";
+import {
+  isVisualProvider,
+  readBoards,
+  type VisualBoard,
+  type VisualProvider,
+  type VisualPurpose,
+} from "../../shared/visual";
 import { trackProgress, type Progress, type ProgressTracker } from "@/lib/progress";
 import {
   isConnectionLost,
@@ -79,6 +91,8 @@ type SavedVisual = {
   deck?: { jobId: string; provider: VisualProvider; basis: VisualBasis; effort: EffortKey };
   /** The drawing in flight. */
   pending?: Pending;
+  /** Drawn by itself for this run already (`auto`): not again. */
+  auto?: boolean;
 };
 
 /** A saved entry's model: one saved before Muse Spark drew was DeepSeek's. */
@@ -86,7 +100,11 @@ function providerOf(value: unknown): VisualProvider {
   return isVisualProvider(value) ? value : "deepseek";
 }
 
-const STORE_KEY = "civilsolve:last-visual";
+/** Each purpose's deck is kept apart: the Visualize section's and the Diagrams section's. */
+const STORE_KEYS: Record<VisualPurpose, string> = {
+  explain: "civilsolve:last-visual",
+  diagrams: "civilsolve:last-diagrams",
+};
 const STOPPED = "You stopped the drawing.";
 const UNREACHABLE =
   "Could not reach the server for 2 minutes. The drawing goes on there - reload this page to pick it up (kept for 24 hours).";
@@ -101,12 +119,13 @@ function isBasis(value: unknown): value is VisualBasis {
   );
 }
 
-function loadVisual(runId: number): SavedVisual {
+function loadVisual(key: string, runId: number): SavedVisual {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(STORE_KEY) ?? "null") as SavedVisual | null;
+    const saved = JSON.parse(window.localStorage.getItem(key) ?? "null") as SavedVisual | null;
     if (!saved || saved.runId !== runId) return { runId };
     return {
       runId,
+      ...(saved.auto ? { auto: true } : {}),
       ...(saved.deck?.jobId && isBasis(saved.deck.basis)
         ? { deck: { ...saved.deck, provider: providerOf(saved.deck.provider) } }
         : {}),
@@ -119,9 +138,9 @@ function loadVisual(runId: number): SavedVisual {
   }
 }
 
-function saveVisual(saved: SavedVisual) {
+function saveVisual(key: string, saved: SavedVisual) {
   try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(saved));
+    window.localStorage.setItem(key, JSON.stringify(saved));
   } catch {
     // Only the pick-up after a reload is lost.
   }
@@ -134,13 +153,23 @@ export function useVisual({
   getBody,
   runs,
   judgeRun,
+  purpose = "explain",
+  auto,
 }: {
   /** The run on the page; a new one starts afresh. */
   runId: number | null;
   getBody: () => SolveRequestBody | null;
   runs: ProviderRuns;
   judgeRun: JudgeRun;
+  /** What the deck is for (shared/visual.ts): the solution explained, or the diagrams to draw. */
+  purpose?: VisualPurpose;
+  /**
+   * Draw by itself, once per run: when `enabled` (the page sent the run) and
+   * there is a `source` to draw and a `provider` to draw it.
+   */
+  auto?: { enabled: boolean; source: StudySource | null; provider: VisualProvider | null };
 }) {
+  const storeKey = STORE_KEYS[purpose];
   const [deck, setDeck] = useState<VisualDeck | null>(null);
   const [deckJobId, setDeckJobId] = useState<string | null>(null);
   const [task, setTask] = useState<VisualTask>({ status: "idle" });
@@ -158,8 +187,8 @@ export function useVisual({
   const freshRef = useRef(false);
 
   const persist = useCallback(() => {
-    if (savedRef.current) saveVisual(savedRef.current);
-  }, []);
+    if (savedRef.current) saveVisual(storeKey, savedRef.current);
+  }, [storeKey]);
 
   /**
    * Sends a drawing (body) or re-attaches to its job (body null). `quiet`
@@ -314,30 +343,30 @@ export function useVisual({
       savedRef.current = null;
       return;
     }
-    const saved = loadVisual(runId);
+    const saved = loadVisual(storeKey, runId);
     savedRef.current = saved;
     if (saved.deck) void attach(null, { ...saved.deck }, true);
     if (saved.pending) {
       setTask({ status: "waiting", message: "Picking the drawing back up...", provider: saved.pending.provider, board: saved.pending.board });
       void attach(null, saved.pending);
     }
-  }, [runId, attach]);
+  }, [runId, attach, storeKey]);
 
-  /** Sends a drawing; refuses while one is in flight. */
+  /** Sends a drawing; refuses while one is in flight. Whether it was sent. */
   const send = useCallback(
     (
       provider: VisualProvider,
       source: StudySource,
       effort: EffortKey,
       extra: Pick<VisualRequestBody, "fix"> = {},
-    ) => {
+    ): boolean => {
       const body = getBody();
       const saved = savedRef.current;
-      if (!body || !saved || runningRef.current) return;
+      if (!body || !saved || runningRef.current) return false;
       const picked = sourceSolutions(source, runsRef.current, judgeRunRef.current);
       if (!picked) {
         setTask({ status: "error", message: "The solution to draw from is no longer on the page." });
-        return;
+        return false;
       }
       const sent: VisualRequestBody = {
         images: body.images,
@@ -346,11 +375,12 @@ export function useVisual({
         solutions: picked.solutions,
         ...(picked.verdict ? { verdict: picked.verdict } : {}),
         effort,
+        ...(purpose === "diagrams" ? { purpose } : {}),
         ...extra,
       };
       if (estimateBodyBytes(sent) > MAX_BODY_BYTES) {
         setTask({ status: "error", message: "The images plus the solutions exceed the request size limit." });
-        return;
+        return false;
       }
       const pending: Pending = {
         provider,
@@ -369,15 +399,33 @@ export function useVisual({
         board: extra.fix?.board,
       });
       void attach(sent, pending);
+      return true;
     },
-    [attach, getBody, persist],
+    [attach, getBody, persist, purpose],
   );
 
   /** A new deck, by the model the student picked, from the solution and at the level they picked. */
   const draw = useCallback(
-    (provider: VisualProvider, source: StudySource, effort: EffortKey) => send(provider, source, effort),
+    (provider: VisualProvider, source: StudySource, effort: EffortKey) => {
+      send(provider, source, effort);
+    },
     [send],
   );
+
+  // Drawn by itself (`auto`): once per run, on the page that sent it, when
+  // nothing is drawn or drawing yet - a failure is left for the student to
+  // draw again, not retried.
+  const autoSource = auto?.enabled ? auto.source : null;
+  const autoProvider = auto?.provider ?? null;
+  useEffect(() => {
+    const saved = savedRef.current;
+    if (!autoSource || !autoProvider || !saved || saved.auto || saved.deck || saved.pending) return;
+    if (runningRef.current || deckRef.current) return;
+    if (send(autoProvider, autoSource, "medium")) {
+      saved.auto = true;
+      persist();
+    }
+  }, [autoSource, autoProvider, send, persist]);
 
   /** One board of the deck on the page drawn again, by the model that drew it, with the student's instructions. */
   const fix = useCallback(

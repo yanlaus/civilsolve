@@ -48,6 +48,7 @@ import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
 import {
   isVisualProvider,
+  isVisualPurpose,
   mergeFixedBoard,
   parseVisual,
   readBoards,
@@ -589,6 +590,12 @@ function buildVisual(provider: ProviderKey, body: Record<string, unknown>, env: 
   const fixed = readFix(body.fix);
   if ("error" in fixed) return { error: fixed.error, status: 400 };
   const fix = fixed.fix;
+  // "diagrams": only the diagrams the question asks for, as an exam answer
+  // draws them (22 October 2026); the whole solution explained otherwise.
+  if (body.purpose !== undefined && !isVisualPurpose(body.purpose)) {
+    return { error: "Visualize draws the solution explained, or the diagrams the question asks for.", status: 400 };
+  }
+  const purpose = body.purpose ?? "explain";
 
   return {
     params: {
@@ -604,6 +611,7 @@ function buildVisual(provider: ProviderKey, body: Record<string, unknown>, env: 
           buildVisualPrompt(notes, solutions, {
             interpretation: interpretation || undefined,
             verdict: verdict || undefined,
+            purpose,
             fix: fix
               ? {
                   index: fix.board,

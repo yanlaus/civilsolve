@@ -92,6 +92,7 @@ export function usagePartLabel(kind: string, detail: string | null, revision = 0
     approach: "approach",
     explain: "explain",
     draw: "draw",
+    diagrams: "diagrams to draw",
     fix: "fix a board",
     cache: "from cache",
     kept: "from storage",

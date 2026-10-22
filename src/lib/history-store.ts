@@ -50,6 +50,8 @@ export type HistoryEntry = {
    * them, shown again in the same sandboxed frame - never as page HTML.
    */
   visual?: { boards: VisualBoard[]; provider?: VisualProvider; jobId?: string };
+  /** The Diagrams 畫圖 deck (since 22 October 2026): the diagrams the question asks for, drawn. */
+  diagrams?: { boards: VisualBoard[]; provider?: VisualProvider; jobId?: string };
 };
 
 const MAX_ENTRIES = 100;
