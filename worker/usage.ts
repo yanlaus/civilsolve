@@ -98,7 +98,7 @@ export async function describeRequest(
   if (kind === "interpret") detail = READING_STEPS[String(body?.mode ?? "interpret")] ?? "read";
   if (kind === "study") detail = text(body?.kind);
   // A deck drawn, or one board of it drawn again.
-  if (kind === "visualize") detail = body?.fix ? "fix" : "draw";
+  if (kind === "visualize") detail = body?.fix ? "fix" : body?.purpose === "diagrams" ? "diagrams" : "draw";
   return {
     kind,
     detail,

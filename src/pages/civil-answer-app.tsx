@@ -20,7 +20,14 @@ import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type Journ
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
 import { loadQuestion, questionFiles, questionFromBody } from "@/lib/question-store";
-import { providerDisplayName, type ModelVariant, type ProviderKey } from "../../shared/providers";
+import {
+  modelStatus,
+  providerDisplayName,
+  SOLUTION_ORDER,
+  type ModelVariant,
+  type ProviderKey,
+} from "../../shared/providers";
+import { DEFAULT_VISUAL_PROVIDER, VISUAL_PROVIDERS } from "../../shared/visual";
 import {
   estimateBodyBytes,
   formatBytes,
@@ -102,6 +109,28 @@ export default function CivilAnswerAppPage() {
   const asks = useAsk({ runId, getBody });
   // Visualize 圖解: a solution drawn as interactive boards, in a job of its own.
   const visual = useVisual({ runId, getBody, runs, judgeRun });
+  // Diagrams 畫圖 (22 October 2026): the diagrams the question asks the
+  // student to draw, drawn by themselves as an exam answer would draw them -
+  // from the first solution that lists some, by Muse Spark (or the first
+  // drawing model the server has a key for), on the page that sent the run.
+  const diagramSource =
+    SOLUTION_ORDER.find((key) => {
+      const run = runs[key];
+      return run.status === "done" && Boolean(run.solution.diagrams?.length);
+    }) ?? null;
+  const drawsWith = (key: (typeof VISUAL_PROVIDERS)[number]) =>
+    modelStatus(providerStatus?.[key])?.configured !== false;
+  const diagramDrawer = drawsWith(DEFAULT_VISUAL_PROVIDER)
+    ? DEFAULT_VISUAL_PROVIDER
+    : (VISUAL_PROVIDERS.find(drawsWith) ?? null);
+  const diagrams = useVisual({
+    runId,
+    getBody,
+    runs,
+    judgeRun,
+    purpose: "diagrams",
+    auto: { enabled: sentHere, source: diagramSource, provider: diagramDrawer },
+  });
   // The answers compared with each other once every solver has answered.
   const { alignment, compareAgain } = useAlign({
     runId,
@@ -118,6 +147,7 @@ export default function CivilAnswerAppPage() {
     judgeRun,
     studyRuns,
     visual: visual.deck ? { deck: visual.deck, jobId: visual.deckJobId } : null,
+    diagrams: diagrams.deck ? { deck: diagrams.deck, jobId: diagrams.deckJobId } : null,
     variants: runVariants,
     interpretation: confirmedInterpretation,
     questionImages,
@@ -193,7 +223,8 @@ export default function CivilAnswerAppPage() {
     Object.values(runs).some(isRunActive) ||
     isJudgeActive(judgeRun) ||
     Object.values(studyRuns).some(isStudyActive) ||
-    visual.active;
+    visual.active ||
+    diagrams.active;
   const isInterpreting = pipeline.status === "running";
   const busy = isSolving || isInterpreting || Boolean(prepStatus);
   const hasRun = Object.values(runs).some((run) => run.status !== "idle");
@@ -610,6 +641,7 @@ export default function CivilAnswerAppPage() {
             onRefineStudy={refineStudy}
             pdfJobOf={pdfJobOf}
             visual={visual}
+            diagrams={diagrams}
           />
         </Suspense>
       </div>

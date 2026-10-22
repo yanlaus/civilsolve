@@ -4,15 +4,22 @@
 // 21 October 2026) or DeepSeek V4.1 Flash, both on OpenCode Go
 // (shared/visual.ts). Optional and made on request, like the notes, from the
 // same sources; the boards run in a sandbox (lib/board-document.ts).
+//
+// With `purpose="diagrams"` the same section is Diagrams 畫圖 (22 October
+// 2026, the owner's request), under the solutions: the diagrams the question
+// asks the student to draw, drawn as a full-mark exam answer would draw them -
+// by itself once a solution lists some (use-visual.ts `auto`), from the
+// solutions that list them, the verdict among them when it graded one.
 
 import { useState } from "react";
-import { Shapes, Sparkles } from "lucide-react";
+import { LineChart, Shapes, Sparkles } from "lucide-react";
 import type { EffortKey } from "../../../shared/prompt";
 import {
   DEFAULT_VISUAL_PROVIDER,
   VISUAL_MODELS,
   VISUAL_PROVIDERS,
   type VisualProvider,
+  type VisualPurpose,
 } from "../../../shared/visual";
 import { modelStatus, type ProviderKey, type ProviderStatus } from "../../../shared/providers";
 import type { JudgeRun, ProviderRuns, StudySource } from "@/hooks/use-solve";
@@ -34,8 +41,28 @@ const BUTTON_CLASS =
   "cs-primary inline-flex items-center justify-center gap-2 rounded-cs bg-cs-accent px-4 py-2 text-sm font-semibold text-cs-on-accent transition hover:bg-cs-accent-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 export const VISUAL_SECTION_ID = "step-visualize";
+export const DIAGRAMS_SECTION_ID = "step-diagrams";
+
+/** Whether a solution on the page lists diagrams to draw. */
+function listsDiagrams(runs: ProviderRuns, key: ProviderKey) {
+  const run = runs[key];
+  return run.status === "done" && Boolean(run.solution.diagrams?.length);
+}
+
+/**
+ * Where diagrams can be drawn from: the solutions that list some, and the
+ * verdict when one of the solutions it graded does.
+ */
+export function diagramSources(runs: ProviderRuns, judgeRun: JudgeRun): StudySource[] {
+  return answerSources(runs, judgeRun).filter((source) =>
+    source === "verdict"
+      ? judgeRun.status === "done" && judgeRun.solvers.some((key) => listsDiagrams(runs, key))
+      : listsDiagrams(runs, source),
+  );
+}
 
 export function VisualSection({
+  purpose = "explain",
   deck,
   task,
   progress,
@@ -53,6 +80,8 @@ export function VisualSection({
   onFix,
   onStop,
 }: {
+  /** "diagrams": the Diagrams 畫圖 section. Visualize otherwise. */
+  purpose?: VisualPurpose;
   deck: VisualDeck | null;
   task: VisualTask;
   progress?: Progress;
@@ -73,7 +102,8 @@ export function VisualSection({
   onFix: (board: number, instructions: string) => void;
   onStop: () => void;
 }) {
-  const sources = answerSources(runs, judgeRun);
+  const diagrams = purpose === "diagrams";
+  const sources = diagrams ? diagramSources(runs, judgeRun) : answerSources(runs, judgeRun);
   const [sourcePick, setSourcePick] = useState<StudySource | null>(null);
   const source: StudySource | undefined =
     sourcePick && sources.includes(sourcePick) ? sourcePick : sources[0];
@@ -97,24 +127,40 @@ export function VisualSection({
   const unconfigured = configured(model) ? undefined : `${VISUAL_MODELS[model].name} is not configured on the server.`;
   const stopReason = blocked || unconfigured || (sources.length ? undefined : "Needs a finished solution.");
   const hint = source
-    ? `One extra call to ${VISUAL_MODELS[model].label}, with the question${interpretation ? ", the confirmed reading" : ""} and ${sourceSentWith(source, judgeRun, nameOf)}. The boards run in a sandbox on this page: they cannot reach your account, your history or anything else here.`
+    ? `${diagrams ? "Drawn by itself once a solution lists diagrams; drawing again is one" : "One"} extra call to ${VISUAL_MODELS[model].label}, with the question${interpretation ? ", the confirmed reading" : ""} and ${sourceSentWith(source, judgeRun, nameOf)}. The boards run in a sandbox on this page: they cannot reach your account, your history or anything else here.`
     : "";
   const fixing = task.status !== "idle" && task.status !== "error" ? task.board : undefined;
   // While a drawing runs, the progress names the model it went to.
   const drawing = VISUAL_MODELS[task.status === "waiting" || task.status === "streaming" ? task.provider : model].name;
+  // Nothing to draw: no solution lists a diagram, and none was drawn.
+  if (diagrams && !sources.length && !deck && task.status === "idle") return null;
 
   return (
     <section
-      id={VISUAL_SECTION_ID}
+      id={diagrams ? DIAGRAMS_SECTION_ID : VISUAL_SECTION_ID}
       tabIndex={-1}
       className="mt-8 scroll-mt-28 outline-none sm:scroll-mt-20 print:hidden"
-      aria-labelledby="visualize-heading"
+      aria-labelledby={diagrams ? "diagrams-heading" : "visualize-heading"}
     >
-      <StickyHeading id="visualize-heading" icon={Shapes} title="Visualize" chinese="圖解" />
-      <p className="mb-3 text-xs text-cs-ink-3">
-        Optional - the solution you pick, drawn as a few interactive boards: the set-up, the key idea and the
-        result, with animations and sliders where they help.
-      </p>
+      {diagrams ? (
+        <>
+          <StickyHeading id="diagrams-heading" icon={LineChart} title="Diagrams" chinese="畫圖" />
+          <p className="mb-3 text-xs text-cs-ink-3">
+            The question asks you to draw {sources.length || deck ? "these diagrams" : "diagrams"}: here they are,
+            drawn as a full-mark answer would draw them, to check yours against - in the exam you draw them
+            yourself. An AI can still get a value or a shape wrong, so check them against the key points in the
+            solution. · 題目要你畫嘅圖，畫好俾你對答案；考試時要自己畫。AI 都可能畫錯，請對返解答嘅重點數值。
+          </p>
+        </>
+      ) : (
+        <>
+          <StickyHeading id="visualize-heading" icon={Shapes} title="Visualize" chinese="圖解" />
+          <p className="mb-3 text-xs text-cs-ink-3">
+            Optional - the solution you pick, drawn as a few interactive boards: the set-up, the key idea and the
+            result, with animations and sliders where they help.
+          </p>
+        </>
+      )}
 
       <div className="cs-panel min-w-0 rounded-cs-lg border border-cs-line-soft bg-cs-surface p-5 shadow-[0_1px_3px_var(--cs-shadow)]">
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
@@ -182,8 +228,8 @@ export function VisualSection({
         <p className="mt-2 text-[0.7rem] text-cs-ink-3">{stopReason || hint}</p>
         {source && source !== "verdict" && markOf(source) === "wrong" && !active ? (
           <p className="mt-1 text-xs font-medium text-[#a85a12]">
-            The cross-check judged this solution wrong: boards drawn from it follow it, mistakes included. Start
-            from the verified answer for boards you can rely on.
+            The cross-check judged this solution wrong: {diagrams ? "diagrams" : "boards"} drawn from it follow it,
+            mistakes included. Start from the verified answer for {diagrams ? "diagrams" : "boards"} you can rely on.
           </p>
         ) : null}
 
@@ -194,7 +240,7 @@ export function VisualSection({
               progress={progress}
               line={
                 task.status === "streaming"
-                  ? `${drawing} is drawing ${fixing === undefined ? "the boards" : `board ${fixing + 1} again`}... ${task.charsReceived.toLocaleString()} characters received.`
+                  ? `${drawing} is drawing ${fixing === undefined ? (diagrams ? "the diagrams" : "the boards") : `board ${fixing + 1} again`}... ${task.charsReceived.toLocaleString()} characters received.`
                   : task.message
               }
               onStop={onStop}
@@ -210,7 +256,11 @@ export function VisualSection({
             }`}
           >
             <div className="font-semibold">
-              {task.stopped ? "Stopped - no boards" : task.timedOut ? "Timed out - no boards" : "No boards returned"}
+              {task.stopped
+                ? `Stopped - no ${diagrams ? "diagrams" : "boards"}`
+                : task.timedOut
+                  ? `Timed out - no ${diagrams ? "diagrams" : "boards"}`
+                  : `No ${diagrams ? "diagrams" : "boards"} returned`}
               {tookLabel(progress) ? <span className="font-normal"> after {tookLabel(progress)}</span> : null}
             </div>
             {task.stopped ? null : <div className="mt-1">{task.message}</div>}

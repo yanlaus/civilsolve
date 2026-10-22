@@ -8,7 +8,7 @@
 
 import { ASK_FIELDS } from "./ask";
 import { STUDY_FIELDS, STUDY_PARTS, type StudyKind } from "./study";
-import { BOARD_MARK, END_MARK, HTML_MARK, MAX_BOARDS, type VisualBoard } from "./visual";
+import { BOARD_MARK, END_MARK, HTML_MARK, MAX_BOARDS, type VisualBoard, type VisualPurpose } from "./visual";
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
 
@@ -773,6 +773,11 @@ export type VisualPromptExtras = {
   verdict?: string;
   /** Redraw one board of a deck, with what to change. */
   fix?: { index: number; count: number; board: VisualBoard; instructions: string };
+  /**
+   * "diagrams": draw the diagrams the question asks the student to draw, as an
+   * exam answer would (22 October 2026); the solution explained otherwise.
+   */
+  purpose?: VisualPurpose;
 };
 
 /**
@@ -785,7 +790,7 @@ export type VisualPromptExtras = {
  * its build path - its "+esm" bundle did not load (the owner's rebuild,
  * 19 October 2026).
  */
-const BOARD_RULES = [
+const SANDBOX_RULES = [
   "What a board is:",
   "- A chunk of HTML that the page runs exactly as written inside a sandboxed frame: `<svg>`, `<canvas>`, `<style>` and `<script type=\"module\">` all work. There is no template and no preset style - what you write is all there is. Write only what goes inside `<body>`: no `<!doctype>`, `<html>`, `<head>` or `<body>` tags.",
   "- The sandbox: scripts, stylesheets and fonts load only from https://cdn.jsdelivr.net (and Google Fonts). Nothing else is reachable - no fetch, XHR or WebSocket, no images from any URL (draw them; a `data:` URI is fine), no forms, no alert or prompt, no new windows, no navigation, and no localStorage or cookies (they throw here).",
@@ -797,7 +802,10 @@ const BOARD_RULES = [
   "  - Matter.js when a mechanism should really move under physics: `import Matter from 'https://cdn.jsdelivr.net/npm/matter-js@0.20.0/+esm';`",
   "- The page's colours, set on `:root` for you - use them for text and lines rather than fixed colours: `var(--ink)` text and main lines, `var(--ink-2)` secondary text, `var(--line)` guides and grid, `var(--surface)` panels, `var(--accent)` the one thing to look at. The frame's background is the page's, light; leave it transparent.",
   "- Size: the board is as wide as the page's column - 320 px on a phone, up to 760 px on a computer - so make everything fluid: `width:100%`, SVG with a `viewBox` and `width=\"100%\"`, a canvas sized from its container's `clientWidth` (times `devicePixelRatio`). Keep a board within about 560 px of height; the page grows the frame to fit, and past that it scrolls. SVG text shrinks with its `viewBox`: drawn 720 units wide, a 13-unit label is about 5 px on a phone. So keep a `viewBox` no wider than about 560 units, every SVG label at least 16 units, and readouts and longer text in HTML, which keeps its size. Use pointer events, so dragging works with a finger as well as a mouse, and touch targets of at least 32 px.",
-  "",
+];
+
+/** How a Visualize board is drawn: explanatory, moving where it can. */
+const EXPLAIN_STYLE = [
   "How good it has to be - explanatory graphics of the 3Blue1Brown or Bartosz Ciechanowski kind, not a sketch on a whiteboard:",
   "- One board, one point, made completely. Usually three boards: the situation (the structure or system with its supports, loads and given values, to scale), the key analysis (the one idea the solution hangs on - the free-body diagram, the control volume, the critical section), and the result (the answer's values shown where they act, and the diagram that carries them).",
   "- If it can move, let it move. A slider that slides a load along the beam while the reactions, the shear force and the bending moment diagrams follow it says more than three stills; an animation with a play button can build a diagram step by step. Show the current value of whatever changes.",
@@ -806,8 +814,34 @@ const BOARD_RULES = [
   "- Colour carries meaning: each quantity has one colour, the same on every board and in its formulas (for example loads red, reactions blue, shear green, moment purple), dark enough to read on white.",
   "- Set formulas with KaTeX - never hand-write x² in an SVG text. Keep readouts, legends, sliders and buttons as plain HTML in thin strips along the top or bottom edge, and give the drawing the room.",
   "- Whitespace, alignment, a hierarchy of type sizes and of line weights.",
+
+];
+
+const CODE_RULE = "Write correct code: plain modern JavaScript in `<script type=\"module\">` (it runs after the HTML above it is parsed); define everything you use; no external images. The page reports any script error back with its line number, so do not hide errors in try/catch. Aim at 4,000 to 10,000 characters of HTML per board.";
+
+const BOARD_RULES = [...SANDBOX_RULES, "", ...EXPLAIN_STYLE, "", CODE_RULE];
+
+/**
+ * How a diagram the question asks for is drawn (22 October 2026, the
+ * owner's request): as a full-mark exam answer draws it - the diagram itself,
+ * to scale, every value the marker looks for - not an explanation of it.
+ */
+const DIAGRAM_BOARD_STYLE = [
+  "What to draw - an exam answer, not an explanation:",
+  "- Exactly the diagrams the question asks the student to draw - the ones listed under \"Diagrams to draw\" - one board each, in that order, and nothing else: no set-up board, no explanation board, no extra diagram. Give each board that diagram's own title.",
+  "- Draw it the way a full-mark exam answer does: to scale; a shear force or bending moment diagram aligned under a sketch of its beam (supports and loads with their values) on the same horizontal scale; a free-body diagram with every force and reaction as an arrow with its value and unit; a graph with labelled axes, units and scales.",
+  "- Mark every value a marker looks for, with its unit: at each support, each load point, each change of slope, every peak and every zero crossing (with its distance from the left end). Get the shape right - level or stepped under point loads, sloping under a UDL, parabolic in the moment under a UDL - and shade the area between the diagram and its baseline.",
+  "- State the sign convention on the board, as the solution uses it (for example: sagging moment positive, drawn on the tension side).",
+  "- Static: SVG, no animation, no slider, no play button. A small readout of the value under the pointer (hover or touch) is welcome, but nothing has to be clicked to see the answer.",
+  "- Plain and clear: `var(--ink)` for lines and text, one accent colour for the diagram itself with a light fill for its area, labels that never sit on a line or on each other.",
+];
+
+const DIAGRAM_BOARD_RULES = [
+  ...SANDBOX_RULES,
   "",
-  "Write correct code: plain modern JavaScript in `<script type=\"module\">` (it runs after the HTML above it is parsed); define everything you use; no external images. The page reports any script error back with its line number, so do not hide errors in try/catch. Aim at 4,000 to 10,000 characters of HTML per board.",
+  ...DIAGRAM_BOARD_STYLE,
+  "",
+  CODE_RULE.replace("4,000 to 10,000", "2,000 to 8,000"),
 ];
 
 function boardFormat(count: string) {
@@ -834,13 +868,15 @@ function boardFormat(count: string) {
 export function buildVisualPrompt(userNotes: string, solutions: string[], extras: VisualPromptExtras = {}) {
   const count = solutions.length;
   const letters = solutions.map((_, index) => String.fromCharCode(65 + index));
+  const diagrams = extras.purpose === "diagrams";
+  const drawDiagrams = `The question asks the student to draw one or more diagrams, listed under "Diagrams to draw" in the ${extras.verdict && count > 1 ? "solutions" : "solution"}. Your job is to draw exactly those diagrams, the way a full-mark exam answer draws them, so the student can check their own drawing against yours.`;
   const sections = extras.verdict
     ? [
-        `The attached civil engineering assignment images have been solved by ${count === 1 ? "a solver" : `${count} solvers`}, and a cross-check graded ${count === 1 ? "the solution" : "their solutions"}: the solutions and the verdict are below. Your job is to draw the full solution for a student as a short deck of interactive boards that make it visible.`,
+        `The attached civil engineering assignment images have been solved by ${count === 1 ? "a solver" : `${count} solvers`}, and a cross-check graded ${count === 1 ? "the solution" : "their solutions"}: the solutions and the verdict are below. ${diagrams ? drawDiagrams : "Your job is to draw the full solution for a student as a short deck of interactive boards that make it visible."}`,
         "Build the boards on the verdict's verified final answer - it is authoritative - and on the method of the solutions it found correct.",
       ]
     : [
-        "The attached civil engineering assignment images have been solved; the worked solution is below. Your job is to draw that solution for a student as a short deck of interactive boards that make it visible.",
+        `The attached civil engineering assignment images have been solved; the worked solution is below. ${diagrams ? drawDiagrams : "Your job is to draw that solution for a student as a short deck of interactive boards that make it visible."}`,
         // As for the study notes: checking is the cross-check's job, and a
         // "correction" of a right value misleads (28 September 2026).
         "Build the boards on this solution as it stands. Do not re-derive its numbers or correct its values - checking it is the cross-check's job, and one that looks off may well be right.",
@@ -848,17 +884,19 @@ export function buildVisualPrompt(userNotes: string, solutions: string[], extras
   sections.push(
     "Every number on a board must be one the solution or the images give, with the same value and unit. Do not invent values to fill a drawing.",
     "",
-    ...BOARD_RULES,
+    ...(diagrams ? DIAGRAM_BOARD_RULES : BOARD_RULES),
     "",
   );
 
   const fix = extras.fix;
   if (fix) {
     sections.push(
-      `This is board ${fix.index + 1} of ${fix.count} of a deck you drew for this solution, given below with what the student wants changed - it may list errors the page caught, with line numbers counted from the first line of the board's HTML. Draw this one board again: the complete corrected board, keeping what works and the same title unless the instructions change it.`,
+      `This is board ${fix.index + 1} of ${fix.count} of ${diagrams ? "the diagrams" : "a deck"} you drew for this solution, given below with what the student wants changed - it may list errors the page caught, with line numbers counted from the first line of the board's HTML. Draw this one board again: the complete corrected board, keeping what works and the same title unless the instructions change it.`,
       "",
       ...boardFormat("exactly one board"),
     );
+  } else if (diagrams) {
+    sections.push(...boardFormat(`one board per diagram listed under "Diagrams to draw", in that order (at most ${MAX_BOARDS})`));
   } else {
     sections.push(...boardFormat(`2 to ${MAX_BOARDS} boards (usually 3)`));
   }

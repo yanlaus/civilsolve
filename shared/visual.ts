@@ -36,6 +36,21 @@ export type VisualBoard = {
 
 export type VisualResult = { boards: VisualBoard[] };
 
+/**
+ * What a deck is for: "explain", Visualize's boards of the whole solution, or
+ * "diagrams" (22 October 2026, the owner's request) - the diagrams the
+ * question asks the student to draw, drawn as a full-mark exam answer would
+ * draw them, by itself once a solution lists some (the page's Diagrams 畫圖
+ * section). One task kind, one endpoint, one parser: only the prompt differs.
+ */
+export const VISUAL_PURPOSES = ["explain", "diagrams"] as const;
+
+export type VisualPurpose = (typeof VISUAL_PURPOSES)[number];
+
+export function isVisualPurpose(value: unknown): value is VisualPurpose {
+  return (VISUAL_PURPOSES as readonly unknown[]).includes(value);
+}
+
 /** The models that draw, the default first. */
 export const VISUAL_PROVIDERS = ["muse", "deepseek"] as const satisfies readonly ProviderKey[];
 

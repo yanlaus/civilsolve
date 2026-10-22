@@ -33,6 +33,8 @@ type HistorySource = {
   studyRuns: StudyRuns;
   /** The Visualize deck on the page, and the job that holds it. */
   visual: { deck: VisualDeck; jobId: string | null } | null;
+  /** The Diagrams 畫圖 deck: the diagrams the question asks for, drawn. */
+  diagrams: { deck: VisualDeck; jobId: string | null } | null;
   variants: RunVariants;
   interpretation: ConfirmedInterpretation | null;
   questionImages: string[];
@@ -47,7 +49,7 @@ type HistorySource = {
  * on every chunk a running solver streams, which would keep putting the
  * write off.
  */
-function finishedSignature({ runs, judgeRun, studyRuns, visual, interpretation }: HistorySource) {
+function finishedSignature({ runs, judgeRun, studyRuns, visual, diagrams, interpretation }: HistorySource) {
   return [
     ...PROVIDER_KEYS.map((key) => {
       const run = runs[key];
@@ -63,13 +65,14 @@ function finishedSignature({ runs, judgeRun, studyRuns, visual, interpretation }
       return run.status === "done" ? `${kind}:${run.study.guide.length}` : "";
     }),
     visual ? `visual:${visual.jobId}:${visual.deck.boards.map((board) => board.html.length).join(",")}` : "",
+    diagrams ? `diagrams:${diagrams.jobId}:${diagrams.deck.boards.map((board) => board.html.length).join(",")}` : "",
     `reading:${interpretation?.text.length ?? 0}`,
   ].join("|");
 }
 
 /** The run as a history entry, merged over what was kept before. */
 function entryOf(source: HistorySource, runId: number, thumbnail: string | undefined) {
-  const { runs, judgeRun, studyRuns, visual, variants, interpretation, notes, pdfJobOf } = source;
+  const { runs, judgeRun, studyRuns, visual, diagrams, variants, interpretation, notes, pdfJobOf } = source;
   const solutions: HistoryEntry["solutions"] = {};
   for (const key of PROVIDER_KEYS) {
     const run = runs[key];
@@ -125,6 +128,13 @@ function entryOf(source: HistorySource, runId: number, thumbnail: string | undef
           ...(visual.jobId ? { jobId: visual.jobId } : {}),
         }
       : current?.visual,
+    diagrams: diagrams
+      ? {
+          boards: diagrams.deck.boards,
+          provider: diagrams.deck.provider,
+          ...(diagrams.jobId ? { jobId: diagrams.jobId } : {}),
+        }
+      : current?.diagrams,
   });
 }
 

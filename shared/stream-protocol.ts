@@ -11,7 +11,7 @@ import type { EffortKey } from "./prompt";
 import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
 import type { StudyKind, StudyResult } from "./study";
-import type { VisualFix, VisualResult } from "./visual";
+import type { VisualFix, VisualPurpose, VisualResult } from "./visual";
 
 /**
  * A re-generation: the version the model wrote last time, as text, and what
@@ -121,6 +121,8 @@ export type VisualRequestBody = {
   effort?: EffortKey;
   /** Set to redraw one board; the job stores the whole deck with it in. */
   fix?: VisualFix;
+  /** "diagrams": the diagrams the question asks for, as an exam answer draws them. "explain" when absent. */
+  purpose?: VisualPurpose;
 };
 
 /** One earlier question about the same solution, and its answer. */

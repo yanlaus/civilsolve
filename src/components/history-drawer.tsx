@@ -230,18 +230,34 @@ function EntryView({
         );
       })}
 
+      {entry.diagrams?.boards.length ? (
+        <HistoryBoards
+          label="畫圖 · Diagrams"
+          boards={entry.diagrams.boards}
+          provider={entry.diagrams.provider}
+        />
+      ) : null}
       {entry.visual?.boards.length ? (
-        <HistoryBoards boards={entry.visual.boards} provider={entry.visual.provider} />
+        <HistoryBoards label="圖解 · Visualize" boards={entry.visual.boards} provider={entry.visual.provider} />
       ) : null}
     </div>
   );
 }
 
 /**
- * The Visualize deck, read-only. The boards run only while the fold is open:
- * a closed fold's frame would otherwise load and run the board unseen.
+ * A deck - Visualize's, or the diagrams drawn - read-only. The boards run only
+ * while the fold is open: a closed fold's frame would otherwise load and run
+ * the board unseen.
  */
-function HistoryBoards({ boards, provider }: { boards: VisualBoard[]; provider?: VisualProvider }) {
+function HistoryBoards({
+  label,
+  boards,
+  provider,
+}: {
+  label: string;
+  boards: VisualBoard[];
+  provider?: VisualProvider;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <details
@@ -249,7 +265,7 @@ function HistoryBoards({ boards, provider }: { boards: VisualBoard[]; provider?:
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 text-sm font-semibold text-cs-ink">
-        圖解 · Visualize ({boards.length} {boards.length === 1 ? "board" : "boards"}
+        {label} ({boards.length} {boards.length === 1 ? "board" : "boards"}
         {provider ? `, by ${VISUAL_MODELS[provider].name}` : ""})
         <ChevronDown className="ml-auto h-4 w-4 text-cs-ink-3 transition group-open:rotate-180" aria-hidden="true" />
       </summary>
