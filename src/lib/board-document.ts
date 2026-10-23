@@ -101,9 +101,30 @@ console.error = function () {
   post({ type: "error", text: Array.prototype.map.call(arguments, String).join(" ") });
   return consoleError.apply(console, arguments);
 };
+// A drawing is never shown larger than its viewBox: at most one pixel per
+// unit, centred, smaller where the column is narrower (24 October 2026, the
+// owner: its labels came out too large - a 520-unit diagram with 16-unit
+// labels filled a 700 px column at 1.35 times, its labels over its arrows).
+// Not an SVG nested in another, which follows its parent, nor an icon.
+var fit = function () {
+  var svgs = document.querySelectorAll("svg[viewBox]");
+  for (var i = 0; i < svgs.length; i++) {
+    var svg = svgs[i];
+    if (svg.ownerSVGElement || svg.getAttribute("data-fitted")) continue;
+    var box = svg.viewBox && svg.viewBox.baseVal;
+    if (!box || box.width < 160) continue;
+    svg.setAttribute("data-fitted", "1");
+    if (!svg.style.maxWidth) svg.style.maxWidth = box.width + "px";
+    if (getComputedStyle(svg).display === "block" && !svg.style.marginLeft && !svg.style.marginRight) {
+      svg.style.marginLeft = "auto";
+      svg.style.marginRight = "auto";
+    }
+  }
+};
 var measure = function (ready) {
   var body = document.body;
   if (!body) return;
+  fit();
   var d = document.documentElement;
   // Measured as the board lays out with no scrollbar: a drawing that scales
   // with its width is taller at full width, so a height measured beside a
@@ -146,6 +167,9 @@ export function boardDocument(html: string, { generation, palette = DEFAULT_PALE
   const colours = (Object.keys(palette) as Array<keyof BoardPalette>)
     .map((name) => `--${name}:${palette[name].replace(/[;<>{}]/g, "")}`)
     .join(";");
+  // SVG text gets a halo of the background (24 October 2026), so a label that
+  // crosses a line or an arrow still reads; at no specificity, so a board's
+  // own styles win.
   const before = [
     "<!doctype html>",
     '<html lang="en">',
@@ -153,7 +177,7 @@ export function boardDocument(html: string, { generation, palette = DEFAULT_PALE
     '<meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="${BOARD_CSP}">`,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<style>:root{${colours};color-scheme:light}html,body{margin:0;background:transparent}body{color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-wrap:break-word}</style>`,
+    `<style>:root{${colours};color-scheme:light}html,body{margin:0;background:transparent}body{color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-wrap:break-word}:where(svg text){paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round}</style>`,
     `<script>var GENERATION = ${Math.floor(generation)}; var HEAD_LINES = __HEAD_LINES__;${BRIDGE}</script>`,
     "</head>",
     "<body>",
