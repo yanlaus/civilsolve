@@ -17,9 +17,12 @@
 //
 // Model output is untrusted. The HTML is built here and handed to the
 // browser with setContent, never loaded from a URL: it is sanitized with
-// HTMLRewriter, the page runs with JavaScript off, and every request but the
-// KaTeX stylesheet and its fonts is refused - so the worst a hostile answer
-// can do is change how its own PDF looks.
+// HTMLRewriter, the page runs with JavaScript off, and its Content-Security-
+// Policy refuses every request but the KaTeX stylesheet and its fonts - so
+// the worst a hostile answer can do is change how its own PDF looks. (Request
+// interception refused them until 31 October 2026: a font Chrome asked for
+// twice was left paused the second time, the page never went idle, and long
+// solutions - more formulas, more fonts - failed with a timeout.)
 //
 // Cost: Workers Paid includes 10 browser hours a month and bills US$0.09
 // an hour beyond. PdfBudget counts the browser time each month and refuses
@@ -57,6 +60,14 @@ export function pdfKey(jobId: string) {
 
 /** KaTeX's stylesheet and fonts, the one thing the page may fetch. */
 const KATEX_BASE = `https://cdn.jsdelivr.net/npm/katex@${katex.version}/dist/`;
+
+/** What the PDF's page may load: KaTeX's stylesheet and fonts, and nothing else. */
+const PDF_CSP = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline' https://cdn.jsdelivr.net",
+  "font-src https://cdn.jsdelivr.net data:",
+  "img-src data:",
+].join("; ");
 
 /**
  * Browser time used this month, and the bytes of PDF kept in R2, in one
@@ -261,6 +272,7 @@ export async function pdfDocument(content: PdfContent) {
   return [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="${PDF_CSP}">`,
     `<title>${escapeHtml(pdfTitle(content))}</title>`,
     `<link rel="stylesheet" href="${KATEX_BASE}katex.min.css">`,
     `<style>${PDF_CSS}</style>`,
@@ -269,23 +281,40 @@ export async function pdfDocument(content: PdfContent) {
 }
 
 /**
+ * How long the browser waits for its next command before Cloudflare closes it
+ * (1 minute by default). Laying out a long solution can take that long with no
+ * command sent, so it gets the most there is; the browser is closed as soon as
+ * the PDF is made either way, so this costs nothing unless the Worker dies.
+ */
+const BROWSER_KEEP_ALIVE_MS = 10 * 60 * 1000;
+
+/** The most the page waits for KaTeX's fonts once the document has loaded. */
+const FONT_WAIT_MS = 15_000;
+
+/**
  * Prints `html` to an A4 PDF in a headless browser that runs no script and
  * fetches nothing but KaTeX. The browser is closed at once: its time is
  * what is billed.
+ *
+ * No time limit on the layout or the printing (31 October 2026, the owner's
+ * request): with 20 s for the layout, a long solution failed with
+ * "Navigation timeout of 20000 ms exceeded" - after 22 to 26 s, where a
+ * short one takes 5 to 9 s - and printing had Puppeteer's 30 s.
  */
 export async function printPdf(binding: Fetcher, html: string): Promise<Uint8Array> {
-  const browser = await puppeteer.launch(binding);
+  const browser = await puppeteer.launch(binding, { keep_alive: BROWSER_KEEP_ALIVE_MS });
   try {
     const page = await browser.newPage();
     await page.setJavaScriptEnabled(false);
-    await page.setRequestInterception(true);
-    page.on("request", (request) => {
-      const url = request.url();
-      if (url.startsWith(KATEX_BASE) || url.startsWith("data:")) void request.continue();
-      else void request.abort();
-    });
-    await page.setContent(html, { waitUntil: "networkidle0", timeout: 20_000 });
+    // The document, with no time limit; then its fonts. KaTeX's fonts start
+    // loading after "load" fires, so the page waits for the network to go
+    // quiet - and prints anyway if it does not: Chrome's own network-idle
+    // signal ("networkidle0") never came through `npm run dev`, and one
+    // that does not come must not cost the student the PDF.
+    await page.setContent(html, { waitUntil: "load", timeout: 0 });
+    await page.waitForNetworkIdle({ idleTime: 500, timeout: FONT_WAIT_MS }).catch(() => {});
     const pdf = await page.pdf({
+      timeout: 0,
       format: "A4",
       printBackground: false,
       margin: { top: "16mm", right: "15mm", bottom: "18mm", left: "15mm" },
