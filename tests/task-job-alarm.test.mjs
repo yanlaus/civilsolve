@@ -18,7 +18,7 @@ await build({
   } }],
 });
 const { TaskJob, JOB_RETENTION_MS, ALARM_TASK_TIMEOUT_MS, runTask, taskTimeoutFor, buildTask } = await import(pathToFileURL(out));
-const env = { OPENCODE_API_KEY: "test-only", OPENCODE_BASE_URL: "https://mock.invalid" };
+const env = { OPENCODE_API_KEY: "test-only", OPENCODE_BASE_URL: "https://mock.invalid", OPENAI_API_KEY: "test-only-openai", ANTHROPIC_API_KEY: "test-only-anthropic" };
 const body = { images: ["data:image/png;base64,aW1hZ2U="], notes: "PRIVATE_NOTES", solution: "PRIVATE_SOLUTION", question: "Explain the support force." };
 const originalFetch = globalThis.fetch;
 let calls = 0;
@@ -283,4 +283,28 @@ test("a region refusal is reported once without retrying or changing models", as
   assert.match(terminal.message, /country restriction/);
   assert.doesNotMatch(terminal.message, /country you are in/);
   assert.equal(calls, 1);
+});
+
+test("the Flagship models start only in the alarm, under its wall limit, and keep their keys out of storage", async () => {
+  for (const [provider, url, answer] of [
+    ["astra", "https://api.openai.com/v1/responses", { output_text: JSON.stringify({ answer: "The support balances the load." }) }],
+    ["opus", "https://api.anthropic.com/v1/messages", { content: [{ type: "text", text: JSON.stringify({ answer: "The support balances the load." }) }], stop_reason: "end_turn" }],
+  ]) {
+    calls = 0;
+    globalThis.fetch = async (sentTo) => {
+      calls++;
+      assert.equal(sentTo, url);
+      return Response.json(answer);
+    };
+    assert.equal(taskTimeoutFor(params(provider)), ALARM_TASK_TIMEOUT_MS);
+    const { job, storage } = make();
+    const result = events(await start(job, provider));
+    assert.equal(calls, 0, provider);
+    assert.ok(storage.alarm <= Date.now());
+    const stored = JSON.stringify([...storage.values]);
+    for (const secret of [env.OPENAI_API_KEY, env.ANTHROPIC_API_KEY, ...body.images]) assert.ok(!stored.includes(secret));
+    await job.alarm();
+    assert.equal((await result).at(-1).type, "done", provider);
+    assert.equal(calls, 1, provider);
+  }
 });

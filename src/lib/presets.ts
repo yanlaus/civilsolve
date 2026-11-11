@@ -16,11 +16,12 @@ export type SolveMode = "careful" | "quick" | "custom";
 
 /**
  * Which models a preset runs (16 October 2026, the owner's request): Smart,
- * the default - light, fast models - Expert, each brand's top model, or
- * since 17 October 2026 China, cheap China models on the OpenCode Go plan.
- * Like the mode, not remembered: the page opens on Smart.
+ * the default - light, fast models - Expert, each brand's top model, since
+ * 17 October 2026 China, cheap China models on the OpenCode Go plan, and
+ * since 11 November 2026 Flagship, OpenAI's and Anthropic's flagships on
+ * their own APIs. Like the mode, not remembered: the page opens on Smart.
  */
-export type Tier = "smart" | "expert" | "china";
+export type Tier = "smart" | "expert" | "china" | "flagship";
 
 export type Preset = {
   /** The solvers, in picker order. */
@@ -82,6 +83,21 @@ const CHINA_SOLVERS: Pick<Preset, "providers" | "effort" | "judge"> = {
   judge: CHINA_JUDGE,
 };
 
+/** Flagship's judge (the owner's pick): Claude Opus 5.5, at $4 / $20 per 1M tokens to Astra's $10 / $50. */
+export const FLAGSHIP_JUDGE: ModelChoice = { provider: "opus" };
+
+/**
+ * Flagship's solvers, the owner's picks of 11 November 2026: GPT-6 Astra on
+ * OpenAI's API and Claude Opus 5.5 on Anthropic's, each billed per token on
+ * the owner's prepaid credit there - roughly US$0.5-1.5 and US$0.2-0.6 a
+ * solve at high. Neither runs anywhere else (TIER_ONLY_PROVIDERS).
+ */
+const FLAGSHIP_SOLVERS: Pick<Preset, "providers" | "effort" | "judge"> = {
+  providers: ["astra", "opus"],
+  effort: "high",
+  judge: FLAGSHIP_JUDGE,
+};
+
 export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>> = {
   careful: {
     // The owner's default solvers, the reading checked by the default readers
@@ -107,6 +123,15 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>>
       readers: [{ provider: "glm" }, { provider: "minimax" }],
       reconciler: { provider: "deepseek" },
     },
+    // Astra and Opus 5.5 read, Astra reconciles, both solve, and Opus 5.5
+    // cross-checks once the answers are in: 6 calls.
+    flagship: {
+      ...FLAGSHIP_SOLVERS,
+      verify: true,
+      autoCheck: true,
+      readers: [{ provider: "astra" }, { provider: "opus" }],
+      reconciler: { provider: "astra" },
+    },
   },
   quick: {
     // Three solvers and nothing else: Muse Spark and Claude Haiku on the
@@ -115,6 +140,7 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>>
     smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: false, autoCheck: false },
     expert: { ...EXPERT_SOLVERS, verify: false, autoCheck: false },
     china: { ...CHINA_SOLVERS, verify: false, autoCheck: false },
+    flagship: { ...FLAGSHIP_SOLVERS, verify: false, autoCheck: false },
   },
 };
 
@@ -137,7 +163,21 @@ export const TIERS: Array<{ key: Tier; title: string; chinese: string; blurb: st
     chinese: "中國",
     blurb: "Cheap China models: DeepSeek, MiniMax M3 and Qwen3.7 Plus solve, and MiMo V2.6 Pro cross-checks - thoroughly, but it can take about 10 minutes (DeepSeek takes over if it fails).",
   },
+  {
+    key: "flagship",
+    title: "Flagship",
+    chinese: "旗艦",
+    blurb: "OpenAI's and Anthropic's flagships on their official APIs: GPT-6 Astra and Claude Opus 5.5 solve, and Opus 5.5 cross-checks.",
+  },
 ];
+
+/**
+ * What a question costs on a tier billed per token, by mode, shown under its
+ * blurb: estimates for one to three pages at high (11 November 2026).
+ */
+export const TIER_COST: Partial<Record<Tier, Record<Exclude<SolveMode, "custom">, string>>> = {
+  flagship: { quick: "US$0.7–2", careful: "US$2–5" },
+};
 
 /** The tier the page opens on, every time. */
 export const DEFAULT_TIER: Tier = "smart";

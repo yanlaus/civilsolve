@@ -38,6 +38,7 @@ import {
   type RunVariants,
 } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
+import { choicesWith } from "@/lib/model-choices";
 import { ProviderLogo } from "./provider-logo";
 
 const PANEL_CLASS =
@@ -191,11 +192,13 @@ export function CrossCheckControls({
     room -= 1;
     return true;
   });
-  const judges = MODEL_CHOICES.filter(configured);
   const [judgePick, setJudgePick] = useState<ModelChoice | null>(null);
   const judge: ModelChoice =
     canonicalChoice(judgePick ??
     (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : defaultJudge));
+  // With the run's own judge in it when the list leaves it out: the Flagship
+  // tier's Claude Opus 5.5.
+  const judges = choicesWith(judge, configured);
 
   // How hard the judge thinks: high by default, the most reliable level
   // measured for grading. A judge's route may not offer every level (ChatGPT

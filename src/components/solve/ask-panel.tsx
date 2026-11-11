@@ -11,7 +11,6 @@ import {
   choiceKey,
   canonicalChoice,
   modelStatus,
-  MODEL_CHOICES,
   parseChoice,
   providerDisplayName,
   type ModelChoice,
@@ -22,6 +21,7 @@ import type { ProviderArtifact } from "../../../shared/solution";
 import type { SolutionStep } from "../../../shared/steps";
 import type { AskThreads, AskWriter } from "@/hooks/use-ask";
 import { effortBand } from "@/lib/effort-band";
+import { choicesWith } from "@/lib/model-choices";
 import { prefersReducedMotion } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
 import MathProse from "./math-prose";
@@ -221,7 +221,7 @@ export function AskPanel({
               }}
               className={SELECT_CLASS}
             >
-              {MODEL_CHOICES.filter(configured).map((choice) => (
+              {choicesWith(model, configured).map((choice) => (
                 <option key={choiceKey(choice)} value={choiceKey(choice)}>
                   {providerDisplayName(choice.provider, choice.variant)}
                   {choiceKey(choice) === choiceKey(defaultModel) ? " (wrote this solution)" : ""}
