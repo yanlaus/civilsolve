@@ -44,6 +44,7 @@ import {
   providerDisplayName,
   SOLVER_KEYS,
   isSolverKey,
+  TIER_ONLY_PROVIDERS,
   type ModelChoice,
   type ModelVariant,
   type ProviderKey,
@@ -58,11 +59,13 @@ import {
   forgetSavedMode,
   MODES,
   PRESETS,
+  TIER_COST,
   TIERS,
   type Preset,
   type SolveMode,
   type Tier,
 } from "@/lib/presets";
+import { choicesWith } from "@/lib/model-choices";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
 import type { SavedReference } from "@/lib/question-store";
 import { effortBand as bandForStatus } from "@/lib/effort-band";
@@ -142,15 +145,6 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
-
-/**
- * The reader, reconciler and judge picks, with `current` added when the lists
- * leave it out: a China preset's GLM-5.3-Flash, say, carried into Custom.
- */
-function choicesWith(current: ModelChoice, available: (choice: ModelChoice) => boolean) {
-  const listed = MODEL_CHOICES.filter(available);
-  return listed.some((choice) => choiceKey(choice) === choiceKey(current)) ? listed : [current, ...listed];
-}
 
 /** The interpretation pass's three models: first reader, second reader, reconciler. */
 type PassRole = "a" | "b" | "v";
@@ -376,6 +370,8 @@ export function UploadForm({
     onPlanChange?.({ verify: verifyEnabled, autoCheck: autoCheckOn });
   }, [onPlanChange, verifyEnabled, autoCheckOn]);
   const callCount = selectedProviders.length + (verifyEnabled ? 3 : 0) + (autoCheckOn ? 1 : 0);
+  /** A question's cost on a tier billed per token (Flagship), for the mode picked. */
+  const tierCost = mode === "custom" ? undefined : TIER_COST[tier]?.[mode];
 
   /** Fills in every setting from a preset - its own defaults for the rest. */
   function applyPreset(preset: Preset) {
@@ -444,8 +440,18 @@ export function UploadForm({
       ? "Pick two different models to read the question independently."
       : "";
 
-  const solverConfigError =
-    bandIsEmpty
+  // A tier whose own models have no key on the server (Flagship before its
+  // OPENAI_API_KEY and ANTHROPIC_API_KEY are set) cannot run: say so, rather
+  // than let the untick above leave another model solving under its name.
+  const tierUnavailable =
+    mode === "custom"
+      ? []
+      : PRESETS[mode][tier].providers.filter((key) => TIER_ONLY_PROVIDERS.has(key) && !isAvailable(key));
+  const tierTitle = TIERS.find((option) => option.key === tier)?.title ?? tier;
+
+  const solverConfigError = tierUnavailable.length
+    ? `${tierUnavailable.map((key) => providerDisplayName(key)).join(" and ")} ${tierUnavailable.length === 1 ? "is" : "are"} not set up on the server yet, so ${tierTitle} cannot run. Pick another tier. · 伺服器尚未設定 ${tierUnavailable.map((key) => providerDisplayName(key)).join("、")}，暫時未能使用。`
+    : bandIsEmpty
       ? `${floorLabels} needs at least ${effortFloor} thinking and ${ceilingLabels} cannot go above ${effortCeiling} — pick one or the other.`
       : selectedProviders.length === 0
         ? "Pick at least one AI provider to solve with."
@@ -1067,8 +1073,9 @@ export function UploadForm({
           ))}
         </div>
         {mode !== "custom" ? (
-          // Smart or Expert: which models the preset runs (16 October 2026).
-          <div className="mt-2 grid grid-cols-3 gap-2" role="radiogroup" aria-label="Which models?">
+          // Which models the preset runs (16 October 2026): four since
+          // Flagship (11 November 2026), two by two on a phone.
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Which models?">
             {TIERS.map((option) => (
               <button
                 key={option.key}
@@ -1097,6 +1104,14 @@ export function UploadForm({
                 <Flame className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 Uses more credit and takes longer: Gemini 4 Argon, Kimi K3 and Grok 4.7 have small monthly
                 allowances; the cross-check uses Claude Opus. · 用多啲額度、慢啲。
+              </span>
+            ) : null}
+            {tierCost ? (
+              // Billed per token on the vendors' prepaid credit (Flagship).
+              <span className="mt-1 flex items-start gap-1 font-semibold text-[#b35c1e]">
+                <Flame className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Billed per token on the OpenAI and Anthropic accounts: about {tierCost} a question. · 按 token
+                收費，每題約 {tierCost}。
               </span>
             ) : null}
           </p>

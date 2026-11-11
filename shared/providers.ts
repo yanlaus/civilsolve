@@ -29,7 +29,9 @@ export type ProviderKey =
   | "muse"
   | "haiku"
   | "qwen"
-  | "glm";
+  | "glm"
+  | "astra"
+  | "opus";
 
 /**
  * Every provider, in picker order - the order of the solver cards, the
@@ -56,6 +58,11 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   // reader and judge lists (TIER_ONLY_PROVIDERS).
   "qwen",
   "glm",
+  // The Flagship tier's own (11 November 2026), on the vendors' official
+  // APIs: GPT-6 Astra on OpenAI's, Claude Opus 5.5 on Anthropic's. Astra
+  // first, so the judge sees it as Solution A.
+  "astra",
+  "opus",
 ];
 
 /**
@@ -82,12 +89,15 @@ export const REVIEW_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderK
 export const LEGACY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["haiku"]);
 
 /**
- * Providers only the China tier runs (17 October 2026, the owner's call):
- * Qwen3.7 Plus solves and GLM-5.3-Flash reads there, but neither has a
- * solver card or a place in the reader and judge lists. Custom shows one
- * only while a China preset left it picked.
+ * Providers only one tier runs: the China tier's (17 October 2026, the
+ * owner's call) - Qwen3.7 Plus solves and GLM-5.3-Flash reads there - and
+ * the Flagship tier's (11 November 2026, the owner's call: "Opus 5.5 is only
+ * available in Flagship") - GPT-6 Astra and Claude Opus 5.5, each billed per
+ * token on the vendor's own API. None has a solver card or a place in the
+ * reader and judge lists. Custom shows one only while a preset left it
+ * picked, and a list a run's own pick is missing from adds it (choicesWith).
  */
-export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm"]);
+export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm", "astra", "opus"]);
 
 /** The solver cards, in picker order: every provider that is not review-only. */
 export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(
@@ -111,6 +121,8 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
   haiku: "Claude Haiku",
   qwen: "Qwen",
   glm: "GLM",
+  astra: "GPT-6 Astra",
+  opus: "Claude Opus 5.5",
 };
 
 /**
@@ -216,10 +228,14 @@ export const CHINA_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
  * Grok is the heaviest draw per solve on the owner's OpenCode Go plan after
  * Gemini 4 Argon ($4 / $20 per 1M tokens to Grok's $2 / $6, about 1,060
  * requests a month on its own cap - October 2026) and Kimi K3 ($3 / $15,
- * about 490 a month, to K2.7 Code's $0.95 / $4 and 6,750).
+ * about 490 a month, to K2.7 Code's $0.95 / $4 and 6,750). The Flagship
+ * tier's two are billed per token on the vendors' prepaid API credit: GPT-6
+ * Astra at $10 / $50 per 1M tokens, Claude Opus 5.5 at $4 / $20.
  */
 export const HIGHER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
   "grok",
+  "astra",
+  "opus",
 ]);
 
 export function usesMoreCredit(provider: ProviderKey, variant?: ModelVariant) {
@@ -304,9 +320,13 @@ export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
  */
 export const DEFAULT_ALIGNER: ModelChoice = { provider: "deepseek" };
 
-export type ChannelKey = "poe" | "opencode" | "google" | "google-backup" | "minimax";
+/**
+ * The upstream accounts. "openai" and "anthropic" (11 November 2026) are the
+ * vendors' own APIs, on the owner's prepaid credit, for the Flagship tier.
+ */
+export type ChannelKey = "poe" | "opencode" | "google" | "google-backup" | "minimax" | "openai" | "anthropic";
 
-export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "google-backup", "minimax"];
+export const CHANNEL_KEYS: ChannelKey[] = ["poe", "opencode", "google", "google-backup", "minimax", "openai", "anthropic"];
 
 export function isChannelKey(value: string): value is ChannelKey {
   return (CHANNEL_KEYS as string[]).includes(value);
@@ -319,6 +339,8 @@ export const CHANNEL_LABELS: Record<ChannelKey, string> = {
   google: "Google Vertex AI",
   "google-backup": "Google Vertex AI, backup key",
   minimax: "MiniMax",
+  openai: "OpenAI API",
+  anthropic: "Anthropic API",
 };
 
 /** Per-provider status reported by GET /api/health (never includes key values). */

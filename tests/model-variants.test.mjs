@@ -186,3 +186,145 @@ test("real runner sends native vision and Haiku's effort through Messages, Opus 
     }
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("Flagship tier: GPT-6 Astra and Claude Opus 5.5 solve, Astra reconciles, Opus 5.5 judges", () => {
+  for (const mode of ["quick", "careful"]) {
+    assert.deepEqual(app.PRESETS[mode].flagship.providers, ["astra", "opus"]);
+    assert.equal(app.PRESETS[mode].flagship.effort, "high");
+    assert.equal(app.choiceKey(app.PRESETS[mode].flagship.judge), "opus");
+  }
+  assert.equal(app.PRESETS.careful.flagship.verify, true);
+  assert.equal(app.PRESETS.careful.flagship.autoCheck, true);
+  assert.equal(app.PRESETS.quick.flagship.verify, false);
+  assert.equal(app.PRESETS.quick.flagship.autoCheck, false);
+  assert.deepEqual(app.PRESETS.careful.flagship.readers.map(app.choiceKey), ["astra", "opus"]);
+  assert.equal(app.choiceKey(app.PRESETS.careful.flagship.reconciler), "astra");
+  assert.deepEqual(app.TIERS.map(t => t.key), ["smart", "expert", "china", "flagship"]);
+  // Flagship only (the owner's call): no card, no reader or judge pick, and
+  // the Claude card's Opus is still Poe's.
+  for (const key of ["astra", "opus"]) {
+    assert.ok(!app.SOLVER_KEYS.includes(key));
+    assert.ok(!app.MODEL_CHOICES.some(c => c.provider === key));
+    assert.equal(app.usesMoreCredit(key), true);
+  }
+  assert.equal(app.resolveRoute("claude", env, app.variantOverride("claude", "opus", env)).model, "claude-opus-4.8");
+  assert.equal(app.providerDisplayName("astra"), "GPT-6 Astra");
+  assert.equal(app.providerDisplayName("opus"), "Claude Opus 5.5");
+  // The judge sees Astra as Solution A.
+  assert.ok(app.PROVIDER_KEYS.indexOf("astra") < app.PROVIDER_KEYS.indexOf("opus"));
+});
+
+test("Flagship routes: the vendors' own APIs, started in the alarm in North America", () => {
+  const config = { ...env, OPENAI_API_KEY: "fake-openai-key", ANTHROPIC_API_KEY: "fake-anthropic-key" };
+  const astra = app.resolveRoute("astra", config);
+  assert.equal(astra.channel, "openai");
+  assert.equal(astra.dialect, "responses");
+  assert.equal(astra.endpoint, "https://api.openai.com/v1/responses");
+  assert.equal(astra.model, "gpt-6-astra");
+  assert.equal(astra.apiKey, "fake-openai-key");
+  assert.equal(astra.label, "GPT-6 Astra (via OpenAI API)");
+  const opus = app.resolveRoute("opus", config);
+  assert.equal(opus.channel, "anthropic");
+  assert.equal(opus.dialect, "messages");
+  assert.equal(opus.endpoint, "https://api.anthropic.com/v1/messages");
+  assert.equal(opus.model, "claude-opus-5-5");
+  assert.equal(opus.apiKey, "fake-anthropic-key");
+  assert.equal(opus.label, "Claude Opus 5.5 (via Anthropic API)");
+  for (const resolved of [astra, opus]) {
+    assert.equal(resolved.region, "wnam");
+    assert.equal(resolved.startInAlarm, true);
+    assert.equal(resolved.timeoutMs, 20 * 60000);
+    assert.equal(resolved.configured, true);
+    // No "off" on either: None sends nothing, Max sends xhigh.
+    assert.equal(app.supportsEffort(resolved, "none"), false);
+  }
+  // Without its key a Flagship model is unavailable, and nothing else moves.
+  const missing = app.resolveRoute("opus", env);
+  assert.equal(missing.configured, false);
+  assert.match(missing.problem, /ANTHROPIC_API_KEY/);
+  assert.equal(app.routeStatus("astra", env).configured, false);
+});
+
+test("real runner sends Astra through OpenAI's Responses API and Opus 5.5 through Anthropic's Messages API", async () => {
+  const config = { ...env, OPENAI_API_KEY: "fake-openai-key", ANTHROPIC_API_KEY: "fake-anthropic-key" };
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [provider, effort, sentEffort] of [["astra", "high", "high"], ["astra", "max", "xhigh"], ["opus", "high", "high"], ["opus", "max", "xhigh"]]) {
+      let calls = 0;
+      globalThis.fetch = async (url, init) => {
+        calls++;
+        const sent = JSON.parse(init.body);
+        const headers = init.headers;
+        assert.match(JSON.stringify(sent), /aW1hZ2U=/);
+        assert.equal(headers["x-opencode-session"], undefined);
+        if (provider === "astra") {
+          assert.equal(url, "https://api.openai.com/v1/responses");
+          assert.equal(headers.Authorization, "Bearer fake-openai-key");
+          assert.equal(sent.model, "gpt-6-astra");
+          assert.equal(sent.reasoning.effort, sentEffort);
+          return Response.json({ output_text: JSON.stringify({ answer: "The load is balanced." }) });
+        }
+        assert.equal(url, "https://api.anthropic.com/v1/messages");
+        assert.equal(headers["x-api-key"], "fake-anthropic-key");
+        assert.equal(sent.model, "claude-opus-5-5");
+        assert.deepEqual(sent.thinking, { type: "adaptive" });
+        assert.equal(sent.output_config.effort, sentEffort);
+        assert.equal(sent.messages[0].content[0].type, "image");
+        return Response.json({ content: [{ type: "text", text: JSON.stringify({ answer: "The load is balanced." }) }], stop_reason: "end_turn" });
+      };
+      const built = app.buildTask("ask", provider, { ...body, effort }, config);
+      assert.ok(built.params, built.error);
+      const events = [];
+      await app.runTask({ event: async e => events.push(e), heartbeat() {}, close: async () => {} }, built.params);
+      assert.equal(events.at(-1).type, "done", events.at(-1).message);
+      assert.equal(calls, 1);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("the official APIs are called exactly as OpenCode Go is: same body, same headers but the gateway's session", () => {
+  const config = { ...env, OPENAI_API_KEY: "fake-openai-key", ANTHROPIC_API_KEY: "fake-anthropic-key" };
+  const caps = { reasoning: true, schema: "strict" };
+  const task = app.buildTask("ask", "chatgpt", body, config).params.task;
+  const pair = (official, opencode) => {
+    const a = app.buildRequest(official, caps, task, "high", true);
+    const b = app.buildRequest(opencode, caps, task, "high", true);
+    const [bodyA, bodyB] = [JSON.parse(a.body), JSON.parse(b.body)];
+    // The model differs, and so may the effort value each model's route maps "high" to.
+    for (const sent of [bodyA, bodyB]) {
+      delete sent.model;
+      if (sent.output_config) delete sent.output_config.effort;
+    }
+    assert.deepEqual(bodyA, bodyB);
+    const { "x-opencode-session": session, ...gatewayHeaders } = b.headers;
+    assert.ok(session);
+    assert.deepEqual(Object.keys(a.headers).sort(), Object.keys(gatewayHeaders).sort());
+  };
+  // GPT-6 Astra as ChatGPT (Luna) on OpenCode Go: the Responses API.
+  pair(app.resolveRoute("astra", config), app.resolveRoute("chatgpt", config));
+  // Claude Opus 5.5 as Claude Haiku on OpenCode Go: the Messages API.
+  pair(app.resolveRoute("opus", config), route("haiku", config));
+  // And dispatched as ChatGPT and Muse on OpenCode Go are: in the alarm, in North America.
+  for (const key of ["astra", "opus"]) {
+    const official = app.resolveRoute(key, config), chatgpt = app.resolveRoute("chatgpt", config);
+    for (const field of ["region", "startInAlarm", "timeoutMs", "streaming", "structured", "startSchema"]) {
+      assert.equal(official[field], chatgpt[field], `${key}: ${field}`);
+    }
+  }
+});
+
+test("OpenAI's country refusal is reported as a country restriction", async () => {
+  const config = { ...env, OPENAI_API_KEY: "fake-openai-key" };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json(
+      { error: { code: "unsupported_country_region_territory", message: "Country, region, or territory not supported", type: "request_forbidden" } },
+      { status: 403 },
+    );
+    const built = app.buildTask("ask", "astra", body, config);
+    const events = [];
+    await app.runTask({ event: async e => events.push(e), heartbeat() {}, close: async () => {} }, built.params);
+    assert.equal(events.at(-1).type, "error");
+    assert.match(events.at(-1).message, /country restriction/);
+  } finally { globalThis.fetch = originalFetch; }
+});

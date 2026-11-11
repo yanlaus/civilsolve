@@ -205,8 +205,10 @@ function isSilentRejection(status: number, body: string) {
   return (status === 400 || status === 422) && !explicitErrorMessage(body);
 }
 
+// OpenAI's own API (the Flagship tier's GPT-6 Astra) answers 403 "Country,
+// region, or territory not supported", code unsupported_country_region_territory.
 const REGION_WORDS =
-  /not (available|supported|offered) in your (country|region|location)|(country|region|location) (is )?not supported|unsupported (country|region|location)/i;
+  /not (available|supported|offered) in your (country|region|location)|(country|region|location|territory) (is )?not supported|unsupported[ _](country|region|location)/i;
 
 /**
  * The upstream will not serve this model where the request comes from.

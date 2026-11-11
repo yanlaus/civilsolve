@@ -14,13 +14,17 @@ import type { ProviderKey } from "../../../shared/providers";
 // The vendors' own marks, from @lobehub/icons-static-svg 1.95.1 (MIT License,
 // Copyright (c) LobeHub); each logo is a trademark of its owner. ChatGPT wears
 // the OpenAI mark, MiMo Xiaomi MiMo's, and Muse Spark Meta's; Claude Haiku
-// shares Claude's; GLM wears Zhipu's and Qwen Qwen's (17 October 2026). Kimi's K is black instead of the colour file's white,
+// shares Claude's; GLM wears Zhipu's and Qwen Qwen's (17 October 2026); the
+// Flagship tier's GPT-6 Astra and Claude Opus 5.5 wear OpenAI's and Claude's
+// (11 November 2026). Kimi's K is black instead of the colour file's white,
 // which is made for a dark tile.
 // Drawn as <img> so the gradient ids inside the files cannot clash.
 const LOGOS: Record<ProviderKey, string> = {
   chatgpt,
+  astra: chatgpt,
   claude,
   haiku: claude,
+  opus: claude,
   deepseek,
   gemini,
   grok,

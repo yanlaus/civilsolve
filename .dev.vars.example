@@ -43,6 +43,15 @@ GOOGLE_BACKUP_API_KEY=
 # Go instead.
 MINIMAX_API_KEY=
 
+# The Flagship tier (11 November 2026): the vendors' own APIs, each billed per
+# token on prepaid credit there - GPT-6 Astra ($10 / $50 per 1M tokens) and
+# Claude Opus 5.5 ($4 / $20). Nothing else uses them; leave them blank and the
+# Flagship tier shows its two models as unavailable.
+# OpenAI (https://platform.openai.com/api-keys)
+OPENAI_API_KEY=
+# Anthropic (https://platform.claude.com/settings/keys)
+ANTHROPIC_API_KEY=
+
 # --- Optional local overrides ----------------------------------------------
 # The defaults are the production routing in worker/channels.ts; any var in
 # `WorkerEnv` there can be set here to depart from it for local runs, e.g.:

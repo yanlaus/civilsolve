@@ -42,6 +42,7 @@ import {
   type StudySource,
 } from "@/hooks/use-solve";
 import { effortBand } from "@/lib/effort-band";
+import { choicesWith } from "@/lib/model-choices";
 import { STEP_IDS } from "@/lib/journey";
 import type { Progress } from "@/lib/progress";
 import { PdfButton } from "./pdf-button";
@@ -322,7 +323,7 @@ function StudyCard({
             }}
             className={SELECT_CLASS}
           >
-            {writers.map((choice) => (
+            {choicesWith(writer, configured).map((choice) => (
               <option key={choiceKey(choice)} value={choiceKey(choice)}>
                 {providerDisplayName(choice.provider, choice.variant)}
               </option>

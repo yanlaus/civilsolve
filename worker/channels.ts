@@ -1,7 +1,8 @@
 // Upstream channel adapters.
 //
 // Every provider is reached through exactly one "channel" (Poe, OpenCode Go,
-// Google), resolved from env at request time. Channels speak four different
+// Google, MiniMax, and since 11 November 2026 OpenAI's and Anthropic's own
+// APIs), resolved from env at request time. Channels speak four different
 // API dialects (OpenAI Responses, chat completions, Gemini, and since
 // 10 October 2026 Anthropic Messages, for Claude Haiku on OpenCode Go), so
 // this module owns:
@@ -83,6 +84,10 @@ export type WorkerEnv = {
    * Vertex stops answering (BACKUP_CHANNELS).
    */
   GOOGLE_BACKUP_API_KEY?: string;
+  /** OpenAI's own API, on the owner's prepaid credit: GPT-6 Astra, the Flagship tier. */
+  OPENAI_API_KEY?: string;
+  /** Anthropic's own API, on the owner's prepaid credit: Claude Opus 5.5, the Flagship tier. */
+  ANTHROPIC_API_KEY?: string;
 
   // Everything below is an optional override. The production values are the
   // defaults in this file (DEFAULT_CHANNELS, ROUTES, INTERPRET_MODEL_DEFAULT),
@@ -104,6 +109,8 @@ export type WorkerEnv = {
   HAIKU_CHANNEL?: string;
   QWEN_CHANNEL?: string;
   GLM_CHANNEL?: string;
+  ASTRA_CHANNEL?: string;
+  OPUS_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
   // A value may be a chain, primary first: "gemini-3.8-flash,gemini-3.5-flash".
@@ -135,9 +142,13 @@ export type WorkerEnv = {
   INTERPRET_CHATGPT_MODEL?: string;
   INTERPRET_GEMINI_MODEL?: string;
   INTERPRET_CLAUDE_MODEL?: string;
+  OPENAI_ASTRA_MODEL?: string;
+  ANTHROPIC_OPUS_MODEL?: string;
 
   // --- Endpoint overrides (proxies) --------------------------------------
   POE_BASE_URL?: string;
+  OPENAI_BASE_URL?: string;
+  ANTHROPIC_BASE_URL?: string;
   OPENCODE_BASE_URL?: string;
   /** OpenCode Go's Google-protocol base, for Gemini 4 Argon (see its route). */
   OPENCODE_GEMINI_BASE_URL?: string;
@@ -204,6 +215,17 @@ const GEMINI_LEVEL: EffortSpec = {
 const HAIKU_EFFORT: EffortSpec = {
   kind: "enum",
   values: { high: "xhigh", max: "max" },
+};
+
+// The Flagship tier's two on their vendors' own APIs (11 November 2026): GPT-6
+// Astra's reasoning.effort and Claude Opus 5.5's output_config.effort both
+// take low, medium, high, xhigh and max. Neither has an "off": Astra has no
+// "none" and Opus 5.5 always thinks ({type: "disabled"} is a 400), so "None"
+// sends nothing and the model uses its own default. "max" sends "xhigh", as
+// Luna's does; the models' own "max" is left out on cost.
+const OFFICIAL_EFFORT: EffortSpec = {
+  kind: "enum",
+  values: { low: "low", medium: "medium", high: "high", max: "xhigh" },
 };
 
 /**
@@ -666,6 +688,53 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       timeoutMs: LONG_THINKING_TIMEOUT_MS,
     },
   },
+  // The Flagship tier (11 November 2026, the owner's request): each vendor's
+  // flagship on its own API, billed per token on the owner's prepaid credit -
+  // nowhere else in the app. Called exactly as OpenCode Go is (the owner's
+  // call): the same dialects and request bodies as ChatGPT (Responses) and
+  // Claude Haiku (Messages) there, nothing added, and like ChatGPT and Muse
+  // started in the job's alarm, placed in North America (region,
+  // startInAlarm) - neither vendor serves Hong Kong, and under an HTTP
+  // invocation the visitor's country goes with the subrequests wherever the
+  // job runs. Alarm routes are capped at 14 minutes. The one difference is
+  // OpenCode Go's x-opencode-session header, which only that gateway wants.
+  //
+  // GPT-6 Astra on OpenAI's Responses API: reads images, strict structured
+  // output, 128K output tokens, $10 / $50 per 1M tokens (2x input and 1.5x
+  // output past 272K tokens of input, which no question comes near).
+  astra: {
+    openai: {
+      dialect: "responses",
+      keyVar: "OPENAI_API_KEY",
+      urlVar: "OPENAI_BASE_URL",
+      defaultUrl: "https://api.openai.com/v1",
+      pathSuffix: "/responses",
+      modelVar: "OPENAI_ASTRA_MODEL",
+      defaultModel: "gpt-6-astra",
+      effort: OFFICIAL_EFFORT,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+      region: "wnam",
+      startInAlarm: true,
+    },
+  },
+  // Claude Opus 5.5 on Anthropic's Messages API: thinking always on (adaptive,
+  // its depth set by output_config.effort - the model's default is medium),
+  // strict structured output, 128K output tokens, $4 / $20 per 1M tokens.
+  opus: {
+    anthropic: {
+      dialect: "messages",
+      keyVar: "ANTHROPIC_API_KEY",
+      urlVar: "ANTHROPIC_BASE_URL",
+      defaultUrl: "https://api.anthropic.com/v1",
+      pathSuffix: "/messages",
+      modelVar: "ANTHROPIC_OPUS_MODEL",
+      defaultModel: "claude-opus-5-5",
+      effort: OFFICIAL_EFFORT,
+      timeoutMs: LONG_THINKING_TIMEOUT_MS,
+      region: "wnam",
+      startInAlarm: true,
+    },
+  },
 };
 
 /**
@@ -695,6 +764,8 @@ const DEFAULT_CHANNELS: Record<ProviderKey, ChannelKey[]> = {
   haiku: ["opencode"],
   qwen: ["opencode"],
   glm: ["opencode"],
+  astra: ["openai"],
+  opus: ["anthropic"],
 };
 
 /**
@@ -722,6 +793,8 @@ const CHANNEL_VAR: Record<ProviderKey, keyof WorkerEnv> = {
   haiku: "HAIKU_CHANNEL",
   qwen: "QWEN_CHANNEL",
   glm: "GLM_CHANNEL",
+  astra: "ASTRA_CHANNEL",
+  opus: "OPUS_CHANNEL",
 };
 
 export type Route = {
@@ -1168,7 +1241,11 @@ function toImageBlock(dataUrl: string) {
  */
 const MESSAGES_MAX_TOKENS = 128_000;
 
-/** Headers a channel demands beyond auth, e.g. OpenCode Go's session id. */
+/**
+ * Headers a channel demands beyond auth, e.g. OpenCode Go's session id. The
+ * vendors' own APIs (the Flagship tier) get nothing extra: they are called
+ * exactly as OpenCode Go is, the owner's call (11 November 2026).
+ */
 function channelHeaders(route: Route, task: Task): Record<string, string> {
   if (route.channel === "opencode") {
     return { "x-opencode-session": task.session };
@@ -1671,7 +1748,9 @@ export function extractPayloadError(dialect: Dialect, payload: Record<string, un
   }
 
   // A safety classifier declined the request: HTTP 200, stop_reason
-  // "refusal". Haiku has no server-side fallback model.
+  // "refusal". No route asks for a fallback model - Opus 5.5 on Anthropic's
+  // API is called as Haiku and Qwen on OpenCode Go are. Not retried: the same
+  // question would be declined again.
   if (dialect === "messages" && messagesStopReason(payload) === "refusal") {
     return "the model declined to answer this request.";
   }
