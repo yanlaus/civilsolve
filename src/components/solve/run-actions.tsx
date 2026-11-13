@@ -198,7 +198,7 @@ export function CrossCheckControls({
     (judgeRun.status !== "idle" ? { provider: judgeRun.judge, variant: variants.judge } : defaultJudge));
   // With the run's own judge in it when the list leaves it out: the Flagship
   // tier's Claude Opus 5.5.
-  const judges = choicesWith(judge, configured);
+  const judges = choicesWith(judge, configured, "judge");
 
   // How hard the judge thinks: high by default, the most reliable level
   // measured for grading. A judge's route may not offer every level (ChatGPT

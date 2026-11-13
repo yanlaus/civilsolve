@@ -8,7 +8,7 @@ import { build } from "esbuild";
 const out = resolve(".wrangler/tests/model-variants.mjs");
 await mkdir(resolve(".wrangler/tests"), { recursive: true });
 await build({
-  stdin: { contents: 'export * from "./shared/providers"; export * from "./worker/channels"; export * from "./worker/tasks"; export * from "./src/lib/presets"; export * from "./src/lib/effort-band"; export * from "./worker/run"; export * from "./src/lib/run-store";', resolveDir: process.cwd() },
+  stdin: { contents: 'export * from "./shared/providers"; export * from "./worker/channels"; export * from "./worker/tasks"; export * from "./src/lib/presets"; export * from "./src/lib/effort-band"; export * from "./worker/run"; export * from "./src/lib/run-store"; export * from "./src/lib/model-choices";', resolveDir: process.cwd() },
   outfile: out, bundle: true, platform: "node", format: "esm",
 });
 const app = await import(pathToFileURL(out));
@@ -21,7 +21,9 @@ test("Muse replaces standalone Haiku in both presets and remains an alarm solver
   assert.deepEqual(app.DEFAULT_SOLVERS, ["muse", "gemini", "claude"]);
   for (const mode of ["quick", "careful"]) assert.deepEqual(app.PRESETS[mode].smart.providers, app.DEFAULT_SOLVERS);
   assert.equal(app.DEFAULT_MODE, "quick");
-  assert.equal(app.SOLVER_KEYS.length, 9);
+  // Nine cards, and the Flagship tier's two after them (13 November 2026).
+  assert.equal(app.SOLVER_KEYS.length, 11);
+  assert.deepEqual(app.SOLVER_KEYS.slice(-2), ["astra", "opus"]);
   assert.ok(app.SOLVER_KEYS.includes("muse"));
   assert.ok(!app.SOLVER_KEYS.includes("haiku"));
   assert.equal(app.SOLUTION_ORDER[0], "muse");
@@ -200,11 +202,13 @@ test("Flagship tier: GPT-6 Astra and Claude Opus 5.5 solve, Astra reconciles, Op
   assert.deepEqual(app.PRESETS.careful.flagship.readers.map(app.choiceKey), ["astra", "opus"]);
   assert.equal(app.choiceKey(app.PRESETS.careful.flagship.reconciler), "astra");
   assert.deepEqual(app.TIERS.map(t => t.key), ["smart", "expert", "china", "flagship"]);
-  // Flagship only (the owner's call): no card, no reader or judge pick, and
-  // the Claude card's Opus is still Poe's.
+  // Custom offers them too (13 November 2026): a solver card each and a place
+  // in the reader and judge lists, badged More credit; the Claude card's Opus
+  // is still Poe's.
   for (const key of ["astra", "opus"]) {
-    assert.ok(!app.SOLVER_KEYS.includes(key));
-    assert.ok(!app.MODEL_CHOICES.some(c => c.provider === key));
+    assert.ok(app.SOLVER_KEYS.includes(key));
+    assert.ok(!app.TIER_ONLY_PROVIDERS.has(key));
+    assert.ok(app.MODEL_CHOICES.some(c => c.provider === key));
     assert.equal(app.usesMoreCredit(key), true);
   }
   assert.equal(app.resolveRoute("claude", env, app.variantOverride("claude", "opus", env)).model, "claude-opus-4.8");
@@ -262,7 +266,7 @@ test("real runner sends Astra through OpenAI's Responses API and Opus 5.5 throug
           assert.equal(headers.Authorization, "Bearer fake-openai-key");
           assert.equal(sent.model, "gpt-6-astra");
           assert.equal(sent.reasoning.effort, sentEffort);
-          return Response.json({ output_text: JSON.stringify({ answer: "The load is balanced." }) });
+          return Response.json({ output_text: JSON.stringify({ title: "Q1", interpreted_problem: "A beam.", assumptions: "None.", step_by_step: "**Step 1 - Reactions**", final_answer: "R_A = 50 kN", latex_body: "", diagrams: [] }) });
         }
         assert.equal(url, "https://api.anthropic.com/v1/messages");
         assert.equal(headers["x-api-key"], "fake-anthropic-key");
@@ -270,9 +274,9 @@ test("real runner sends Astra through OpenAI's Responses API and Opus 5.5 throug
         assert.deepEqual(sent.thinking, { type: "adaptive" });
         assert.equal(sent.output_config.effort, sentEffort);
         assert.equal(sent.messages[0].content[0].type, "image");
-        return Response.json({ content: [{ type: "text", text: JSON.stringify({ answer: "The load is balanced." }) }], stop_reason: "end_turn" });
+        return Response.json({ content: [{ type: "text", text: JSON.stringify({ title: "Q1", interpreted_problem: "A beam.", assumptions: "None.", step_by_step: "**Step 1 - Reactions**", final_answer: "R_A = 50 kN", latex_body: "", diagrams: [] }) }], stop_reason: "end_turn" });
       };
-      const built = app.buildTask("ask", provider, { ...body, effort }, config);
+      const built = app.buildTask("solve", provider, { ...body, effort }, config);
       assert.ok(built.params, built.error);
       const events = [];
       await app.runTask({ event: async e => events.push(e), heartbeat() {}, close: async () => {} }, built.params);
@@ -321,10 +325,47 @@ test("OpenAI's country refusal is reported as a country restriction", async () =
       { error: { code: "unsupported_country_region_territory", message: "Country, region, or territory not supported", type: "request_forbidden" } },
       { status: 403 },
     );
-    const built = app.buildTask("ask", "astra", body, config);
+    const built = app.buildTask("solve", "astra", body, config);
     const events = [];
     await app.runTask({ event: async e => events.push(e), heartbeat() {}, close: async () => {} }, built.params);
     assert.equal(events.at(-1).type, "error");
     assert.match(events.at(-1).message, /country restriction/);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("the Flagship models read, solve and judge, and nothing else", () => {
+  const config = { ...env, OPENAI_API_KEY: "fake-openai-key", ANTHROPIC_API_KEY: "fake-anthropic-key" };
+  const request = { ...body, kind: "explain", solutions: ["A", "B"], answers: ["A", "B"] };
+  for (const provider of ["astra", "opus"]) {
+    for (const kind of ["interpret", "solve", "judge"]) {
+      assert.equal(app.servesPurpose(provider, kind), true);
+      const built = app.buildTask(kind, provider, request, config);
+      assert.ok(built.params, `${provider} ${kind}: ${built.error}`);
+    }
+    for (const kind of ["study", "ask", "align", "visualize"]) {
+      assert.equal(app.servesPurpose(provider, kind), false);
+      const built = app.buildTask(kind, provider, request, config);
+      assert.equal(built.status, 400, `${provider} ${kind}`);
+      assert.match(built.error, /only reads questions, solves them and judges the answers/);
+    }
+  }
+  // Every other model keeps every purpose.
+  for (const provider of app.PROVIDER_KEYS.filter((key) => !app.FLAGSHIP_PROVIDERS.has(key))) {
+    for (const kind of app.TASK_KINDS) assert.equal(app.servesPurpose(provider, kind), true, `${provider} ${kind}`);
+  }
+});
+
+test("Custom's lists offer the Flagship models to read, solve and judge, never for notes or questions", () => {
+  const all = () => true;
+  const has = (list, key) => list.some((choice) => choice.provider === key);
+  for (const key of ["astra", "opus"]) {
+    for (const purpose of ["interpret", "judge"]) assert.ok(has(app.choicesWith(undefined, all, purpose), key), `${key} ${purpose}`);
+    for (const purpose of ["study", "ask"]) {
+      assert.ok(!has(app.choicesWith(undefined, all, purpose), key), `${key} ${purpose}`);
+      // Not even as the run's own pick - the solution's writer.
+      assert.ok(!has(app.choicesWith({ provider: key }, all, purpose), key), `${key} ${purpose} as current`);
+    }
+  }
+  // A China tier pick the lists leave out is still added for its own run.
+  assert.ok(has(app.choicesWith({ provider: "qwen" }, all, "ask"), "qwen"));
 });

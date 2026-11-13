@@ -19,6 +19,7 @@ import {
   MODEL_CHOICES,
   parseChoice,
   providerDisplayName,
+  servesPurpose,
   SOLUTION_ORDER,
   type ModelChoice,
   type ProviderKey,
@@ -252,7 +253,8 @@ function StudyCard({
 }) {
   const { title, chinese, blurb, Icon, placeholder } = KINDS[kind];
   const configured = (choice: ModelChoice) => modelStatus(providerStatus?.[choice.provider], choice.variant)?.configured !== false;
-  const writers = MODEL_CHOICES.filter(configured);
+  // Not a Flagship model: they read, solve and judge only (servesPurpose).
+  const writers = MODEL_CHOICES.filter((choice) => configured(choice) && servesPurpose(choice.provider, "study"));
 
   // What to start from: the user's pick while it is still on the page, else
   // the first in the list - Muse Spark's solution, else the verified answer,
@@ -268,8 +270,14 @@ function StudyCard({
   // model. The level: medium unless picked - the notes explain a solution,
   // they do not derive one - kept inside the model's band (ChatGPT runs at
   // high or max).
+  // A Flagship model reads, solves and judges only (servesPurpose): its
+  // solution or verdict is explained by the list's first model instead.
   const [pick, setPick] = useState<ModelChoice | null>(null);
-  const writer = canonicalChoice(pick ?? (source ? modelOf(source) : writers[0] ?? MODEL_CHOICES[0]));
+  const sourceModel = source ? modelOf(source) : undefined;
+  const writer = canonicalChoice(
+    pick ??
+      (sourceModel && servesPurpose(sourceModel.provider, "study") ? sourceModel : writers[0] ?? MODEL_CHOICES[0]),
+  );
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
   const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[writer.provider], writer.variant));
   const effort = clamp(effortPick);
@@ -323,7 +331,7 @@ function StudyCard({
             }}
             className={SELECT_CLASS}
           >
-            {choicesWith(writer, configured).map((choice) => (
+            {choicesWith(writer, configured, "study").map((choice) => (
               <option key={choiceKey(choice)} value={choiceKey(choice)}>
                 {providerDisplayName(choice.provider, choice.variant)}
               </option>

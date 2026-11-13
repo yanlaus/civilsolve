@@ -11,8 +11,10 @@ import {
   choiceKey,
   canonicalChoice,
   modelStatus,
+  MODEL_CHOICES,
   parseChoice,
   providerDisplayName,
+  servesPurpose,
   type ModelChoice,
   type ProviderKey,
   type ProviderStatus,
@@ -77,7 +79,13 @@ export function AskPanel({
   const [effortPick, setEffortPick] = useState<EffortKey>("medium");
   const box = useRef<HTMLTextAreaElement>(null);
   const configured = (choice: ModelChoice) => modelStatus(providerStatus?.[choice.provider], choice.variant)?.configured !== false;
-  const model = canonicalChoice(modelPick ?? defaultModel);
+  // The model that wrote the solution answers - unless it is a Flagship
+  // model, which reads, solves and judges only (servesPurpose): then the
+  // list's first model does.
+  const startModel = servesPurpose(defaultModel.provider, "ask")
+    ? defaultModel
+    : (MODEL_CHOICES.find((choice) => configured(choice) && servesPurpose(choice.provider, "ask")) ?? MODEL_CHOICES[0]);
+  const model = canonicalChoice(modelPick ?? startModel);
   const { inBand, clamp } = effortBand(modelStatus(providerStatus?.[model.provider], model.variant));
   const effort = clamp(effortPick);
 
@@ -221,7 +229,7 @@ export function AskPanel({
               }}
               className={SELECT_CLASS}
             >
-              {choicesWith(model, configured).map((choice) => (
+              {choicesWith(model, configured, "ask").map((choice) => (
                 <option key={choiceKey(choice)} value={choiceKey(choice)}>
                   {providerDisplayName(choice.provider, choice.variant)}
                   {choiceKey(choice) === choiceKey(defaultModel) ? " (wrote this solution)" : ""}
