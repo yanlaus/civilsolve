@@ -44,6 +44,7 @@ import {
   providerDisplayName,
   SOLVER_KEYS,
   isSolverKey,
+  FLAGSHIP_PROVIDERS,
   TIER_ONLY_PROVIDERS,
   type ModelChoice,
   type ModelVariant,
@@ -446,7 +447,9 @@ export function UploadForm({
   const tierUnavailable =
     mode === "custom"
       ? []
-      : PRESETS[mode][tier].providers.filter((key) => TIER_ONLY_PROVIDERS.has(key) && !isAvailable(key));
+      : PRESETS[mode][tier].providers.filter(
+          (key) => (FLAGSHIP_PROVIDERS.has(key) || TIER_ONLY_PROVIDERS.has(key)) && !isAvailable(key),
+        );
   const tierTitle = TIERS.find((option) => option.key === tier)?.title ?? tier;
 
   const solverConfigError = tierUnavailable.length
@@ -1153,7 +1156,8 @@ export function UploadForm({
                 (pick one or more - they solve together)
               </span>
             </p>
-            {/* Three by three - nine solvers - on every screen, at the owner's request. */}
+            {/* Three a row on every screen, at the owner's request: nine solvers,
+                and since 13 November 2026 the Flagship tier's two after them. */}
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               {[
                 ...SOLVER_OPTIONS,
@@ -1379,7 +1383,7 @@ export function UploadForm({
                           }}
                           className={PASS_SELECT_CLASS}
                         >
-                          {choicesWith(role.value, (choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
+                          {choicesWith(role.value, (choice) => isAvailable(choice.provider, choice.variant), "interpret").map((choice) => (
                             <option key={choiceKey(choice)} value={choiceKey(choice)}>
                               {providerDisplayName(choice.provider, choice.variant)}
                             </option>
@@ -1458,7 +1462,7 @@ export function UploadForm({
                     }}
                     className={PASS_SELECT_CLASS}
                   >
-                    {choicesWith(autoJudge, (choice) => isAvailable(choice.provider, choice.variant)).map((choice) => (
+                    {choicesWith(autoJudge, (choice) => isAvailable(choice.provider, choice.variant), "judge").map((choice) => (
                       <option key={choiceKey(choice)} value={choiceKey(choice)}>
                         {providerDisplayName(choice.provider, choice.variant)}
                       </option>

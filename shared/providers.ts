@@ -58,9 +58,10 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   // reader and judge lists (TIER_ONLY_PROVIDERS).
   "qwen",
   "glm",
-  // The Flagship tier's own (11 November 2026), on the vendors' official
-  // APIs: GPT-6 Astra on OpenAI's, Claude Opus 5.5 on Anthropic's. Astra
-  // first, so the judge sees it as Solution A.
+  // The Flagship tier's (11 November 2026), on the vendors' official APIs:
+  // GPT-6 Astra on OpenAI's, Claude Opus 5.5 on Anthropic's - the dearest,
+  // so they close the solver cards (in Custom too since 13 November 2026).
+  // Astra first, so the judge sees it as Solution A.
   "astra",
   "opus",
 ];
@@ -90,14 +91,40 @@ export const LEGACY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
 
 /**
  * Providers only one tier runs: the China tier's (17 October 2026, the
- * owner's call) - Qwen3.7 Plus solves and GLM-5.3-Flash reads there - and
- * the Flagship tier's (11 November 2026, the owner's call: "Opus 5.5 is only
- * available in Flagship") - GPT-6 Astra and Claude Opus 5.5, each billed per
- * token on the vendor's own API. None has a solver card or a place in the
- * reader and judge lists. Custom shows one only while a preset left it
- * picked, and a list a run's own pick is missing from adds it (choicesWith).
+ * owner's call) - Qwen3.7 Plus solves and GLM-5.3-Flash reads there. Neither
+ * has a solver card or a place in the reader and judge lists. Custom shows
+ * one only while a preset left it picked, and a list a run's own pick is
+ * missing from adds it (choicesWith). The Flagship tier's GPT-6 Astra and
+ * Claude Opus 5.5 were here from 11 to 13 November 2026, when the owner let
+ * Custom pick them too - to read, solve and judge only (FLAGSHIP_PROVIDERS).
  */
-export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm", "astra", "opus"]);
+export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm"]);
+
+/**
+ * What a model can be asked to do: read the question (the interpretation
+ * pass - a reader or the reconciler), solve it, judge the answers, or one of
+ * the extras - study notes, answers to a student's questions, the comparison
+ * of the answers, drawings. The same words as the worker's task kinds.
+ */
+export type ModelPurpose = "interpret" | "solve" | "judge" | "study" | "ask" | "align" | "visualize";
+
+/**
+ * The Flagship tier's models read, solve and judge, and nothing else (13
+ * November 2026, the owner's call): every extra would be another per-token
+ * call on the vendors' own APIs. Custom offers them for those three too - a
+ * solver card each and a place in the reader, reconciler and judge lists -
+ * but no list offers them for anything else (choicesWith), the worker
+ * refuses them the rest (servesPurpose in buildTask), and the study notes
+ * and the questions under a Flagship solution start from another model.
+ */
+export const FLAGSHIP_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["astra", "opus"]);
+
+const FLAGSHIP_PURPOSES: ReadonlySet<ModelPurpose> = new Set<ModelPurpose>(["interpret", "solve", "judge"]);
+
+/** Whether a provider may be asked for this purpose. */
+export function servesPurpose(provider: ProviderKey, purpose: ModelPurpose) {
+  return !FLAGSHIP_PROVIDERS.has(provider) || FLAGSHIP_PURPOSES.has(purpose);
+}
 
 /** The solver cards, in picker order: every provider that is not review-only. */
 export const SOLVER_KEYS: ProviderKey[] = PROVIDER_KEYS.filter(

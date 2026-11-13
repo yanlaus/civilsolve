@@ -90,7 +90,8 @@ export const FLAGSHIP_JUDGE: ModelChoice = { provider: "opus" };
  * Flagship's solvers, the owner's picks of 11 November 2026: GPT-6 Astra on
  * OpenAI's API and Claude Opus 5.5 on Anthropic's, each billed per token on
  * the owner's prepaid credit there - roughly US$0.5-1.5 and US$0.2-0.6 a
- * solve at high. Neither runs anywhere else (TIER_ONLY_PROVIDERS).
+ * solve at high. Custom can pick them too (13 November 2026), to read, solve
+ * and judge only (FLAGSHIP_PROVIDERS).
  */
 const FLAGSHIP_SOLVERS: Pick<Preset, "providers" | "effort" | "judge"> = {
   providers: ["astra", "opus"],

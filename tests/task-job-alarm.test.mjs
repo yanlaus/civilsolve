@@ -44,7 +44,7 @@ class Storage {
   async deleteAll() { this.values.clear(); }
 }
 const make = (storage = new Storage()) => ({ storage, job: new TaskJob({ storage }, env) });
-const start = (job, provider = "muse") => job.fetch(new Request(`https://job/run?jobId=test&kind=ask&provider=${provider}`, { method: "POST", body: JSON.stringify(body) }));
+const start = (job, provider = "muse", kind = "ask") => job.fetch(new Request(`https://job/run?jobId=test&kind=${kind}&provider=${provider}`, { method: "POST", body: JSON.stringify(body) }));
 const attach = job => job.fetch(new Request("https://job/attach"));
 const stop = job => job.fetch(new Request("https://job/cancel", { method: "DELETE" }));
 const events = async response => (await response.text()).split("\n\n").filter(frame => frame.includes("data: ")).map(frame => {
@@ -52,8 +52,8 @@ const events = async response => (await response.text()).split("\n\n").filter(fr
   return { type: lines.find(line => line.startsWith("event: ")).slice(7), ...JSON.parse(lines.find(line => line.startsWith("data: ")).slice(6)) };
 });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
-const params = (provider = "muse") => {
-  const result = buildTask("ask", provider, body, env);
+const params = (provider = "muse", kind = "ask") => {
+  const result = buildTask(kind, provider, body, env);
   assert.ok(result.params);
   return result.params;
 };
@@ -287,8 +287,8 @@ test("a region refusal is reported once without retrying or changing models", as
 
 test("the Flagship models start only in the alarm, under its wall limit, and keep their keys out of storage", async () => {
   for (const [provider, url, answer] of [
-    ["astra", "https://api.openai.com/v1/responses", { output_text: JSON.stringify({ answer: "The support balances the load." }) }],
-    ["opus", "https://api.anthropic.com/v1/messages", { content: [{ type: "text", text: JSON.stringify({ answer: "The support balances the load." }) }], stop_reason: "end_turn" }],
+    ["astra", "https://api.openai.com/v1/responses", { output_text: JSON.stringify({ title: "Q1", interpreted_problem: "A beam.", assumptions: "None.", step_by_step: "**Step 1 - Reactions**", final_answer: "R_A = 50 kN", latex_body: "", diagrams: [] }) }],
+    ["opus", "https://api.anthropic.com/v1/messages", { content: [{ type: "text", text: JSON.stringify({ title: "Q1", interpreted_problem: "A beam.", assumptions: "None.", step_by_step: "**Step 1 - Reactions**", final_answer: "R_A = 50 kN", latex_body: "", diagrams: [] }) }], stop_reason: "end_turn" }],
   ]) {
     calls = 0;
     globalThis.fetch = async (sentTo) => {
@@ -296,9 +296,9 @@ test("the Flagship models start only in the alarm, under its wall limit, and kee
       assert.equal(sentTo, url);
       return Response.json(answer);
     };
-    assert.equal(taskTimeoutFor(params(provider)), ALARM_TASK_TIMEOUT_MS);
+    assert.equal(taskTimeoutFor(params(provider, "solve")), ALARM_TASK_TIMEOUT_MS);
     const { job, storage } = make();
-    const result = events(await start(job, provider));
+    const result = events(await start(job, provider, "solve"));
     assert.equal(calls, 0, provider);
     assert.ok(storage.alarm <= Date.now());
     const stored = JSON.stringify([...storage.values]);

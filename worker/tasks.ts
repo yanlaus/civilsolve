@@ -41,6 +41,8 @@ import {
   isVariantOf,
   PROVIDER_LABELS,
   PROVIDER_VARIANTS,
+  servesPurpose,
+  type ModelPurpose,
   type ModelVariant,
   type ProviderKey,
 } from "../shared/providers";
@@ -75,7 +77,8 @@ import {
 import { interpretOverride, variantOverride, VISUAL_ROUTES, VISUAL_TIMEOUT_MS, type WorkerEnv } from "./channels";
 import type { RunTaskParams } from "./run";
 
-export type TaskKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "visualize";
+/** A task is a model asked for one purpose (ModelPurpose in shared/providers.ts). */
+export type TaskKind = ModelPurpose;
 
 export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align", "visualize"];
 
@@ -143,6 +146,13 @@ export function buildTask(
   if (kind === "solve" && !isSolverKey(providerName)) {
     return {
       error: `${PROVIDER_LABELS[providerName]} reads questions and judges answers, but does not solve.`,
+      status: 400,
+    };
+  }
+  // The Flagship tier's models read, solve and judge, and nothing else.
+  if (!servesPurpose(providerName, kind)) {
+    return {
+      error: `${PROVIDER_LABELS[providerName]} only reads questions, solves them and judges the answers. Pick another model for this.`,
       status: 400,
     };
   }
