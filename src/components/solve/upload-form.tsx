@@ -56,6 +56,7 @@ import { parsePageSpec } from "@/lib/page-range";
 import { STEP_IDS } from "@/lib/journey";
 import {
   DEFAULT_MODE,
+  customPicks,
   DEFAULT_TIER,
   forgetSavedMode,
   MODES,
@@ -146,6 +147,15 @@ export const PROVIDER_OPTIONS: Array<{ key: ProviderKey; label: string }> =
   PROVIDER_KEYS.map((key) => ({ key, label: PROVIDER_LABELS[key] }));
 
 const SOLVER_OPTIONS = PROVIDER_OPTIONS.filter((option) => SOLVER_KEYS.includes(option.key));
+
+/**
+ * The current pick, for Custom's own reader, reconciler and judge lists to
+ * add when they leave it out - never a Flagship model, which Custom does not
+ * offer (customPicks in lib/presets.ts).
+ */
+function customChoice(choice: ModelChoice) {
+  return FLAGSHIP_PROVIDERS.has(choice.provider) ? undefined : choice;
+}
 
 /** The interpretation pass's three models: first reader, second reader, reconciler. */
 type PassRole = "a" | "b" | "v";
@@ -402,12 +412,26 @@ export function UploadForm({
    * Picks a mode. A preset fills in the settings; Custom starts from the
    * settings on screen - the preset picked last, its models included (the
    * owner, 16 October 2026: until then Custom brought back the student's
-   * own earlier Custom settings, so the models changed on the way in).
+   * own earlier Custom settings, so the models changed on the way in) -
+   * except the Flagship models, which Custom never offers (customPicks).
    */
   function chooseMode(next: SolveMode) {
     if (next === mode) return;
     const preset = presetOf(next, tier);
     if (preset) applyPreset(preset);
+    if (next === "custom") {
+      const picks = customPicks({
+        providers: selectedProviders,
+        readers: [interpreterA, interpreterB],
+        reconciler: verifier,
+        judge: autoJudge,
+      });
+      setSelectedProviders(picks.providers);
+      setInterpreterA(picks.readers[0]);
+      setInterpreterB(picks.readers[1]);
+      setVerifier(picks.reconciler);
+      setAutoJudge(picks.judge);
+    }
     setMode(next);
   }
 
@@ -1156,15 +1180,16 @@ export function UploadForm({
                 (pick one or more - they solve together)
               </span>
             </p>
-            {/* Three a row on every screen, at the owner's request: nine solvers,
-                and since 13 November 2026 the Flagship tier's two after them. */}
+            {/* Three by three - nine solvers - on every screen, at the owner's request. */}
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               {[
                 ...SOLVER_OPTIONS,
                 // A China preset's own solver (Qwen), shown while it is picked.
+                // Never a Flagship model: Custom does not offer them (customPicks).
                 ...PROVIDER_OPTIONS.filter(
                   (option) =>
                     !SOLVER_KEYS.includes(option.key) &&
+                    !FLAGSHIP_PROVIDERS.has(option.key) &&
                     isSolverKey(option.key) &&
                     selectedProviders.includes(option.key),
                 ),
@@ -1383,7 +1408,7 @@ export function UploadForm({
                           }}
                           className={PASS_SELECT_CLASS}
                         >
-                          {choicesWith(role.value, (choice) => isAvailable(choice.provider, choice.variant), "interpret").map((choice) => (
+                          {choicesWith(customChoice(role.value), (choice) => isAvailable(choice.provider, choice.variant), "interpret").map((choice) => (
                             <option key={choiceKey(choice)} value={choiceKey(choice)}>
                               {providerDisplayName(choice.provider, choice.variant)}
                             </option>
@@ -1462,7 +1487,7 @@ export function UploadForm({
                     }}
                     className={PASS_SELECT_CLASS}
                   >
-                    {choicesWith(autoJudge, (choice) => isAvailable(choice.provider, choice.variant), "judge").map((choice) => (
+                    {choicesWith(customChoice(autoJudge), (choice) => isAvailable(choice.provider, choice.variant), "judge").map((choice) => (
                       <option key={choiceKey(choice)} value={choiceKey(choice)}>
                         {providerDisplayName(choice.provider, choice.variant)}
                       </option>

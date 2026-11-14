@@ -10,7 +10,16 @@
 // Careful kept getting it.
 
 import type { EffortKey } from "../../shared/prompt";
-import { DEFAULT_SOLVERS, type ModelChoice, type ModelVariant, type ProviderKey } from "../../shared/providers";
+import {
+  DEFAULT_INTERPRETERS,
+  DEFAULT_JUDGE,
+  DEFAULT_SOLVERS,
+  DEFAULT_VERIFIER,
+  FLAGSHIP_PROVIDERS,
+  type ModelChoice,
+  type ModelVariant,
+  type ProviderKey,
+} from "../../shared/providers";
 
 export type SolveMode = "careful" | "quick" | "custom";
 
@@ -90,8 +99,8 @@ export const FLAGSHIP_JUDGE: ModelChoice = { provider: "opus" };
  * Flagship's solvers, the owner's picks of 11 November 2026: GPT-6 Astra on
  * OpenAI's API and Claude Opus 5.5 on Anthropic's, each billed per token on
  * the owner's prepaid credit there - roughly US$0.5-1.5 and US$0.2-0.6 a
- * solve at high. Custom can pick them too (13 November 2026), to read, solve
- * and judge only (FLAGSHIP_PROVIDERS).
+ * solve at high. They run here and nowhere else - never in Custom
+ * (customPicks) - and only to read, solve and judge (FLAGSHIP_PROVIDERS).
  */
 const FLAGSHIP_SOLVERS: Pick<Preset, "providers" | "effort" | "judge"> = {
   providers: ["astra", "opus"],
@@ -137,7 +146,8 @@ export const PRESETS: Record<Exclude<SolveMode, "custom">, Record<Tier, Preset>>
   quick: {
     // Three solvers and nothing else: Muse Spark and Claude Haiku on the
     // OpenCode Go subscription (Haiku in DeepSeek's place since 17 October
-    // 2026), and Gemini (3.8 Flash) on the Vertex AI prepaid credit.
+    // 2026), and Gemini (4 Hydrogen since 14 November 2026, 3.8 Flash
+    // before) on the Vertex AI prepaid credit.
     smart: { providers: DEFAULT_SOLVERS, effort: "high", verify: false, autoCheck: false },
     expert: { ...EXPERT_SOLVERS, verify: false, autoCheck: false },
     china: { ...CHINA_SOLVERS, verify: false, autoCheck: false },
@@ -179,6 +189,36 @@ export const TIERS: Array<{ key: Tier; title: string; chinese: string; blurb: st
 export const TIER_COST: Partial<Record<Tier, Record<Exclude<SolveMode, "custom">, string>>> = {
   flagship: { quick: "US$0.7–2", careful: "US$2–5" },
 };
+
+/** The models a form has picked: what Custom starts from. */
+export type FormPicks = {
+  providers: ProviderKey[];
+  readers: [ModelChoice, ModelChoice];
+  reconciler: ModelChoice;
+  judge: ModelChoice;
+};
+
+/**
+ * What Custom starts from when the student leaves a preset for it: the
+ * preset's picks (the owner, 16 October 2026), with the Flagship tier's
+ * models taken out - Custom never offers GPT-6 Astra or Claude Opus 5.5 (14
+ * November 2026, the owner's call). Each one goes for the default in its
+ * place: the Smart solvers when no solver is left, the default readers,
+ * reconciler and judge.
+ */
+export function customPicks(picks: FormPicks): FormPicks {
+  const flagship = (choice: ModelChoice) => FLAGSHIP_PROVIDERS.has(choice.provider);
+  const providers = picks.providers.filter((key) => !FLAGSHIP_PROVIDERS.has(key));
+  return {
+    providers: providers.length ? providers : [...DEFAULT_SOLVERS],
+    readers: [
+      flagship(picks.readers[0]) ? DEFAULT_INTERPRETERS[0] : picks.readers[0],
+      flagship(picks.readers[1]) ? DEFAULT_INTERPRETERS[1] : picks.readers[1],
+    ],
+    reconciler: flagship(picks.reconciler) ? DEFAULT_VERIFIER : picks.reconciler,
+    judge: flagship(picks.judge) ? DEFAULT_JUDGE : picks.judge,
+  };
+}
 
 /** The tier the page opens on, every time. */
 export const DEFAULT_TIER: Tier = "smart";

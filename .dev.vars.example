@@ -38,6 +38,14 @@ GOOGLE_API_KEY=
 # GOOGLE_BACKUP_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 GOOGLE_BACKUP_API_KEY=
 
+# Gemini 4 Hydrogen and Carbon are served from Vertex AI's global location
+# only, which a key reaches only with its project number in the URL. Without
+# these each Gemini pick falls back to its Gemini 3 model (3.8 Flash, 3.1 Pro
+# Preview). The project number is in the 404 a regional call returns, or on
+# the Cloud console's dashboard. Production sets both as secrets.
+# GOOGLE_BASE_URL=https://aiplatform.googleapis.com/v1/projects/<project number>/locations/global/publishers/google
+# GOOGLE_BACKUP_BASE_URL=https://aiplatform.googleapis.com/v1/projects/<backup project number>/locations/global/publishers/google
+
 # MiniMax (https://platform.minimaxi.com) - first in MiniMax's default channel
 # chain (minimax, then opencode). Leave it blank and MiniMax runs on OpenCode
 # Go instead.

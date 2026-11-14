@@ -58,10 +58,10 @@ export const PROVIDER_KEYS: ProviderKey[] = [
   // reader and judge lists (TIER_ONLY_PROVIDERS).
   "qwen",
   "glm",
-  // The Flagship tier's (11 November 2026), on the vendors' official APIs:
-  // GPT-6 Astra on OpenAI's, Claude Opus 5.5 on Anthropic's - the dearest,
-  // so they close the solver cards (in Custom too since 13 November 2026).
-  // Astra first, so the judge sees it as Solution A.
+  // The Flagship tier's own (11 November 2026), on the vendors' official
+  // APIs: GPT-6 Astra on OpenAI's, Claude Opus 5.5 on Anthropic's. No solver
+  // card and not in the reader and judge lists: never in Custom
+  // (TIER_ONLY_PROVIDERS). Astra first, so the judge sees it as Solution A.
   "astra",
   "opus",
 ];
@@ -91,14 +91,16 @@ export const LEGACY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>([
 
 /**
  * Providers only one tier runs: the China tier's (17 October 2026, the
- * owner's call) - Qwen3.7 Plus solves and GLM-5.3-Flash reads there. Neither
- * has a solver card or a place in the reader and judge lists. Custom shows
- * one only while a preset left it picked, and a list a run's own pick is
- * missing from adds it (choicesWith). The Flagship tier's GPT-6 Astra and
- * Claude Opus 5.5 were here from 11 to 13 November 2026, when the owner let
- * Custom pick them too - to read, solve and judge only (FLAGSHIP_PROVIDERS).
+ * owner's call) - Qwen3.7 Plus solves and GLM-5.3-Flash reads there - and
+ * the Flagship tier's GPT-6 Astra and Claude Opus 5.5 (11 November 2026).
+ * None has a solver card or a place in the reader and judge lists, and a
+ * list a run's own pick is missing from adds it (choicesWith). Custom shows
+ * a China model only while a China preset left it picked; it never offers
+ * the Flagship models, not even carried over from Flagship (customPicks in
+ * src/lib/presets.ts) - Custom offered them on 13 November 2026 only, and
+ * the owner took that back the next day.
  */
-export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm"]);
+export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["qwen", "glm", "astra", "opus"]);
 
 /**
  * What a model can be asked to do: read the question (the interpretation
@@ -111,11 +113,11 @@ export type ModelPurpose = "interpret" | "solve" | "judge" | "study" | "ask" | "
 /**
  * The Flagship tier's models read, solve and judge, and nothing else (13
  * November 2026, the owner's call): every extra would be another per-token
- * call on the vendors' own APIs. Custom offers them for those three too - a
- * solver card each and a place in the reader, reconciler and judge lists -
- * but no list offers them for anything else (choicesWith), the worker
- * refuses them the rest (servesPurpose in buildTask), and the study notes
- * and the questions under a Flagship solution start from another model.
+ * call on the vendors' own APIs. They run in the Flagship tier only
+ * (TIER_ONLY_PROVIDERS; never in Custom), no list offers them for anything
+ * else (choicesWith), the worker refuses them the rest (servesPurpose in
+ * buildTask), and the study notes and the questions under a Flagship
+ * solution start from another model.
  */
 export const FLAGSHIP_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey>(["astra", "opus"]);
 
@@ -155,10 +157,13 @@ export const PROVIDER_LABELS: Record<ProviderKey, string> = {
 /**
  * Models one provider offers under a single card, the first being the
  * default: the card gets a switch, and the reader and judge lists one entry
- * each. Gemini since 26 September 2026, on Google Vertex AI: 3.8 Flash (the
- * route's own chain, falling back to 3.5 Flash) or 3.1 Pro, which was 2/2 on
- * B.8 at "high" in 136-189 s - and since 15 October 2026 (the owner's
- * request) 4 Argon, `gemini-4-argon-contributor` on OpenCode Go. Kimi since
+ * each. Gemini since 26 September 2026, on Google Vertex AI - since 14
+ * November 2026 (the owner's call) Gemini 4: 4 Hydrogen, the fast one (the
+ * route's own chain, falling back to 3.8 Flash, the "Flash" pick until
+ * then), or 4 Carbon, the strongest (falling back to 3.1 Pro Preview, the
+ * "Pro" pick until then) - and since 15 October 2026 (the owner's request) 4
+ * Argon, `gemini-4-argon-contributor` on OpenCode Go. The keys "flash" and
+ * "pro" stay, for the runs and history saved with them. Kimi since
  * 15 October 2026 (the owner's request): K2.7 Code, as before, or K3. The
  * worker maps a variant onto a model in variantOverride (worker/channels.ts).
  */
@@ -168,8 +173,8 @@ export const PROVIDER_VARIANTS: Partial<
   Record<ProviderKey, ReadonlyArray<{ key: ModelVariant; label: string; shortLabel: string }>>
 > = {
   gemini: [
-    { key: "flash", label: "3.8 Flash", shortLabel: "Flash" },
-    { key: "pro", label: "3.1 Pro", shortLabel: "Pro" },
+    { key: "flash", label: "4 Hydrogen", shortLabel: "4 Hydrogen" },
+    { key: "pro", label: "4 Carbon", shortLabel: "4 Carbon" },
     { key: "argon", label: "4 Argon", shortLabel: "4 Argon" },
   ],
   claude: [
@@ -192,7 +197,7 @@ export function isVariantOf(provider: ProviderKey, value: unknown): value is Mod
   return Boolean(PROVIDER_VARIANTS[provider]?.some((variant) => variant.key === value));
 }
 
-/** "Gemini (3.1 Pro)" - a provider's name with the model picked, when it offers several. */
+/** "Gemini (4 Carbon)" - a provider's name with the model picked, when it offers several. */
 export function providerDisplayName(provider: ProviderKey, variant?: ModelVariant) {
   // Before variants existed, "claude" always meant Opus. Preserve old records.
   if (provider === "claude") return variant === "haiku" ? "Claude Haiku" : "Claude Opus";
@@ -289,7 +294,8 @@ export const LOWER_CREDIT_PROVIDERS: ReadonlySet<ProviderKey> = new Set<Provider
 ]);
 
 /**
- * The Smart tier's solvers, in picker order: Muse Spark, Gemini (3.8 Flash)
+ * The Smart tier's solvers, in picker order: Muse Spark, Gemini (4 Hydrogen
+ * since 14 November 2026, 3.8 Flash before)
  * and Claude (Haiku, the card's first model) - Claude Haiku in DeepSeek's
  * place since 17 October 2026 (the owner's call; DeepSeek solves in the China
  * tier). Muse came back after alarm dispatch on 11 October 2026.
@@ -320,7 +326,8 @@ export const JUDGE_FALLBACKS: Partial<Record<string, ModelChoice>> = {
  * read in 21-35 s, MiMo in 18-28 s, both correct), and ChatGPT took Muse
  * Spark's on 10 October, when its free tier refused students abroad by
  * country - the owner's picks each time. Gemini is on Vertex AI and its
- * prepaid credit: each reading is a billed Flash call.
+ * prepaid credit: each reading is a billed call - to Gemini 4 Hydrogen since
+ * 14 November 2026, to 3.8 Flash before.
  */
 export const DEFAULT_INTERPRETERS: [ModelChoice, ModelChoice] = [
   { provider: "chatgpt" },

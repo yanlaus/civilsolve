@@ -759,6 +759,12 @@ export async function runTask(
           }
         }
 
+        // A model this account or location does not serve (404) goes down the
+        // model chain at once: Gemini 4 Hydrogen and Carbon are served from
+        // Vertex AI's global location only, so on a regional base URL they
+        // are "not found" and 3.8 Flash / 3.1 Pro Preview take over (14
+        // November 2026).
+        if (lastError.status === 404 && (await switchModel("is not served on this account or location (HTTP 404)"))) continue;
         if (!isRetryable(lastError)) break;
         const failure = lastError.status ? `HTTP ${lastError.status}` : "no response";
         if (await switchModel(`did not answer (${failure})`)) continue;

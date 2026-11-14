@@ -367,7 +367,7 @@ export default function SolutionPanel({
   const visibleProviders = SOLUTION_TAB_ORDER.filter(
     (provider) => runs[provider.key].status !== "idle",
   );
-  // "Gemini (3.1 Pro)" when the run picked one of a provider's models.
+  // "Gemini (4 Carbon)" when the run picked one of a provider's models.
   const nameOf = (key: ProviderKey) => providerDisplayName(key, variants.solvers[key]);
   const firstDone = visibleProviders.find(
     (provider) => runs[provider.key].status === "done",

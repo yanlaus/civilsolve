@@ -21,9 +21,8 @@ test("Muse replaces standalone Haiku in both presets and remains an alarm solver
   assert.deepEqual(app.DEFAULT_SOLVERS, ["muse", "gemini", "claude"]);
   for (const mode of ["quick", "careful"]) assert.deepEqual(app.PRESETS[mode].smart.providers, app.DEFAULT_SOLVERS);
   assert.equal(app.DEFAULT_MODE, "quick");
-  // Nine cards, and the Flagship tier's two after them (13 November 2026).
-  assert.equal(app.SOLVER_KEYS.length, 11);
-  assert.deepEqual(app.SOLVER_KEYS.slice(-2), ["astra", "opus"]);
+  // Nine cards; the Flagship tier's two are not among them (14 November 2026).
+  assert.equal(app.SOLVER_KEYS.length, 9);
   assert.ok(app.SOLVER_KEYS.includes("muse"));
   assert.ok(!app.SOLVER_KEYS.includes("haiku"));
   assert.equal(app.SOLUTION_ORDER[0], "muse");
@@ -151,13 +150,66 @@ test("China tier: its own solvers and readers, MiMo V2.6 Pro judging with DeepSe
   assert.equal(app.resolveRoute("mimo", env).model, "mimo-v2.6-flash");
 });
 
-test("Gemini keeps its Flash/Pro models and backup account behavior", () => {
-  assert.deepEqual(app.PROVIDER_VARIANTS.gemini.map(v => v.shortLabel), ["Flash", "Pro", "4 Argon"]);
+test("Gemini runs Gemini 4 - Hydrogen, Carbon, Argon - with Gemini 3 behind it, and keeps its backup account", () => {
+  assert.deepEqual(app.PROVIDER_VARIANTS.gemini.map(v => v.key), ["flash", "pro", "argon"]);
+  assert.deepEqual(app.PROVIDER_VARIANTS.gemini.map(v => v.shortLabel), ["4 Hydrogen", "4 Carbon", "4 Argon"]);
+  assert.equal(app.providerDisplayName("gemini", "flash"), "Gemini (4 Hydrogen)");
   const config = { GOOGLE_BACKUP_API_KEY: "fake-backup" };
   const pro = app.resolveRoute("gemini", config, app.variantOverride("gemini", "pro", config));
   assert.equal(pro.channel, "google-backup");
-  assert.equal(pro.model, "gemini-3.1-pro-preview");
-  assert.equal(app.routeStatus("gemini", env).variants.flash, "gemini-3.8-flash");
+  assert.equal(pro.model, "gemini-4-carbon");
+  assert.deepEqual(pro.fallbackModels, ["gemini-3.1-pro-preview"]);
+  const flash = app.resolveRoute("gemini", env);
+  assert.equal(flash.model, "gemini-4-hydrogen");
+  assert.deepEqual(flash.fallbackModels, ["gemini-3.8-flash"]);
+  assert.equal(app.routeStatus("gemini", env).variants.flash, "gemini-4-hydrogen");
+  assert.equal(app.routeStatus("gemini", env).variants.pro, "gemini-4-carbon");
+  // The reading pass's Gemini reader too.
+  const reader = app.resolveRoute("gemini", env, app.interpretOverride("gemini", env));
+  assert.equal(reader.model, "gemini-4-hydrogen");
+  assert.deepEqual(reader.fallbackModels, ["gemini-3.8-flash"]);
+  // The project's global base, from the secret, carries every model.
+  const global = "https://aiplatform.googleapis.com/v1/projects/123/locations/global/publishers/google";
+  assert.equal(app.resolveRoute("gemini", { ...env, GOOGLE_BASE_URL: global }).endpoint, global);
+});
+
+test("Gemini 4 Carbon gets its instructions in the message, every other Gemini as a system instruction", () => {
+  const caps = { reasoning: true, schema: "strict" };
+  const task = app.buildTask("solve", "gemini", { ...body, variant: "pro" }, env).params.task;
+  const pro = app.resolveRoute("gemini", env, app.variantOverride("gemini", "pro", env));
+  const carbon = JSON.parse(app.buildRequest(pro, caps, task, "high", true).body);
+  assert.equal(carbon.systemInstruction, undefined);
+  const parts = carbon.contents[0].parts;
+  assert.equal(parts[0].text, task.instructions);
+  assert.ok(parts.some((part) => part.inline_data), "the image is still sent");
+  assert.ok(carbon.generationConfig.responseSchema, "the schema is still sent");
+  assert.equal(carbon.generationConfig.thinkingConfig.thinkingLevel, "high");
+  // 3.1 Pro Preview behind it, Hydrogen and 3.8 Flash take one as before.
+  for (const model of ["gemini-3.1-pro-preview", "gemini-4-hydrogen", "gemini-3.8-flash"]) {
+    const sent = JSON.parse(app.buildRequest({ ...pro, model }, caps, task, "high", true).body);
+    assert.equal(sent.systemInstruction.parts[0].text, task.instructions, model);
+    assert.notEqual(sent.contents[0].parts[0].text, task.instructions, model);
+  }
+});
+
+test("a model the location does not serve (404) hands over to the next in the chain", async () => {
+  const originalFetch = globalThis.fetch;
+  const asked = [];
+  try {
+    globalThis.fetch = async (url) => {
+      asked.push(String(url).match(/models\/([^:]+):/)[1]);
+      if (asked.length === 1) {
+        return Response.json({ error: { code: 404, message: "Publisher model `projects/1/locations/asia-southeast1/publishers/google/models/gemini-4-hydrogen` was not found or your project does not have access to it." } }, { status: 404 });
+      }
+      return new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ answer: "The load is balanced." }) }] }, finishReason: "STOP" }] })}\n\n`, { headers: { "content-type": "text/event-stream" } });
+    };
+    const built = app.buildTask("ask", "gemini", body, env);
+    const events = [];
+    await app.runTask({ event: async e => events.push(e), heartbeat() {}, close: async () => {} }, built.params);
+    assert.deepEqual(asked, ["gemini-4-hydrogen", "gemini-3.8-flash"]);
+    assert.equal(events.at(-1).type, "done", events.at(-1).message);
+    assert.ok(events.some((e) => /gemini-4-hydrogen is not served on this account or location \(HTTP 404\)\. Trying gemini-3\.8-flash/.test(e.message ?? "")));
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("real runner sends native vision and Haiku's effort through Messages, Opus through Responses", async () => {
@@ -202,13 +254,12 @@ test("Flagship tier: GPT-6 Astra and Claude Opus 5.5 solve, Astra reconciles, Op
   assert.deepEqual(app.PRESETS.careful.flagship.readers.map(app.choiceKey), ["astra", "opus"]);
   assert.equal(app.choiceKey(app.PRESETS.careful.flagship.reconciler), "astra");
   assert.deepEqual(app.TIERS.map(t => t.key), ["smart", "expert", "china", "flagship"]);
-  // Custom offers them too (13 November 2026): a solver card each and a place
-  // in the reader and judge lists, badged More credit; the Claude card's Opus
-  // is still Poe's.
+  // Flagship only, never in Custom (the owner's call, 14 November 2026): no
+  // card, no reader or judge pick; and the Claude card's Opus is still Poe's.
   for (const key of ["astra", "opus"]) {
-    assert.ok(app.SOLVER_KEYS.includes(key));
-    assert.ok(!app.TIER_ONLY_PROVIDERS.has(key));
-    assert.ok(app.MODEL_CHOICES.some(c => c.provider === key));
+    assert.ok(!app.SOLVER_KEYS.includes(key));
+    assert.ok(app.TIER_ONLY_PROVIDERS.has(key));
+    assert.ok(!app.MODEL_CHOICES.some(c => c.provider === key));
     assert.equal(app.usesMoreCredit(key), true);
   }
   assert.equal(app.resolveRoute("claude", env, app.variantOverride("claude", "opus", env)).model, "claude-opus-4.8");
@@ -355,11 +406,13 @@ test("the Flagship models read, solve and judge, and nothing else", () => {
   }
 });
 
-test("Custom's lists offer the Flagship models to read, solve and judge, never for notes or questions", () => {
+test("no list offers the Flagship models; a Flagship run's own judge is kept, never for notes or questions", () => {
   const all = () => true;
   const has = (list, key) => list.some((choice) => choice.provider === key);
   for (const key of ["astra", "opus"]) {
-    for (const purpose of ["interpret", "judge"]) assert.ok(has(app.choicesWith(undefined, all, purpose), key), `${key} ${purpose}`);
+    for (const purpose of ["interpret", "judge"]) assert.ok(!has(app.choicesWith(undefined, all, purpose), key), `${key} ${purpose}`);
+    // A Flagship run's cross-check keeps its own judge in the list.
+    assert.ok(has(app.choicesWith({ provider: key }, all, "judge"), key), `${key} as the run's judge`);
     for (const purpose of ["study", "ask"]) {
       assert.ok(!has(app.choicesWith(undefined, all, purpose), key), `${key} ${purpose}`);
       // Not even as the run's own pick - the solution's writer.
@@ -368,4 +421,35 @@ test("Custom's lists offer the Flagship models to read, solve and judge, never f
   }
   // A China tier pick the lists leave out is still added for its own run.
   assert.ok(has(app.choicesWith({ provider: "qwen" }, all, "ask"), "qwen"));
+});
+
+test("Custom never starts with a Flagship model: leaving Flagship for Custom puts the defaults in their place", () => {
+  for (const mode of ["quick", "careful"]) {
+    const preset = app.PRESETS[mode].flagship;
+    const picks = app.customPicks({
+      providers: preset.providers,
+      readers: preset.readers ?? app.DEFAULT_INTERPRETERS,
+      reconciler: preset.reconciler ?? app.DEFAULT_VERIFIER,
+      judge: preset.judge,
+    });
+    assert.deepEqual(picks.providers, app.DEFAULT_SOLVERS, mode);
+    assert.deepEqual(picks.readers.map(app.choiceKey), app.DEFAULT_INTERPRETERS.map(app.choiceKey), mode);
+    assert.equal(app.choiceKey(picks.reconciler), app.choiceKey(app.DEFAULT_VERIFIER), mode);
+    assert.equal(app.choiceKey(picks.judge), app.choiceKey(app.DEFAULT_JUDGE), mode);
+    const flagship = [...picks.providers, ...picks.readers.map((c) => c.provider), picks.reconciler.provider, picks.judge.provider];
+    assert.ok(!flagship.some((key) => app.FLAGSHIP_PROVIDERS.has(key)), mode);
+  }
+  // Every other tier's picks carry into Custom as they are, China's GLM and Qwen included.
+  for (const tier of ["smart", "expert", "china"]) {
+    const preset = app.PRESETS.careful[tier];
+    const before = { providers: preset.providers, readers: preset.readers ?? app.DEFAULT_INTERPRETERS, reconciler: preset.reconciler ?? app.DEFAULT_VERIFIER, judge: preset.judge ?? app.DEFAULT_JUDGE };
+    assert.deepEqual(app.customPicks(before), before, tier);
+  }
+  // A Flagship model mixed with others: only it goes.
+  assert.deepEqual(app.customPicks({ providers: ["muse", "opus"], readers: [{ provider: "chatgpt" }, { provider: "astra" }], reconciler: { provider: "deepseek" }, judge: { provider: "opus" } }), {
+    providers: ["muse"],
+    readers: [{ provider: "chatgpt" }, app.DEFAULT_INTERPRETERS[1]],
+    reconciler: { provider: "deepseek" },
+    judge: app.DEFAULT_JUDGE,
+  });
 });
