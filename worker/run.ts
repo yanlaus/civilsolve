@@ -8,6 +8,7 @@
 
 import { EFFORT_KEYS, type EffortKey } from "../shared/prompt";
 import type { ProviderKey } from "../shared/providers";
+import type { SubjectKey } from "../shared/subjects";
 import { formatDuration, taskTimeoutMs } from "../shared/stream-protocol";
 import {
   buildRequest,
@@ -368,6 +369,14 @@ export type RunTaskParams = {
   signal?: AbortSignal;
   /** Server-owned deadline, including time waiting for alarm dispatch. */
   deadlineAt?: number;
+  /**
+   * The question's course subject (shared/subjects.ts), when the request
+   * named one: its method guide goes first in the task's instructions
+   * (applyCourseGuide in worker/course-guides.ts, before the task runs).
+   */
+  subject?: SubjectKey;
+  /** A status line sent before the model is asked - the course guide followed. */
+  notice?: string;
 };
 
 export type TaskEvent = { type: string } & Record<string, unknown>;
@@ -493,6 +502,7 @@ export async function runTask(
       return summary();
     }
 
+    if (params.notice) await write({ type: "status", message: params.notice });
     await write({ type: "status", message: `Asking ${route.label}...` });
 
     let streamUpstream = wantsUpstreamStream(route, env);

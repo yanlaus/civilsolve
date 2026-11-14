@@ -1,5 +1,5 @@
 // App-level SSE protocol for POST /api/solve, /api/interpret, /api/judge,
-// /api/study, /api/ask, /api/align and /api/visualize.
+// /api/study, /api/ask, /api/align, /api/visualize and /api/classify.
 // The Worker translates upstream provider streams into these events so the
 // client is agnostic to whether the upstream call streamed or not.
 
@@ -11,6 +11,7 @@ import type { EffortKey } from "./prompt";
 import type { ModelVariant } from "./providers";
 import type { ProviderArtifact } from "./solution";
 import type { StudyKind, StudyResult } from "./study";
+import type { SubjectKey, SubjectResult } from "./subjects";
 import type { VisualFix, VisualPurpose, VisualResult } from "./visual";
 
 /**
@@ -36,6 +37,11 @@ export type SolveRequestBody = {
   variant?: ModelVariant;
   /** Set when the user asked for this solution again, with instructions. */
   revision?: RevisionRequest;
+  /**
+   * The course subject (shared/subjects.ts): its method guide goes first in
+   * the model's instructions (worker/course-guides.ts). Absent: no guide.
+   */
+  subject?: SubjectKey;
 };
 
 export type InterpretRequestBody = {
@@ -72,6 +78,11 @@ export type JudgeRequestBody = {
   variant?: ModelVariant;
   /** Set when the user asked for the verdict again, with instructions. */
   revision?: RevisionRequest;
+  /**
+   * The course subject (shared/subjects.ts): its method guide goes first in
+   * the judge's instructions (worker/course-guides.ts). Absent: no guide.
+   */
+  subject?: SubjectKey;
 };
 
 /**
@@ -99,6 +110,11 @@ export type StudyRequestBody = {
   variant?: ModelVariant;
   /** Set when the user asked for the notes again, with instructions. */
   revision?: RevisionRequest;
+  /**
+   * The course subject (shared/subjects.ts): its method guide goes first in
+   * the model's instructions (worker/course-guides.ts). Absent: no guide.
+   */
+  subject?: SubjectKey;
 };
 
 /**
@@ -150,7 +166,26 @@ export type AskRequestBody = {
   effort?: EffortKey;
   /** Which of the provider's models, when it offers several. */
   variant?: ModelVariant;
+  /**
+   * The course subject (shared/subjects.ts): its method guide goes first in
+   * the model's instructions (worker/course-guides.ts). Absent: no guide.
+   */
+  subject?: SubjectKey;
 };
+
+/**
+ * Which course subject a question belongs to (shared/subjects.ts, 14 November
+ * 2026): its pages and notes, sent once before anything is solved when the
+ * form leaves the subject to the classifier. Answered with `done {subject}`.
+ */
+export type ClassifyRequestBody = {
+  images: string[];
+  notes: string;
+  /** Reasoning level. Defaults to "low": it sorts, it does not solve. */
+  effort?: EffortKey;
+};
+
+export type ClassifyDone = { subject: SubjectResult };
 
 /**
  * The answers compared with each other (shared/align.ts): every finished

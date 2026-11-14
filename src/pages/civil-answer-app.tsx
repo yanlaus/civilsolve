@@ -3,6 +3,7 @@ import { Calculator, History, Loader2, X } from "lucide-react";
 import { InterpretProgress } from "@/components/solve/interpret-progress";
 import { InterpretationReview } from "@/components/solve/interpretation-review";
 import { JourneyBar, JumpButton } from "@/components/solve/journey-bar";
+import { SubjectBadge } from "@/components/solve/subject-badge";
 import { useTheme } from "@/components/theme-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { SOLVE_MODE_ID, UploadForm, type FormPrefill, type SolveSubmission } from "@/components/solve/upload-form";
@@ -16,6 +17,7 @@ import { useInterpret } from "@/hooks/use-interpret";
 import { isJudgeActive, isRunActive, isStudyActive, useSolve } from "@/hooks/use-solve";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { filesToImageDataUrls } from "@/lib/attachments";
+import { outcomeSubject, settleSubject, type SubjectOutcome } from "@/lib/classify";
 import { buildJourney, scrollToStep, scrollToStepWhenReady, STEP_IDS, type JourneyStep } from "@/lib/journey";
 import { useNow } from "@/lib/progress";
 import { lectureNotesToPayload } from "@/lib/lecture-notes";
@@ -69,7 +71,15 @@ type PendingSolve = {
   crossCheckJudge: SolveSubmission["crossCheckJudge"];
   /** The reconciler, which also re-generates the reading when asked. */
   verifierLabel: string;
+  /** The question's subject, settled while the question is read (lib/classify.ts). */
+  subject: Promise<SubjectOutcome>;
 };
+
+/** The body with the run's course subject, when it has one. */
+function withSubject(body: SolveRequestBody, outcome: SubjectOutcome): SolveRequestBody {
+  const subject = outcomeSubject(outcome);
+  return subject ? { ...body, subject } : body;
+}
 
 export default function CivilAnswerAppPage() {
   const { theme } = useTheme();
@@ -190,6 +200,11 @@ export default function CivilAnswerAppPage() {
     stopRevise: stopReadingRevision,
   } = useInterpret();
   const [pendingSolve, setPendingSolve] = useState<PendingSolve | null>(null);
+  // The question's course subject (shared/subjects.ts): the student's pick,
+  // or DeepSeek's, settled before anything is solved. `subjectStop` ends a
+  // classification still running when the run is stopped or replaced.
+  const [subjectOutcome, setSubjectOutcome] = useState<SubjectOutcome | null>(null);
+  const subjectStop = useRef<AbortController | null>(null);
   const [prepStatus, setPrepStatus] = useState("");
   const [error, setError] = useState("");
   const [runtimeError, setRuntimeError] = useState("");
@@ -296,10 +311,19 @@ export default function CivilAnswerAppPage() {
     setRecovered(false);
   }
 
+  /** Ends a classification still running; its answer is no longer wanted. */
+  function stopSubject() {
+    const running = subjectStop.current;
+    subjectStop.current = null;
+    running?.abort();
+    setSubjectOutcome((current) => (current?.status === "running" ? null : current));
+  }
+
   function cancelAll() {
     setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
+    stopSubject();
     cancel();
   }
 
@@ -308,6 +332,8 @@ export default function CivilAnswerAppPage() {
   function stopInterpretation() {
     resetInterpret();
     setPendingSolve(null);
+    stopSubject();
+    setSubjectOutcome(null);
     setFormCollapsed(false);
   }
 
@@ -322,11 +348,14 @@ export default function CivilAnswerAppPage() {
     autoCheck,
     crossCheckJudge,
     savedReference,
+    subject,
   }: SolveSubmission) {
     setError("");
     setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
+    stopSubject();
+    setSubjectOutcome(null);
     // A new question clears the last one's solutions and verdict first.
     // Left on screen while the new question was being read, they looked
     // like what the interpretation pass was working on (26 September 2026).
@@ -377,6 +406,20 @@ export default function CivilAnswerAppPage() {
         );
       }
 
+      // The subject: the student's pick, or DeepSeek's from the pages - in
+      // parallel with the reading check when there is one, so it costs no
+      // time there; a Quick run waits for it (at most CLASSIFY_WAIT_MS).
+      const stop = new AbortController();
+      subjectStop.current = stop;
+      setSubjectOutcome(subject === "auto" ? { status: "running" } : { status: "picked", subject });
+      const settled = settleSubject(subject, { images, notes, effort: "low" }, stop.signal).then((outcome) => {
+        if (subjectStop.current === stop) {
+          subjectStop.current = null;
+          setSubjectOutcome(outcome);
+        }
+        return outcome;
+      });
+
       if (verify) {
         setPendingSolve({
           providers,
@@ -385,13 +428,18 @@ export default function CivilAnswerAppPage() {
           autoCheck,
           crossCheckJudge,
           verifierLabel: providerDisplayName(verify.verifier.provider, verify.verifier.variant),
+          subject: settled,
         });
         setPrepStatus("");
         await startInterpret(verify, images, notes);
         return;
       }
 
-      start(providers, body, judgeOf(autoCheck), variants, undefined, crossCheckJudge);
+      if (subject === "auto") setPrepStatus("Getting ready to solve · 準備解題...");
+      const outcome = await settled;
+      // Stopped, or another question started, while it was being identified.
+      if (stop.signal.aborted) return;
+      start(providers, withSubject(body, outcome), judgeOf(autoCheck), variants, undefined, crossCheckJudge);
       scrollToStepWhenReady(STEP_IDS.answers);
     } catch (prepError) {
       // Nothing was sent: back to the form to fix the upload.
@@ -404,9 +452,9 @@ export default function CivilAnswerAppPage() {
     }
   }
 
-  function confirmInterpretation(confirmedText: string) {
+  async function confirmInterpretation(confirmedText: string) {
     if (!pendingSolve || pipeline.status !== "review") return;
-    const { providers, body, variants, autoCheck, crossCheckJudge } = pendingSolve;
+    const { providers, body, variants, autoCheck, crossCheckJudge, subject } = pendingSolve;
     // Kept above the solutions: the Chinese and who read it go with the run.
     const extras = {
       chinese: pipeline.interpretation.traditional_chinese?.trim() || undefined,
@@ -415,7 +463,20 @@ export default function CivilAnswerAppPage() {
     };
     setPendingSolve(null);
     resetInterpret();
-    start(providers, { ...body, interpretation: confirmedText }, judgeOf(autoCheck), variants, extras, crossCheckJudge);
+    // Nearly always settled by now: the reading took longer.
+    const waiting = subjectStop.current;
+    if (waiting) setPrepStatus("Getting ready to solve · 準備解題...");
+    const outcome = await subject;
+    setPrepStatus("");
+    if (waiting?.signal.aborted) return;
+    start(
+      providers,
+      withSubject({ ...body, interpretation: confirmedText }, outcome),
+      judgeOf(autoCheck),
+      variants,
+      extras,
+      crossCheckJudge,
+    );
     // The reading folds away and the solutions start below it: go to them.
     scrollToStepWhenReady(STEP_IDS.answers);
   }
@@ -425,6 +486,8 @@ export default function CivilAnswerAppPage() {
     setRecovered(false);
     resetInterpret();
     setPendingSolve(null);
+    stopSubject();
+    setSubjectOutcome(null);
     setError("");
     dismiss();
     setFormCollapsed(false);
@@ -552,6 +615,8 @@ export default function CivilAnswerAppPage() {
             ) : null
           }
         />
+
+        {collapsed ? <SubjectBadge outcome={subjectOutcome} subject={getBody()?.subject} /> : null}
 
         {pipeline.status === "review" ? (
           <InterpretationReview

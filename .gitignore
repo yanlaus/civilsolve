@@ -3,3 +3,6 @@ dist/
 .wrangler/
 .dev.vars
 .claude/settings.local.json
+
+# Course method guides distilled from lecture notes: private, uploaded to R2, never committed (the repo is public)
+course-guides/

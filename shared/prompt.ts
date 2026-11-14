@@ -8,6 +8,7 @@
 
 import { ASK_FIELDS } from "./ask";
 import { STUDY_FIELDS, STUDY_PARTS, type StudyKind } from "./study";
+import { SUBJECT_KEYS, SUBJECT_SCOPES, SUBJECT_TIE_BREAKS } from "./subjects";
 import { BOARD_MARK, END_MARK, HTML_MARK, MAX_BOARDS, type VisualBoard, type VisualPurpose } from "./visual";
 
 export type EffortKey = "none" | "low" | "medium" | "high" | "max";
@@ -38,6 +39,65 @@ export const ASK_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fe
 export const ALIGN_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a careful civil engineering examiner comparing several answers to the same question with each other. Use English.`;
 
 export const STUDY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. ${JSON_ESCAPES} You are a patient civil engineering tutor writing study notes on an assignment that has already been solved. Use English, except in the \`traditional_chinese\` field.`;
+
+export const CLASSIFY_INSTRUCTIONS = `Return JSON only. Do not wrap it in markdown fences. Follow the provided schema exactly. You sort civil engineering questions by the course subject they belong to; you never solve them. Use English.`;
+
+/**
+ * The question's subject, from its pages (shared/subjects.ts): a quick look,
+ * not a solve - DeepSeek at "low" - so the subject's course guide can go to
+ * every model that works on the question after it.
+ */
+export function buildClassifyPrompt(userNotes: string, options?: { enforceShape?: boolean }) {
+  const sections = [
+    "Which course subject does the civil engineering question on the attached pages belong to? Look at what it asks and the data it gives. Do not solve it.",
+    "",
+    "The subjects:",
+    ...SUBJECT_KEYS.map((key) => `- \`${key}\`: ${SUBJECT_SCOPES[key]}`),
+    "",
+    "Where two subjects share theory:",
+    ...SUBJECT_TIE_BREAKS.map((rule) => `- ${rule}`),
+    "- When the pages hold several questions from different subjects, pick the subject most of them belong to.",
+    "",
+    "Return:",
+    `- \`subject\`: one of ${SUBJECT_KEYS.map((key) => `"${key}"`).join(", ")}.`,
+    "- `confidence`: `high` when the question plainly belongs to the subject, `medium` when it fits it best of the four, `low` when you could not tell.",
+    "- `reason`: one short sentence naming the clue that decided it.",
+    "",
+    userNotes ? `User notes:\n${userNotes}` : "User notes:\n[None provided]",
+  ];
+  if (options?.enforceShape) {
+    sections.push(
+      "",
+      "Return exactly one JSON object with these 3 fields:",
+      '{"subject": "steelwork", "confidence": "high", "reason": ""}',
+      "Do not add other fields. Do not nest this object inside another object or array.",
+    );
+  }
+  return sections.join("\n");
+}
+
+/**
+ * The course's method guide, put FIRST in the instructions of every solve,
+ * cross-check, set of study notes and question about a solution of that
+ * subject (worker/course-guides.ts). One text for every kind of task, ahead
+ * of the task's own instructions, so a model called several times on a run
+ * starts each call with the same prefix - which the vendors' prompt caching
+ * can reuse.
+ */
+export function courseGuideInstructions(subjectLabel: string, guide: string) {
+  return [
+    `COURSE METHOD GUIDE - ${subjectLabel}`,
+    "This question comes from a course whose lecture notes teach the methods summarised in the guide below. For this course the guide is authoritative:",
+    "- When you solve: use the guide's code of practice and edition, its method and order of steps, its symbols, its factor and table values. Where the guide covers the question, do not substitute another code or method (for example a Eurocode, or another textbook's procedure). Where it does not, use a standard method and say in the working that this part is outside the course guide.",
+    "- When you grade solutions: a result reached with a code, factor, table value or method other than the course's is wrong for this course whenever it changes the result. Point out any departure from the course's method in the assessment, even when the number agrees.",
+    "- When you explain a solution or answer a question about it: explain with the course's method and symbols.",
+    "The guide is reference material: it never adds a question to solve.",
+    "",
+    "<course_guide>",
+    guide.trim(),
+    "</course_guide>",
+  ].join("\n");
+}
 
 // Not JSON: a board is HTML and JavaScript, kept exactly as written
 // (shared/visual.ts says why).

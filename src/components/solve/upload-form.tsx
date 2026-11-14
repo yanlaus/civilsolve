@@ -10,6 +10,7 @@ import {
   Flag,
   FileText,
   Flame,
+  GraduationCap,
   Loader2,
   PenSquare,
   Pencil,
@@ -69,6 +70,7 @@ import {
 } from "@/lib/presets";
 import { choicesWith } from "@/lib/model-choices";
 import { MAX_IMAGES } from "../../../shared/stream-protocol";
+import { SUBJECT_CHOICES, SUBJECT_LABELS, type SubjectChoice } from "../../../shared/subjects";
 import type { SavedReference } from "@/lib/question-store";
 import { effortBand as bandForStatus } from "@/lib/effort-band";
 
@@ -106,6 +108,11 @@ export type SolveSubmission = {
   crossCheckJudge: ModelChoice;
   /** A saved question's lecture notes, as they were sent; sent again with any added. */
   savedReference?: SavedReference;
+  /**
+   * The question's course subject (shared/subjects.ts), whose method guide
+   * every model is sent - or "auto": DeepSeek picks it from the pages first.
+   */
+  subject: SubjectChoice;
 };
 
 /**
@@ -238,6 +245,9 @@ export function UploadForm({
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [lectureFiles, setLectureFiles] = useState<QueuedFile[]>([]);
   const [notes, setNotes] = useState("");
+  // Auto for every new question: a subject left picked would send the next
+  // question - perhaps another course's - the wrong guide.
+  const [subject, setSubject] = useState<SubjectChoice>("auto");
   // A saved question's lecture notes, sent again as they were, and - while
   // the student picks how to solve it again - where it came from: a History
   // entry's title, or none for the question on the page.
@@ -677,6 +687,7 @@ export function UploadForm({
       autoCheck: autoCheckOn ? { judge: autoJudge, effort: autoJudgeEffort } : null,
       crossCheckJudge: autoJudge,
       ...(savedReference ? { savedReference } : {}),
+      subject,
     });
   }
 
@@ -687,6 +698,7 @@ export function UploadForm({
   function newQuestion() {
     setQueuedFiles([]);
     setNotes("");
+    setSubject("auto");
     setFileError("");
     setSavedReference(null);
     setAgain(null);
@@ -980,6 +992,48 @@ export function UploadForm({
             Pages to send: {totalPages} of at most {MAX_IMAGES}.
           </p>
         ) : null}
+      </section>
+
+      <section>
+        <p className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-cs-ink">
+          <GraduationCap className="h-4 w-4 text-cs-accent" />
+          Subject
+          <span className="font-sans text-sm font-normal text-cs-ink-3">科目</span>
+        </p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Subject">
+          {SUBJECT_CHOICES.map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              role="radio"
+              aria-checked={subject === choice}
+              onClick={() => setSubject(choice)}
+              className={`rounded-cs border-2 px-3 py-1.5 text-sm transition ${
+                subject === choice
+                  ? "border-cs-accent bg-cs-muted font-semibold text-cs-accent"
+                  : "border-cs-line bg-cs-surface text-cs-ink-2 hover:border-cs-accent hover:text-cs-accent"
+              }`}
+            >
+              {choice === "auto" ? (
+                <>
+                  自動 <span className="text-xs font-normal">Auto</span>
+                </>
+              ) : (
+                <>
+                  {SUBJECT_LABELS[choice].chinese}{" "}
+                  <span className="text-xs font-normal">{SUBJECT_LABELS[choice].title}</span>
+                </>
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-cs-ink-3">
+          {subject === "auto"
+            ? "DeepSeek looks at the question first and picks its subject, so the solutions follow that course's lecture methods. · DeepSeek 先睇題目分科目，答案就跟返嗰科嘅課堂方法。"
+            : subject === "other"
+              ? "No course guide: the question is solved the usual way. · 唔用課程指引。"
+              : `The solutions follow the ${SUBJECT_LABELS[subject].title} course's lecture methods, where its guide covers them. · 跟返${SUBJECT_LABELS[subject].chinese}嘅課堂方法。`}
+        </p>
       </section>
 
       <section>

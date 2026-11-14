@@ -1154,6 +1154,7 @@ export function useSolve() {
         images: body.images,
         notes: body.notes,
         ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+        ...(body.subject ? { subject: body.subject } : {}),
         solutions,
         ...(verdict ? { verdict } : {}),
         ...(writer.variant ? { variant: writer.variant } : {}),
@@ -1506,6 +1507,8 @@ async function runJudge({
       images: body.images,
       notes: body.notes,
       ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+      // The course guide grades against the course's method too.
+      ...(body.subject ? { subject: body.subject } : {}),
       ...(saved.variant ? { variant: saved.variant } : {}),
       ...(saved.effort ? { effort: saved.effort } : {}),
       ...(revision ? { revision } : {}),

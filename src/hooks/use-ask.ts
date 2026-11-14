@@ -258,6 +258,7 @@ export function useAsk({
         images: body.images,
         notes: body.notes,
         ...(body.interpretation ? { interpretation: body.interpretation } : {}),
+        ...(body.subject ? { subject: body.subject } : {}),
         solution: artifactToText(solution, MAX_SOLUTION_TEXT),
         question: question.trim(),
         ...(step ? { step: `${step.title}\n\n${step.body}` } : {}),
