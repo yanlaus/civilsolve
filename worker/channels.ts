@@ -113,7 +113,7 @@ export type WorkerEnv = {
   OPUS_CHANNEL?: string;
 
   // --- Model overrides ---------------------------------------------------
-  // A value may be a chain, primary first: "gemini-3.8-flash,gemini-3.5-flash".
+  // A value may be a chain, primary first: "gemini-4-hydrogen,gemini-3.8-flash".
   // Every model must be vision-capable - verify with an image before changing
   // one (AGENTS.md).
   POE_CHATGPT_MODEL?: string;
@@ -199,8 +199,9 @@ const CLAMPED_EFFORT: EffortSpec = {
 // answered "Thinking budget is not supported for this model" to 4 of 8
 // identical requests with a budget, and to none of 8 with a level - the
 // failures landed on a backend that takes only levels, and the worker then
-// dropped thinking altogether. 3.8 Flash and 3.1 Pro take levels too. There
-// is no level above "high". "none" is absent, as it was for budgets: Pro
+// dropped thinking altogether. 3.8 Flash and 3.1 Pro take levels too, and so
+// do Gemini 4 Hydrogen and Carbon (low and high probed on Vertex, 14 November
+// 2026). There is no level above "high". "none" is absent, as it was for budgets: Pro
 // cannot switch thinking off, so "None" means the model's own default.
 const GEMINI_LEVEL: EffortSpec = {
   kind: "enum",
@@ -407,10 +408,23 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
       dialect: "gemini",
       keyVar: "GOOGLE_API_KEY",
       modelVar: "GOOGLE_GEMINI_MODEL",
-      // The "Flash" pick: a chain, primary first. Both answer on Vertex; the
-      // Pro pick is GOOGLE_GEMINI_PRO_MODEL (variantOverride). On Vertex the
-      // Pro tier is "gemini-3.1-pro-preview"; "gemini-3.1-pro" is a 404.
-      defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
+      // The "Flash" pick: a chain, primary first. Gemini 4 Hydrogen since 14
+      // November 2026 (the owner's call), the fast Gemini 4 - $1.50 / $7.50
+      // per 1M tokens to 3.8 Flash's $0.75 / $3.75 - with 3.8 Flash behind
+      // it. The Pro pick is GOOGLE_GEMINI_PRO_MODEL (variantOverride): Gemini
+      // 4 Carbon, 3.1 Pro Preview behind it.
+      //
+      // Gemini 4 Hydrogen and Carbon are served from Vertex AI's global
+      // location only, which an API key reaches only with the project in the
+      // URL: https://aiplatform.googleapis.com/v1/projects/<project number>/
+      // locations/global/publishers/google - the default base below routes
+      // to a region (asia-southeast1 from Hong Kong), where both are 404 and
+      // the chain falls back (run.ts). The repo is public, so the project
+      // numbers are not here: production sets GOOGLE_BASE_URL and
+      // GOOGLE_BACKUP_BASE_URL as secrets. The global location serves 3.8
+      // Flash, 3.5 Flash, 3.1 Pro Preview and 4 Argon too (probed with both
+      // keys, 14 November 2026).
+      defaultModel: "gemini-4-hydrogen,gemini-3.8-flash",
       urlVar: "GOOGLE_BASE_URL",
       defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
       effort: GEMINI_LEVEL,
@@ -424,12 +438,13 @@ const ROUTES: Record<ProviderKey, Partial<Record<ChannelKey, RouteSpec>>> = {
     // and the interpretation pass alike (BACKUP_CHANNELS). It shares
     // GOOGLE_GEMINI_MODEL / GOOGLE_GEMINI_PRO_MODEL with "google". An AI Studio
     // key works too, with GOOGLE_BACKUP_BASE_URL set to AI Studio's endpoint:
-    // it names the models alike.
+    // it names the models alike. Its own project's global base, like
+    // "google"'s, is the GOOGLE_BACKUP_BASE_URL secret.
     "google-backup": {
       dialect: "gemini",
       keyVar: "GOOGLE_BACKUP_API_KEY",
       modelVar: "GOOGLE_GEMINI_MODEL",
-      defaultModel: "gemini-3.8-flash,gemini-3.5-flash",
+      defaultModel: "gemini-4-hydrogen,gemini-3.8-flash",
       urlVar: "GOOGLE_BACKUP_BASE_URL",
       defaultUrl: "https://aiplatform.googleapis.com/v1/publishers/google",
       effort: GEMINI_LEVEL,
@@ -973,9 +988,11 @@ export function resolveRoute(
 // Poe account. To go back, set chatgpt to "poe" below and
 // INTERPRET_CHATGPT_MODEL to a Poe bot id.
 //
-// Gemini reads on Google, free-tier Flash, with a model chain: 3.8-flash
-// first, 3.5-flash when 3.8 is unavailable (it answered 503 "high demand" on
-// four of six solves the day this was added; 3.5 was 3/3). The backup key
+// Gemini reads on Google with a model chain: Gemini 4 Hydrogen first since
+// 14 November 2026 (the owner's call; it read the beam diagram right in 2-3 s
+// at low and high), 3.8 Flash behind it. 3.8 Flash read first from its
+// release, 3.5 Flash behind it (3.8 answered 503 "high demand" on four of six
+// solves the day the chain was added; 3.5 was 3/3). The backup key
 // backs it up (BACKUP_CHANNELS). If neither Google key is configured the
 // reader falls back to the Poe pin so the pass keeps working.
 const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
@@ -986,7 +1003,7 @@ const INTERPRET_MODEL_VAR: Partial<Record<ProviderKey, keyof WorkerEnv>> = {
 
 const INTERPRET_MODEL_DEFAULT: Partial<Record<ProviderKey, string>> = {
   chatgpt: "gpt-6-luna",
-  gemini: "gemini-3.8-flash,gemini-3.5-flash",
+  gemini: "gemini-4-hydrogen,gemini-3.8-flash",
   claude: "claude-opus-4.8",
 };
 
@@ -1037,15 +1054,18 @@ export const VISUAL_TIMEOUT_MS = LONG_THINKING_TIMEOUT_MS;
 /** Health payload for one provider. Never exposes key values. */
 /**
  * The models behind a provider's picks (PROVIDER_VARIANTS), other than the
- * route's own model: Gemini's "pro" runs GOOGLE_GEMINI_PRO_MODEL on Google,
- * and "argon" its OpenCode Go route (Gemini 4). "flash" is the Google
- * route's own chain, so it needs no entry.
+ * route's own model: Gemini's "pro" runs GOOGLE_GEMINI_PRO_MODEL on Google -
+ * Gemini 4 Carbon since 14 November 2026 (the owner's call), the strongest
+ * Gemini 4, with 3.1 Pro Preview behind it - and "argon" its OpenCode Go
+ * route (Gemini 4 Argon). "flash" is the Google route's own chain (Gemini 4
+ * Hydrogen, 3.8 Flash behind it), so it needs no entry. The keys "flash" and
+ * "pro" are kept for the runs and history saved with them.
  */
 const VARIANT_ROUTES: Partial<
   Record<ProviderKey, Partial<Record<ModelVariant, { channel: ChannelKey; modelVar?: keyof WorkerEnv; defaultModel?: string }>>>
 > = {
   gemini: {
-    pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-3.1-pro-preview" },
+    pro: { channel: "google", modelVar: "GOOGLE_GEMINI_PRO_MODEL", defaultModel: "gemini-4-carbon,gemini-3.1-pro-preview" },
     argon: { channel: "opencode" },
   },
   // Kimi's "k2.7" pick is the route's own model, so it needs no entry.
@@ -1218,6 +1238,16 @@ function geminiSchema(schema: Record<string, unknown>): Record<string, unknown> 
 
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/;
 
+/**
+ * Gemini models that get the instructions inside the message, not as a
+ * systemInstruction. Gemini 4 Carbon on Vertex AI (14 November 2026): with a
+ * systemInstruction and an image together it sent nothing and Google closed
+ * the connection after 60 s - four times out of four, streamed or not - while
+ * the same request without the systemInstruction answered in 4-6 s, a
+ * schema and the image included. Hydrogen and Argon take one as usual.
+ */
+const GEMINI_INSTRUCTIONS_IN_MESSAGE = /^gemini-4-carbon/;
+
 function toInlineData(dataUrl: string) {
   const match = DATA_URL.exec(dataUrl);
   if (!match) return null;
@@ -1287,7 +1317,13 @@ export function buildRequest(
       generationConfig.thinkingConfig = { thinkingBudget: budget };
     }
 
-    const parts: Array<Record<string, unknown>> = [{ text: prompt }];
+    // A model that cannot take a system instruction with an image gets the
+    // instructions as the message's first part instead.
+    const inlineInstructions = GEMINI_INSTRUCTIONS_IN_MESSAGE.test(route.model);
+    const parts: Array<Record<string, unknown>> = [
+      ...(inlineInstructions ? [{ text: instructions }] : []),
+      { text: prompt },
+    ];
     for (const image of images) {
       const inline = toInlineData(image);
       if (inline) parts.push(inline);
@@ -1312,7 +1348,7 @@ export function buildRequest(
         ...(stream ? { Accept: "text/event-stream" } : {}),
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: instructions }] },
+        ...(inlineInstructions ? {} : { systemInstruction: { parts: [{ text: instructions }] } }),
         contents: [{ role: "user", parts }],
         ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
       }),
