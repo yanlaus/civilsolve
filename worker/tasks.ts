@@ -20,6 +20,7 @@ import {
   ASK_INSTRUCTIONS,
   buildAlignPrompt,
   buildAskPrompt,
+  buildClassifyPrompt,
   buildInterpretPrompt,
   buildJudgePrompt,
   buildReviseReadingPrompt,
@@ -27,6 +28,7 @@ import {
   buildTutorPrompt,
   buildVerifyPrompt,
   buildVisualPrompt,
+  CLASSIFY_INSTRUCTIONS,
   INTERPRET_INSTRUCTIONS,
   isEffortKey,
   JUDGE_INSTRUCTIONS,
@@ -48,6 +50,7 @@ import {
 } from "../shared/providers";
 import { finalizeProviderArtifact, solutionSchema } from "../shared/solution";
 import { isStudyKind, parseStudy, studySchema } from "../shared/study";
+import { classifySchema, isSubjectKey, parseClassification, type SubjectKey } from "../shared/subjects";
 import {
   isVisualProvider,
   isVisualPurpose,
@@ -80,7 +83,7 @@ import type { RunTaskParams } from "./run";
 /** A task is a model asked for one purpose (ModelPurpose in shared/providers.ts). */
 export type TaskKind = ModelPurpose;
 
-export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align", "visualize"];
+export const TASK_KINDS: TaskKind[] = ["solve", "interpret", "judge", "study", "ask", "align", "visualize", "classify"];
 
 export function isTaskKind(value: string): value is TaskKind {
   return (TASK_KINDS as string[]).includes(value);
@@ -126,6 +129,17 @@ function readRevision(
   return { revision: { previous, instructions } };
 }
 
+/**
+ * The question's course subject, when the request names one: its method
+ * guide is put first in the task's instructions before it runs
+ * (worker/course-guides.ts). Absent is fine; an unknown one is refused.
+ */
+function readSubject(body: Record<string, unknown>): { subject?: SubjectKey } | { error: string } {
+  const { subject } = body;
+  if (subject === undefined || subject === null || subject === "") return {};
+  return isSubjectKey(subject) ? { subject } : { error: "Unknown subject." };
+}
+
 /** The assignment images every task needs: 1 to MAX_IMAGES data URLs. */
 function readAssignment(body: Record<string, unknown>): ImagesResult {
   const assignment = readImages(body.images, MAX_IMAGES, "Images");
@@ -168,6 +182,20 @@ export function buildTask(
       status: 400,
     };
   }
+  const read = readSubject(body);
+  if ("error" in read) return { error: read.error, status: 400 };
+  const built = buildKind(kind, providerName, body, env, variant);
+  return read.subject && "params" in built ? { params: { ...built.params, subject: read.subject } } : built;
+}
+
+function buildKind(
+  kind: TaskKind,
+  providerName: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
+  if (kind === "classify") return buildClassify(providerName, body, env, variant);
   if (kind === "solve") return buildSolve(providerName, body, env, variant);
   if (kind === "interpret") return buildInterpret(providerName, body, env, variant);
   if (kind === "study") return buildStudy(providerName, body, env, variant);
@@ -538,6 +566,44 @@ function buildAlign(
       },
       finalize: (rawText, { lastAttempt }) => ({
         comparison: parseAlign(rawText, provider, count, { allowIncomplete: lastAttempt }),
+      }),
+    },
+  };
+}
+
+/**
+ * Which course subject the question belongs to (shared/subjects.ts): its
+ * pages and notes, at "low" - a quick look before anything is solved, so the
+ * subject's course guide goes to everything after it.
+ */
+function buildClassify(
+  provider: ProviderKey,
+  body: Record<string, unknown>,
+  env: WorkerEnv,
+  variant?: ModelVariant,
+): BuiltTask {
+  const assignment = readAssignment(body);
+  if ("error" in assignment) return { error: assignment.error, status: 400 };
+  const notes = readText(body.notes, MAX_NOTES_LENGTH);
+  const effort: EffortKey =
+    typeof body.effort === "string" && isEffortKey(body.effort) ? body.effort : "low";
+
+  return {
+    params: {
+      provider,
+      env,
+      effort,
+      routeOverride: variantOverride(provider, variant, env),
+      task: {
+        session: crypto.randomUUID(),
+        prompt: ({ enforceShape }) => buildClassifyPrompt(notes, { enforceShape }),
+        instructions: CLASSIFY_INSTRUCTIONS,
+        schemaName: "civil_question_subject",
+        schema: classifySchema as unknown as Record<string, unknown>,
+        images: assignment.images,
+      },
+      finalize: (rawText, { lastAttempt }) => ({
+        subject: parseClassification(rawText, provider, { allowIncomplete: lastAttempt }),
       }),
     },
   };

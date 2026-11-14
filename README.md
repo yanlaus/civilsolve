@@ -163,7 +163,8 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 ```
 ├── worker/
 │   ├── index.ts            # Hono app: rate limit, validation, task endpoints, /api/jobs/:id
-│   ├── tasks.ts            # Request body -> task, for solve / interpret / judge / study / ask / align / visualize
+│   ├── tasks.ts            # Request body -> task, for solve / interpret / judge / study / ask / align / visualize / classify
+│   ├── course-guides.ts    # A subject's course method guide from R2, first in the instructions of solve / judge / study / ask
 │   ├── jobs.ts             # TaskJob Durable Object: runs a task, keeps its answer 24 h
 │   ├── pdf.ts              # GET /api/pdf/:id: an answer rendered and printed by Browser Rendering; PdfBudget
 │   ├── channels.ts         # Routes, per-dialect request building + parsing
@@ -175,6 +176,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   ├── judgement.ts        # Answer cross-check (judge) schema and parsing
 │   ├── study.ts            # Study notes (approach, simple explanation): schema, part labels, parsing
 │   ├── visual.ts           # Visualize boards: the marker format, parsing, a fixed board merged into its deck
+│   ├── subjects.ts         # Course subjects: names, the classifier's topic lists, its schema and parser
 │   ├── prompt.ts           # Solve, interpret/verify, judge and study-notes prompts, shape contract
 │   ├── markdown.ts         # Markdown + KaTeX rendering pipeline (page and PDF), sanitizer supplied by the caller
 │   └── stream-protocol.ts  # SSE event types + request limits
@@ -188,6 +190,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │   │   ├── upload-form.tsx             # Dropzone, notes, providers, effort, both optional passes
 │   │   ├── provider-logo.tsx           # Official provider logo (src/assets/providers/*.svg)
 │   │   ├── interpretation-review.tsx   # Confirm the diagram reading
+│   │   ├── subject-badge.tsx           # The run's course subject: being identified, identified, or not
 │   │   ├── solution-panel.tsx          # Kept reading, tabs, streaming states, Stop, verdict card, exports (lazy)
 │   │   ├── pdf-button.tsx              # Generate PDF -> Open PDF / Copy link, or Print instead
 │   │   ├── study-notes.tsx             # The two optional study-notes cards under the verdict (lazy)
@@ -214,8 +217,11 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 │       ├── attachments.ts              # File -> JPEG data URL conversion
 │       ├── page-range.ts               # "1-3, 5" -> the PDF pages to send
 │       ├── lecture-notes.ts            # Reference payload from notes files
+│       ├── classify.ts                 # The question's subject: the student's pick, or DeepSeek's (POST /api/classify)
 │       ├── pdf-to-images.ts            # pdf.js page count + rasterization (dynamic import)
 │       └── exports.ts                  # "Print instead": the browser's print dialog
+├── course-guides/          # The course method guides, <subject>.md - gitignored, uploaded to R2 (npm run guides:upload)
+├── scripts/upload-course-guides.mjs  # course-guides/*.md -> R2 PDFS/course-guides/
 ├── wrangler.jsonc          # Worker config (assets, JOBS / PDF_BUDGET / BROWSER bindings, limiters); vars only to override
 ├── .dev.vars.example       # Local secrets template (copy to .dev.vars)
 ├── .npmrc                  # min-release-age=3: skip package versions under 3 days old
@@ -224,7 +230,7 @@ A stream can also just stop — no terminal frame, no error, nothing received �
 
 ## API
 
-`POST /api/solve`, `/api/interpret`, `/api/judge`, `/api/study`, `/api/ask`, `/api/align` and `/api/visualize` are rate limited per client IP: past the limit they answer `429` with `retry-after: 60`, and the page shows that message as the tab's error. There is no sign-in yet - see "Rate limiting" below.
+`POST /api/solve`, `/api/interpret`, `/api/judge`, `/api/study`, `/api/ask`, `/api/align`, `/api/visualize` and `/api/classify` are rate limited per client IP: past the limit they answer `429` with `retry-after: 60`, and the page shows that message as the tab's error. There is no sign-in yet - see "Rate limiting" below.
 
 ### `GET /api/health`
 
@@ -293,6 +299,12 @@ Muse and ChatGPT on OpenCode have an additional **14-minute ceiling**, below Clo
 ### `POST /api/study/:provider`
 
 Optional, the **study notes** (`shared/study.ts`). Body: `{ kind: "approach" | "explain", images, notes, interpretation?, solutions: [text, ...], verdict?, effort?, variant?, revision? }`. The notes start from what the user picked on the card: one solver's solution (`solutions` holds exactly that one, as `artifactToText` writes it), or the cross-check's verified answer - `verdict` as text (`judgementToText`) with the one to four solutions it graded, in its order so its letters still match, and a placeholder for a graded one that is no longer on the page. Without a verdict, more than one solution is a 400. The prompt builds on the verdict's verified answer and the method of the solutions it found correct, or on the one solution, following the correct engineering where it has a clear error - though a misread question is not one it catches: started from the B.8 solution that read the inlet pressure as 200 kPa, DeepSeek explained its wrong −460 N faithfully. `effort` defaults to `medium`: the notes explain a solution, they do not derive one. Returns the same SSE shape with `done → { study, kind }`: `{ guide, traditional_chinese }`, and the kind asked for - stored with the notes for their PDF (since 30 September 2026; for notes stored before, the PDF takes notes that cut into the approach parts as approach notes). Each part of the notes opens with its bold label on a line of its own (`STUDY_PARTS`: Problem type, Approach, Key formulas, Common mistakes; or What's going on, The key idea, Step by step, Wrap-up - each with its Chinese label, 發生咩事, 關鍵諗法, 逐步計 and 總結 for the Cantonese one); `openStudyLabels` puts every label on a line of its own, spelled as in `STUDY_PARTS`, with a blank line around it: models ran the part on after the label (DeepSeek wrote `**Approach** - 1. Identify ...`, which cut the numbered steps' list in two), wrote variants ("Key idea" for "The key idea"), and put "Wrap-up" straight under the numbered steps with no blank line, where Markdown reads it as more of the last step and indents it like one - the owner saw that on every explanation. The parser runs it, and the page again when it renders, for notes stored before. It runs on the provider's normal solve route, like the judge, and the notes are never sent to `/api/judge`. Measured on 28 September 2026 with saved solutions as input: given a verdict, DeepSeek at `low` wrote the approach notes in 103-126 s with B's double-counted pressure force among the common mistakes; the beam explained simply took 59 s (7,077 characters, 3,532 in Chinese); ChatGPT at `high` explained B.8 from one solution in 66 s; a re-generation with instructions took 28 s.
+
+### `POST /api/classify/:provider`
+
+The question's **course subject** (`shared/subjects.ts`, since 14 November 2026, the owner's request), asked by the page before anything is solved when the form's Subject 科目 is left on Auto - in parallel with the reading check in Careful, so it costs no time there; a Quick run waits for it, at most `CLASSIFY_WAIT_MS` (60 s, `src/lib/classify.ts`). Body: `{ images, notes, effort? }`; the page sends it to `DEFAULT_CLASSIFIER` (DeepSeek V4.1 Flash, on the OpenCode Go subscription) at `low`, the default. The prompt lists each subject's topics (`SUBJECT_SCOPES`, generic words only) and the tie-breaks where two share theory (`SUBJECT_TIE_BREAKS`: a cofferdam or trench is temporary works even with earth pressure in it). `done → { subject: { subject: "steelwork" | "temporary-works" | "geotechnical" | "other", confidence: "high" | "medium" | "low", reason } }`; `parseClassification` reads words for a subject ("Temporary Works", "geotech") and, on the last attempt, a subject named in prose. A failure, or no answer in time, leaves the question without a subject: it is solved the usual way, and the badge under the folded form says so.
+
+The subject - the classifier's or the student's pick - then goes in the run's body as `subject`, and from there into every solve, cross-check, set of study notes and question about a solution (`/api/interpret`, `/api/align` and `/api/visualize` ignore it). An unknown subject is a 400. See "Course guides" below for what the Worker does with it.
 
 ### `POST /api/align/:provider`
 
@@ -615,6 +627,22 @@ FROM usage_log
 WHERE question = '0123456789abcdef'
 ORDER BY started_at;
 ```
+
+### Course guides
+
+A course **method guide** (since 14 November 2026, the owner's request): the methods, code of practice, symbols, factor and table values and solution layout one course's lecture notes teach, distilled once from the notes into 16,000-28,000 characters of Markdown - read once, so the notes are never sent with each question. For a request whose `subject` has one, `applyCourseGuide` (`worker/course-guides.ts`) puts it **first** in the instructions of a solve, a cross-check, study notes and a question about a solution (`GUIDED_KINDS`), with `courseGuideInstructions` (`shared/prompt.ts`) telling each role what to do with it: solve with the course's method, grade a departure from it as an error when it changes the result, explain with it. One identical prefix for every kind of task, so a model called several times on a run starts each call the same way - which the vendors' prompt caching can reuse. Each such task's status log opens with "Following the <subject> course method guide."
+
+The guides are **not in this repository** - it is public, and they come from the university's lecture notes. They live in `course-guides/<subject>.md` on the owner's machine (gitignored) and in R2, in the `PDFS` bucket under `course-guides/<subject>.md`:
+
+```bash
+npm run guides:upload          # production bucket (npx wrangler login first)
+```
+
+```bash
+npm run guides:upload:local    # the dev server's local bucket
+```
+
+Each isolate keeps a guide it read for 5 minutes (`GUIDE_CACHE_MS`), so a replaced guide is in use within that. A subject with no guide in R2 (Geotechnical, until its notes are distilled; Other, always) gets none, and nothing fails: R2 that cannot be read, or a missing binding, leaves the task as it was. A guide past `MAX_GUIDE_CHARS` (40,000) is cut. The per-question **Lecture Notes** upload on the form still works alongside, for material the guide does not hold.
 
 ### Question pages
 

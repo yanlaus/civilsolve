@@ -106,9 +106,10 @@ export const TIER_ONLY_PROVIDERS: ReadonlySet<ProviderKey> = new Set<ProviderKey
  * What a model can be asked to do: read the question (the interpretation
  * pass - a reader or the reconciler), solve it, judge the answers, or one of
  * the extras - study notes, answers to a student's questions, the comparison
- * of the answers, drawings. The same words as the worker's task kinds.
+ * of the answers, drawings - or tell which course subject a question belongs
+ * to (`classify`). The same words as the worker's task kinds.
  */
-export type ModelPurpose = "interpret" | "solve" | "judge" | "study" | "ask" | "align" | "visualize";
+export type ModelPurpose = "interpret" | "solve" | "judge" | "study" | "ask" | "align" | "visualize" | "classify";
 
 /**
  * The Flagship tier's models read, solve and judge, and nothing else (13
@@ -353,6 +354,14 @@ export const DEFAULT_JUDGE: ModelChoice = { provider: "chatgpt" };
  * it is sent for training.
  */
 export const DEFAULT_ALIGNER: ModelChoice = { provider: "deepseek" };
+
+/**
+ * Who tells which course subject a question belongs to (shared/subjects.ts,
+ * 14 November 2026, the owner's choice), at "low", before anything is
+ * solved: DeepSeek Flash again - a quick look at the pages, on the OpenCode Go
+ * subscription.
+ */
+export const DEFAULT_CLASSIFIER: ModelChoice = { provider: "deepseek" };
 
 /**
  * The upstream accounts. "openai" and "anthropic" (11 November 2026) are the

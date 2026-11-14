@@ -17,7 +17,16 @@
 import type { WorkerEnv } from "./channels";
 import type { TaskOutcome } from "./run";
 
-export type UsageKind = "solve" | "interpret" | "judge" | "study" | "ask" | "align" | "visualize" | "pdf";
+export type UsageKind =
+  | "solve"
+  | "interpret"
+  | "judge"
+  | "study"
+  | "ask"
+  | "align"
+  | "visualize"
+  | "classify"
+  | "pdf";
 
 export type UsageOutcome = TaskOutcome["outcome"] | "running" | "rejected" | "rate-limited";
 
@@ -99,6 +108,8 @@ export async function describeRequest(
   if (kind === "study") detail = text(body?.kind);
   // A deck drawn, or one board of it drawn again.
   if (kind === "visualize") detail = body?.fix ? "fix" : body?.purpose === "diagrams" ? "diagrams" : "draw";
+  // The course subject a solution was asked under (shared/subjects.ts).
+  if (kind === "solve" || kind === "judge") detail = text(body?.subject);
   return {
     kind,
     detail,

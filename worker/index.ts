@@ -4,6 +4,7 @@ import { MAX_BODY_BYTES } from "../shared/stream-protocol";
 import { resolveRoute, routeStatus, type WorkerEnv } from "./channels";
 import { runTask, SSE_HEADERS, streamSink, type RunTaskParams } from "./run";
 import { buildTask, type TaskKind } from "./tasks";
+import { applyCourseGuide } from "./course-guides";
 import { pdfContentOf, pdfDocument, pdfFileName, pdfKey, pdfTitle, printPdf } from "./pdf";
 import { usageFilter, usageReport } from "./usage-report";
 import { PAGE_NAME_PATTERN, QUESTION_PATTERN, questionPrefix, storedQuestion } from "./questions";
@@ -141,7 +142,7 @@ function logTurnedAway(
 
 /**
  * The one handler behind /api/solve, /api/interpret, /api/judge, /api/study,
- * /api/ask and /api/align. The task
+ * /api/ask, /api/align, /api/visualize and /api/classify. The task
  * is built here first so a bad request gets its 400 at once. Then it runs in
  * a TaskJob Durable Object of its own, which carries on when the page goes
  * away and keeps the answer for GET /api/jobs/:id; the job's first event
@@ -175,7 +176,8 @@ async function handleTask(c: AppContext, kind: TaskKind) {
     if (route.startInAlarm) {
       return c.json({ error: `${route.label} requires the JOBS binding for background execution.` }, 503);
     }
-    return startInlineSse(c, built.params, { kind, body: parsed.body, ...started });
+    const guided = await applyCourseGuide(kind, built.params, c.env);
+    return startInlineSse(c, guided, { kind, body: parsed.body, ...started });
   }
 
   const jobId = crypto.randomUUID();
@@ -209,6 +211,8 @@ app.post("/api/judge/:provider", (c) => handleTask(c, "judge"));
 app.post("/api/study/:provider", (c) => handleTask(c, "study"));
 app.post("/api/ask/:provider", (c) => handleTask(c, "ask"));
 app.post("/api/align/:provider", (c) => handleTask(c, "align"));
+// The question's course subject, before anything is solved (shared/subjects.ts).
+app.post("/api/classify/:provider", (c) => handleTask(c, "classify"));
 // Visualize 圖解: Muse Spark or DeepSeek V4.1 Flash on OpenCode Go only (buildVisual).
 app.post("/api/visualize/:provider", (c) => handleTask(c, "visualize"));
 

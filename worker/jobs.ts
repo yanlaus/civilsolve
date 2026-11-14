@@ -40,6 +40,7 @@ import {
   type RunTaskParams,
 } from "./run";
 import { buildTask, isTaskKind } from "./tasks";
+import { applyCourseGuide } from "./course-guides";
 import { storeQuestionPages } from "./questions";
 import { describeRequest, forwardedClient, logTaskEnd, logTaskStart } from "./usage";
 
@@ -179,7 +180,9 @@ export class TaskJob extends DurableObject<WorkerEnv> {
     this.startedAt = Date.now();
     this.deadlineAt = this.startedAt + taskTimeoutFor(built.params);
     this.expiresAt = this.startedAt + MAX_TIMEOUT_MS + JOB_RETENTION_MS;
-    const params = { ...built.params, signal: this.cancelled.signal, deadlineAt: this.deadlineAt };
+    // The question's course guide, first in the instructions (worker/course-guides.ts).
+    const guided = await applyCourseGuide(kind, built.params, this.env);
+    const params = { ...guided, signal: this.cancelled.signal, deadlineAt: this.deadlineAt };
     const route = resolveRoute(params.provider, this.env, params.routeOverride);
     if (route.startInAlarm) this.pending = params;
     // Not awaited: the log never holds up the task.
